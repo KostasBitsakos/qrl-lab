@@ -17,7 +17,7 @@ def main():
     if len(sys.argv) < 2:
         sys.exit(__doc__)
     sys.path.insert(0, sys.argv[1])
-    from environment import Environment  # noqa: E402
+    from environment import Environment  # noqa: E402  # pyright: ignore[reportMissingImports]
 
     steps = int(sys.argv[2]) if len(sys.argv) > 2 else 5000
     runs = int(sys.argv[3]) if len(sys.argv) > 3 else 5
