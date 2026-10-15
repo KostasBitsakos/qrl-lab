@@ -1,0 +1,5 @@
+{
+  "name": "lab-bridge",
+  "version": "0.1.0",
+  "description": "Delivers the researcher's dashboard messages (.lab/inbox.jsonl) to the running coordinator session."
+}

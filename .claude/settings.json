@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "model": "opus",
+  "effortLevel": "medium",
+  "env": {
+    "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": "3",
+    "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "1"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(python3 tools/labq.py *)",
+      "Bash(python3 -I tools/sanity_trivial_policies.py *)",
+      "Bash(kubectl get *)",
+      "Bash(kubectl describe *)",
+      "Bash(kubectl logs *)",
+      "Bash(kubectl top *)",
+      "Bash(kubectl version *)",
+      "Bash(kubectl config get-contexts *)",
+      "Bash(nvidia-smi *)",
+      "Bash(tmux ls *)",
+      "Bash(tmux capture-pane *)",
+      "Bash(git -C code status *)",
+      "Bash(git -C code diff *)",
+      "Bash(git -C code log *)",
+      "Bash(git -C code add *)",
+      "Bash(git -C code commit *)"
+    ],
+    "ask": [
+      "Bash(kubectl apply *)",
+      "Bash(kubectl create *)",
+      "Bash(kubectl scale *)",
+      "Bash(kubectl delete *)",
+      "Bash(kubectl patch *)",
+      "Bash(kubectl edit *)",
+      "Bash(kubectl rollout *)",
+      "Bash(kubectl config use-context *)",
+      "Bash(helm *)",
+      "Bash(git push *)",
+      "Bash(git worktree *)",
+      "Bash(sudo *)",
+      "Bash(pip install *)",
+      "Bash(npm install *)",
+      "Bash(apt *)",
+      "Bash(rm -rf *)"
+    ],
+    "deny": [
+      "Bash(git push --force *)",
+      "Bash(git push -f *)",
+      "Read(~/.ssh/**)",
+      "Read(~/.codex/auth.json)",
+      "Read(~/.qiskit/**)",
+      "Read(~/.kube/config)",
+      "Read(**/.env)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)"
+    ]
+  },
+  "hooks": {
+    "SubagentStart": [
+      { "hooks": [ { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR\"/tools/lab_event_hook.py" } ] }
+    ],
+    "SubagentStop": [
+      { "hooks": [ { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR\"/tools/lab_event_hook.py" } ] }
+    ],
+    "PreToolUse": [
+      { "hooks": [ { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR\"/tools/lab_event_hook.py" } ] }
+    ],
+    "PostToolUse": [
+      { "hooks": [ { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR\"/tools/lab_event_hook.py" } ] }
+    ],
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR\"/tools/lab_event_hook.py" } ] }
+    ]
+  }
+}

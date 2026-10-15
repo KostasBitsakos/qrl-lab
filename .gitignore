@@ -1,0 +1,10 @@
+# research code is a separate git worktree
+code/
+.venv/
+.lab/runs/
+.lab/lab.db
+.lab/*.jsonl
+paper/build/
+__pycache__/
+*.pyc
+.claude/settings.local.json
