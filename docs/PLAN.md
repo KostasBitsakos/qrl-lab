@@ -327,9 +327,9 @@ parts, so typing is never lost. Greek UI.
 5. **⚖️ Council** — brief, decision card, Claude's and Codex's proposals side by side.
 6. **🖥️ Πόροι** — CPU, RAM, disk, load, GPU.
    **☸️ Kubernetes** — read-only (`tools/k8s_view.py`, verbs `get`/`version`/`config current-context` only, 5 s timeout, 10 s cache): KPI tiles, health badges, failing items with reasons, pods/deployments/services/nodes/HPAs; clear Greek message when the API server is down.
-7. **📄 Paper & συνέδρια** — deadlines with countdown (`docs/deadlines.json`, verified sources only), `docs/VENUES.md`,
-   `paper/claims.md`, section status.
-   The same tab holds the manuscript tools (`tools/paper_build.py`, outside auto-refresh fragments): venue selector
+7. **🎓 Συνέδρια** (split from the former «Paper & συνέδρια» tab) — deadlines with countdown (`docs/deadlines.json`,
+   verified sources only), `docs/VENUES.md`, `paper/claims.md`.
+   **📝 Paper** — the «Paper — συγγραφή» chat with writer/reviewer selection, plus the manuscript tools (`tools/paper_build.py`, outside auto-refresh fragments): venue selector
    (IEEE/ACM/LNCS) + «Μεταγλώττιση» (latexmk, 120 s timeout, `-interaction=nonstopmode -halt-on-error`, output
    `paper/build/<venue>/`, last 40 log lines on failure), PDF viewer + download + build time, LaTeX source view over
    `paper/**/*.tex|.bib|.md` (read-only; «Επεξεργασία» + «Αποθήκευση» write only under `paper/`, realpath and

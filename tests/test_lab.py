@@ -609,6 +609,12 @@ def test_paper_tab():
     at = AppTest.from_file(os.path.join(TMP, "dashboard", "app.py"), default_timeout=60)
     at.run()
     assert not at.exception, at.exception
+    labels = [t.label for t in at.tabs]
+    assert "📝 Paper" in labels and "🎓 Συνέδρια" in labels and "📄 Paper & συνέδρια" not in labels, labels
+    vt = [t for t in at.tabs if t.label == "🎓 Συνέδρια"][0]
+    assert any("Υποψήφια συνέδρια" in m.value for m in vt.markdown), "venues content missing in the Συνέδρια tab"
+    pt = [t for t in at.tabs if t.label == "📝 Paper"][0]
+    assert not any("Υποψήφια συνέδρια" in m.value for m in pt.markdown)
     assert any(b.label == "Μεταγλώττιση" for b in at.button)
     assert any(s.label == "Venue" for s in at.selectbox)
     assert any(t.label == "Επεξεργασία" for t in at.toggle)

@@ -352,7 +352,7 @@ FILES_TAB = "📁 Αρχεία"
 _open_files = "path" in st.query_params and not st.session_state.get("fb_tab_done")
 st.session_state["fb_tab_done"] = True
 TAB_NAMES = ["💬 Συνομιλία", f"✅ Αποφάσεις ({n_open})", "🤖 Πράκτορες", "📈 Πειράματα", "⚖️ Council",
-             "🖥️ Πόροι", "☸️ Kubernetes", FILES_TAB, "📄 Paper & συνέδρια", "🧾 Ιστορικό", "⌨️ Terminal"]
+             "🖥️ Πόροι", "☸️ Kubernetes", FILES_TAB, "📝 Paper", "🎓 Συνέδρια", "🧾 Ιστορικό", "⌨️ Terminal"]
 _term_url = web_terminal.iframe_url() if web_terminal.running() else ""
 _side = bool(_term_url) and st.sidebar.toggle("Terminal στα δεξιά", key="term_side")
 if _side:  # tabs in the left column, the terminal in a right-hand column
@@ -360,11 +360,11 @@ if _side:  # tabs in the left column, the terminal in a right-hand column
     with _right:
         st.iframe(_term_url, height=700)
     with _left:
-        (tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_files, tab_paper, tab_audit,
-         tab_term) = st.tabs(TAB_NAMES, default=FILES_TAB if _open_files else None)
+        (tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_files, tab_paper, tab_venues,
+         tab_audit, tab_term) = st.tabs(TAB_NAMES, default=FILES_TAB if _open_files else None)
 else:
-    (tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_files, tab_paper, tab_audit,
-     tab_term) = st.tabs(TAB_NAMES, default=FILES_TAB if _open_files else None)
+    (tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_files, tab_paper, tab_venues,
+     tab_audit, tab_term) = st.tabs(TAB_NAMES, default=FILES_TAB if _open_files else None)
 
 # ================================================================ conversation
 with tab_chat:
@@ -1046,27 +1046,6 @@ with tab_paper:
         except (LabError, UploadError) as e:
             st.error(str(e))
     st.divider()
-    dl = read_text(os.path.join(ROOT, "docs", "deadlines.json"))
-    if dl:
-        try:
-            items = json.loads(dl)
-            rows = []
-            for it in items:
-                due = dt.datetime.fromisoformat(it["due"])
-                days = (due - dt.datetime.now(dt.timezone.utc)).total_seconds() / 86400
-                rows.append({"συνέδριο": it["venue"], "τι": it["what"], "προθεσμία": it["due_label"],
-                             "μέρες": round(days, 1), "πηγή": it["source"], "επαληθεύτηκε": it["verified"]})
-            st.markdown("##### Προθεσμίες")
-            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch",
-                         column_config={"πηγή": st.column_config.LinkColumn("πηγή")})
-        except (ValueError, KeyError) as e:
-            st.error(f"docs/deadlines.json: {e}")
-    venues = read_text(os.path.join(ROOT, "docs", "VENUES.md"))
-    st.markdown("##### Υποψήφια συνέδρια (scholar)")
-    st.markdown(venues or "_Δεν υπάρχει ακόμη `docs/VENUES.md`._")
-    claims = read_text(os.path.join(ROOT, "paper", "claims.md"))
-    st.markdown("##### Ισχυρισμοί → τεκμήρια")
-    st.markdown(claims or "_Δεν υπάρχει ακόμη `paper/claims.md`._")
     # ---- manuscript: build, PDF, source (NOT in a fragment, so typing is never refreshed away)
     st.markdown("##### 📝 Paper")
     pss = st.session_state
@@ -1132,6 +1111,30 @@ with tab_paper:
     st.metric("[TBD] στο generated/results.tex", "—" if tbd is None else tbd)
     crows = paper_build.claims_rows(ROOT)
     st.markdown(f"Γραμμές claims.md: **{len(crows)}**")
+
+# ================================================================ venues
+with tab_venues:
+    dl = read_text(os.path.join(ROOT, "docs", "deadlines.json"))
+    if dl:
+        try:
+            items = json.loads(dl)
+            rows = []
+            for it in items:
+                due = dt.datetime.fromisoformat(it["due"])
+                days = (due - dt.datetime.now(dt.timezone.utc)).total_seconds() / 86400
+                rows.append({"συνέδριο": it["venue"], "τι": it["what"], "προθεσμία": it["due_label"],
+                             "μέρες": round(days, 1), "πηγή": it["source"], "επαληθεύτηκε": it["verified"]})
+            st.markdown("##### Προθεσμίες")
+            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch",
+                         column_config={"πηγή": st.column_config.LinkColumn("πηγή")})
+        except (ValueError, KeyError) as e:
+            st.error(f"docs/deadlines.json: {e}")
+    venues = read_text(os.path.join(ROOT, "docs", "VENUES.md"))
+    st.markdown("##### Υποψήφια συνέδρια (scholar)")
+    st.markdown(venues or "_Δεν υπάρχει ακόμη `docs/VENUES.md`._")
+    claims = read_text(os.path.join(ROOT, "paper", "claims.md"))
+    st.markdown("##### Ισχυρισμοί → τεκμήρια")
+    st.markdown(claims or "_Δεν υπάρχει ακόμη `paper/claims.md`._")
 
 # ================================================================ audit
 with tab_audit:
