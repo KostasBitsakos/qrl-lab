@@ -33,6 +33,7 @@ LAB = os.path.join(ROOT, ".lab")
 DB_PATH = os.path.join(LAB, "lab.db")
 EVENTS = os.path.join(LAB, "events.jsonl")
 HEARTBEAT = os.path.join(LAB, "bridge_heartbeat")
+HEALTH = os.path.join(LAB, "health.json")
 
 # Categorical slots in fixed order (validated reference palette, light mode). Colour follows the agent, never rank.
 AGENTS = {
@@ -169,6 +170,38 @@ def active_agent_keys(ev):
     return ["coordinator"] + sorted({e["agent"] for e in active_ids.values()} - {"coordinator"})
 
 
+def read_health(max_age=90):
+    """health.json written by tools/health_watch.py; None when missing or stale (the watcher is not running)."""
+    try:
+        with open(HEALTH, encoding="utf-8") as f:
+            h = json.load(f)
+        return h if time.time() - float(h.get("checked", 0)) <= max_age else None
+    except (OSError, ValueError):
+        return None
+
+
+def health_banner_text(h, now=None):
+    """Exact Greek message for a health state, or None when everything is fine."""
+    if not h or h.get("state") in (None, "ok"):
+        return None
+    when = (h.get("detail") or "").strip()
+    st_ = h["state"]
+    if st_ == "limit":
+        tz = "" if "(" in when else " (ώρα VM)"
+        msg = ("⛔ Ο συντονιστής σταμάτησε: όριο χρήσης Claude"
+               + (f" — ξαναρχίζει {when}{tz}" if when else " — δεν βρέθηκε ώρα επαναφοράς, δες το terminal"))
+    elif st_ == "permission":
+        msg = "🔐 Περιμένει άδεια στο terminal: tmux attach -t lab"
+    elif st_ == "down":
+        msg = "📴 Ο συντονιστής δεν τρέχει"
+    elif st_ == "api_error":
+        msg = "⚠️ Σφάλμα API / υπερφόρτωση στον συντονιστή" + (f": «{h['line'][:150]}»" if h.get("line") else "")
+    else:
+        return None
+    sec = (now if now is not None else time.time()) - float(h.get("since", 0) or 0)
+    return f"{msg} · εδώ και {ago(max(0, int(sec)))}"
+
+
 def read_text(path):
     try:
         with open(path, encoding="utf-8") as f:
@@ -204,12 +237,14 @@ def sidebar_status():
     if not ev.empty:
         recent = ev[ev["ts"] > dt.datetime.now() - dt.timedelta(minutes=10)]
         notif = recent[recent["event"] == "Notification"]
-        if not notif.empty and "permission" in str(notif.iloc[-1]["summary"]).lower():
+        if read_health() is None and not notif.empty and "permission" in str(notif.iloc[-1]["summary"]).lower():
             st.warning("Ο συντονιστής περιμένει άδεια στο terminal/app: " + str(notif.iloc[-1]["summary"]),
                        icon="🔐")
-        last = ev.iloc[-1]
-        st.caption(f"Τελευταία δραστηριότητα: {AGENTS.get(last['agent'], (last['agent'],))[0]} · "
-                   f"{ago((dt.datetime.now() - last['ts']).total_seconds())} πριν")
+        ev = ev[ev["event"] != "HealthState"]
+        if not ev.empty:
+            last = ev.iloc[-1]
+            st.caption(f"Τελευταία δραστηριότητα: {AGENTS.get(last['agent'], (last['agent'],))[0]} · "
+                       f"{ago((dt.datetime.now() - last['ts']).total_seconds())} πριν")
     # toasts for new items since the last refresh of this browser session
     n_agent_msgs = d.conn.execute("SELECT COUNT(*) FROM messages WHERE author!='researcher'").fetchone()[0]
     prev = st.session_state.get("_seen", None)
@@ -225,6 +260,16 @@ def sidebar_status():
 
 with st.sidebar:
     sidebar_status()
+
+# ---------------------------------------------------------------- health banner (every tab; no inputs inside)
+@st.fragment(run_every=refresh)
+def health_banner():
+    txt = health_banner_text(read_health())
+    if txt:
+        st.error(txt)
+
+
+health_banner()
 
 # ---------------------------------------------------------------- tabs
 d0 = db()

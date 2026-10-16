@@ -303,6 +303,10 @@ parts, so typing is never lost. Greek UI.
    «⏳ ο συντονιστής δουλεύει…» plus the active agents; the input is never inside a fragment. Types: μήνυμα, πρόταση
    ιδέας, ερώτηση για τον κώδικα. Warns when a delivered message is not taken within 3 minutes. Every agent message
    shows its author and model («Codex · gpt-6-sol»); agents pass `labq.py post --model <free text>`.
+0. **Health banner** — `tools/health_watch.py` (tmux window `health`, no LLM, every 20 s) classifies the coordinator pane
+   (usage limit with reset time, permission prompt, API error/overloaded, coordinator not running) with a regex table,
+   writes `.lab/health.json` and state changes to `.lab/events.jsonl`; the dashboard shows an exact Greek banner on
+   every tab with the time since the state began.
 2. **✅ Αποφάσεις** — open requests (blocking first) with body, attached files, the frozen run spec and its hash;
    Approve / Reject / Request changes (comment required for changes), Answer for questions; history.
 3. **🤖 Πράκτορες** — who is working now (active subagents), timeline of actions per agent (fixed colour per agent,

@@ -331,6 +331,36 @@ def test_uploads():
     ok("uploads: traversal, collisions, size cap, per-message dir, body block, bridge line")
 
 
+def test_health_watch():
+    import health_watch as hw
+    d = hw.detect
+    assert d("hello\n> working", True, "claude")["state"] == "ok"
+    r = d("blah\nClaude usage limit reached ∙ resets 2:45am\n> ", True, "claude")
+    assert r["state"] == "limit" and r["detail"] == "2:45am" and "2:45am" in r["line"], r
+    r = d("5-hour limit reached ∙ resets at 11pm (UTC) │\n", True, "node")
+    assert r["state"] == "limit" and r["detail"] == "11pm (UTC)", r
+    assert d("Your usage limit has been reached", True)["state"] == "limit"
+    assert d("Do you want to proceed?\n❯ 1. Yes\n  2. No", True)["state"] == "permission"
+    assert d("Claude needs your permission to use Bash", True)["state"] == "permission"
+    assert d("│ ❯ 1. Yes, and don't ask again", True)["state"] == "permission"
+    for t in ("API Error: 529 overloaded_error", "request failed: rate limit exceeded", "Overloaded"):
+        assert d(t, True)["state"] == "api_error", t
+    assert d("anything", False)["state"] == "down"
+    assert d("user@vm:~$ ", True, "bash")["state"] == "down"
+    assert d("limit reached resets 1am\n" + "\n".join(f"line {i}" for i in range(40)), True)["state"] == "ok", "old text"
+    assert len(d("API Error " + "x" * 1000, True)["line"]) == 300
+    # state file: since is kept while the state is unchanged; event only on change; no pane text stored
+    lab = tempfile.mkdtemp(prefix="hl-", dir=TMP)
+    c1 = hw.step(d("API Error: x", True, "claude"), lab, now=100.0)
+    c2 = hw.step(d("API Error: x", True, "claude"), lab, now=150.0)
+    assert c1["since"] == c2["since"] == 100.0 and c2["checked"] == 150.0
+    c3 = hw.step(d("fine", True, "claude"), lab, now=200.0)
+    assert c3["state"] == "ok" and c3["since"] == 200.0
+    evs = [json.loads(l) for l in open(os.path.join(lab, "events.jsonl"))]
+    assert [e["state"] for e in evs] == ["api_error", "ok"] and all("ts" in e and "hook_event_name" in e for e in evs), evs
+    ok("health_watch: detector table, state file, change events")
+
+
 def test_k8s_view():
     import k8s_view as kv
     from unittest import mock
@@ -550,6 +580,22 @@ def test_dashboard():
     at.run()
     assert not at.exception, at.exception
     assert len(at.tabs) >= 9 and any("Kubernetes" in tb.label for tb in at.tabs), [tb.label for tb in at.tabs]
+    hp = os.path.join(TMP, ".lab", "health.json")
+    json.dump({"state": "limit", "detail": "2:45am", "line": "limit reached ∙ resets 2:45am", "since": time.time() - 125,
+               "checked": time.time()}, open(hp, "w"))
+    at.run()
+    errs = [e.value for e in at.error]
+    assert any(v.startswith("Ο συντονιστής σταμάτησε: όριο χρήσης Claude — ξαναρχίζει 2:45am (ώρα VM) · εδώ και 2 λεπτά")
+               for v in errs), errs
+    json.dump({"state": "permission", "detail": "", "line": "", "since": time.time(), "checked": time.time()}, open(hp, "w"))
+    at.run()
+    assert any("Περιμένει άδεια στο terminal: tmux attach -t lab" in e.value for e in at.error)
+    json.dump({"state": "down", "detail": "", "line": "", "since": time.time(), "checked": time.time()}, open(hp, "w"))
+    at.run()
+    assert any("Ο συντονιστής δεν τρέχει" in e.value for e in at.error)
+    os.remove(hp)
+    at.run()
+    assert not any("Ο συντονιστής" in e.value and "εδώ και" in e.value for e in at.error), "stale/missing = no banner"
     ok("dashboard: Kubernetes tab renders without exception (cluster down or up)")
     assert any("Αρχεία" in tb.label for tb in at.tabs), [tb.label for tb in at.tabs]
     import file_view
@@ -573,6 +619,7 @@ if __name__ == "__main__":
         test_hook()
         test_launcher()
         test_uploads()
+        test_health_watch()
         test_k8s_view()
         test_file_view()
         try:
