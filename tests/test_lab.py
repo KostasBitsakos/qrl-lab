@@ -857,6 +857,37 @@ def test_dashboard():
     ok("dashboard: voice recorder widget renders in the chat")
 
 
+def test_decisions_live_and_tab():
+    from streamlit.testing.v1 import AppTest
+    db = LabDB()
+    for r in db.requests(state="open"):
+        db.decide(r["id"], "ack" if json.loads(r["options"]) == ["ack"] else "reject", "cleanup", actor="researcher")
+    a = db.ask("question", "Live A", "σώμα", scope="research")
+    at = AppTest.from_file(os.path.join(TMP, "dashboard", "app.py"), default_timeout=60).run()
+    assert not at.exception, at.exception
+    labels0 = [t.label for t in at.tabs]
+    assert "✅ Αποφάσεις" in labels0, labels0
+    # a request added after the first render shows up on the next run; typed text survives (AppTest cannot run
+    # the 5 s fragment alone, so the badge itself is not asserted)
+    at.text_area(key=f"note_{a}").set_value("μισογραμμένη πρόταση")
+    time.sleep(1.1)
+    b = db.ask("question", "Live B", "σώμα", scope="research")
+    at.run()  # stands in for the 5 s fragment rerun / any rerun
+    assert any("από 2" in m.value for m in at.markdown), "navigator not updated to 2 requests"
+    # form text is kept client-side until submit; server side the same form/key must still be the one rendered
+    assert [x.key for x in at.text_area] == [f"note_{a}"], "current form was replaced by the new request"
+    # tab labels stay constant (label change = new tab identity = jump to first tab)
+    assert [t.label for t in at.tabs] == labels0
+    # clicking a decision keeps the same tab list, so the browser keeps the Αποφάσεις tab selected
+    at.radio(key=f"choice_{a}").set_value("own")
+    at.text_area(key=f"note_{a}").set_value("απάντηση")
+    at.button[[x.label for x in at.button].index("Υποβολή απόφασης")].click().run()
+    assert not at.exception, at.exception
+    assert db.request(a)["state"] != "open", "decision not stored"
+    assert [t.label for t in at.tabs] == labels0, "tab list changed after decision"
+    ok("dashboard: new request badge, typing kept, tab labels stable across a decision")
+
+
 def test_deputy():
     import deputy
     shutil.copy(os.path.join(KIT, "AGENTS.md"), os.path.join(TMP, "AGENTS.md"))
@@ -1081,6 +1112,7 @@ if __name__ == "__main__":
             test_paper_tab()
             test_prom_tab()
             test_grafana_tab()
+            test_decisions_live_and_tab()
         except ImportError:
             print("  --  dashboard test skipped (streamlit not installed in this interpreter)")
         print(f"ALL PASSED ({len(PASSED)})")

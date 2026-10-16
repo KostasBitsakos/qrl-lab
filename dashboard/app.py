@@ -349,10 +349,12 @@ d0 = db()
 n_open = len(d0.requests(state="open"))
 d0.close()
 FILES_TAB = "📁 Αρχεία"
+# Constant label: a changing label (e.g. a request count) makes Streamlit treat it as a new tab and jump to the first.
+DEC_TAB = "✅ Αποφάσεις"
 # Deep link ?path=...: on the first run of a session with that parameter the Αρχεία tab opens first.
 _open_files = "path" in st.query_params and not st.session_state.get("fb_tab_done")
 st.session_state["fb_tab_done"] = True
-TAB_NAMES = ["💬 Συνομιλία", f"✅ Αποφάσεις ({n_open})", "🤖 Πράκτορες", "📈 Πειράματα", "⚖️ Council",
+TAB_NAMES = ["💬 Συνομιλία", DEC_TAB, "🤖 Πράκτορες", "📈 Πειράματα", "⚖️ Council",
              "🖥️ Πόροι", "☸️ Kubernetes", "📡 Prometheus", "📊 Grafana", FILES_TAB, "📝 Paper", "🎓 Συνέδρια", "🧾 Ιστορικό", "⌨️ Terminal"]
 _term_url = web_terminal.iframe_url() if web_terminal.running() else ""
 _side = bool(_term_url) and st.sidebar.toggle("Terminal στα δεξιά", key="term_side")
@@ -508,8 +510,22 @@ with tab_dec:
     if top[1].button("🔄 Ανανέωση", key="refresh_dec"):
         st.rerun()
     d = db()
+    # Live check, outside the form: only compares the set of open request ids with the one rendered; it never touches
+    # the form widgets, so unsaved typing is never lost. A full rerun (button) keeps widget state by key.
+    @st.fragment(run_every=5)
+    def new_request_badge(shown_ids):
+        dd = db()
+        now_ids = sorted(r["id"] for r in dd.requests(state="open"))
+        dd.close()
+        if now_ids != sorted(shown_ids):
+            fresh = len(set(now_ids) - set(shown_ids))
+            c = st.columns([3, 2])
+            c[0].warning(f"🔔 νέο αίτημα ({fresh} νέα · {len(now_ids)} ανοιχτά συνολικά)", icon=None)
+            if c[1].button("Φόρτωση", key="dec_reload"):
+                st.rerun()
     # oldest blocking request first, then the oldest overall; one at a time
     open_reqs = sorted(d.requests(state="open"), key=lambda r: (-r["blocking"], r["ts"]))
+    new_request_badge([r["id"] for r in open_reqs])
     if not open_reqs:
         st.success("Δεν υπάρχει τίποτα που να περιμένει απόφασή σου.", icon="✅")
     else:
