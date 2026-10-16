@@ -194,9 +194,10 @@ class LabDB:
 
     # ---------- messages ----------
     def researcher_send(self, body, kind="message", thread_id=None, title=None, reply_to=None,
-                        req_model=None, req_effort=None):
+                        req_model=None, req_effort=None, attachments=None, root=None):
+        """attachments: [(filename, bytes)] saved under docs/uploads/<new message id>/ and listed in the body."""
         body = (body or "").strip()
-        if not body:
+        if not body and not attachments:
             raise LabError("Το μήνυμα είναι κενό.")
         if kind not in ("message", "proposal", "code_question"):
             raise LabError(f"Άγνωστος τύπος μηνύματος: {kind}")
@@ -209,6 +210,16 @@ class LabDB:
             if thread_id and not c.execute("SELECT 1 FROM messages WHERE thread_id=? LIMIT 1", (thread_id,)).fetchone():
                 raise LabError(f"Δεν υπάρχει θέμα {thread_id}.")
             mid = self._new_id(c, "messages", "id", "M")
+            if attachments:
+                import shutil
+                import uploads
+                root_dir = root or lab_root()
+                try:
+                    body = uploads.body_with_attachments(body, uploads.save_uploads(attachments, root_dir, mid))
+                except BaseException:
+                    shutil.rmtree(os.path.join(root_dir, "docs", "uploads", uploads.sanitize_filename(mid)),
+                                  ignore_errors=True)
+                    raise
             t = now()
             c.execute("INSERT INTO messages(id, ts, thread_id, reply_to, author, kind, title, body, status, updated_at,"
                       " req_model, req_effort) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",

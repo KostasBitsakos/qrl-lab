@@ -273,18 +273,17 @@ def test_hook():
 
 
 def test_uploads():
-    import datetime
     import uploads
     root = tempfile.mkdtemp(prefix="up-", dir=TMP)
-    day = datetime.date(2026, 10, 16)
+    day = "M-20261016-001"
     ups = os.path.realpath(os.path.join(root, "docs", "uploads"))
     saved = uploads.save_uploads([("../../x.txt", b"a"), ("/etc/passwd", b"b"), ("..", b"c"),
                                   ("a\\..\\y.pdf", b"d"), ("x.txt", b"e"), ("x.txt", b"f"), ("ε.pdf", b"g")], root, day)
     paths = [p for p, _ in saved]
     for p in paths:
         assert os.path.realpath(os.path.join(root, p)).startswith(ups + os.sep), p
-    assert paths[0] == "docs/uploads/2026-10-16/x.txt" and paths[4] == "docs/uploads/2026-10-16/x-1.txt"
-    assert paths[5] == "docs/uploads/2026-10-16/x-2.txt" and paths[1].endswith("/passwd")
+    assert paths[0] == "docs/uploads/M-20261016-001/x.txt" and paths[4] == "docs/uploads/M-20261016-001/x-1.txt"
+    assert paths[5] == "docs/uploads/M-20261016-001/x-2.txt" and paths[1].endswith("/passwd")
     assert open(os.path.join(root, paths[0]), "rb").read() == b"a"  # not overwritten
     assert not os.path.exists(os.path.join(root, "x.txt"))
     assert uploads.sanitize_filename("a\x00b\n.txt") == "ab.txt"
@@ -297,11 +296,39 @@ def test_uploads():
     finally:
         uploads.MAX_BYTES = old
     assert big is not None
-    blk = uploads.attachments_block([("docs/uploads/2026-10-16/foo.pdf", 123 * 1024)])
-    assert blk == "Συνημμένα:\n- docs/uploads/2026-10-16/foo.pdf (123 KB)", blk
+    blk = uploads.attachments_block([("docs/uploads/M-20261016-001/foo.pdf", 123 * 1024)])
+    assert blk == "Συνημμένα:\n- docs/uploads/M-20261016-001/foo.pdf (123 KB)", blk
     assert uploads.body_with_attachments("", [("p", 2048)]) == "Συνημμένα:\n- p (2 KB)"
     assert uploads.body_with_attachments("hi", [("p", 2048)]).startswith("hi\n\nΣυνημμένα:")
-    ok("uploads: traversal, collisions, size cap, body block")
+    assert uploads.MAX_BYTES == 200 * 2**20
+    assert "maxUploadSize = 200 " in open(os.path.join(TMP, ".streamlit", "config.toml")).read()
+    assert uploads.attachment_paths(blk) == ["docs/uploads/M-20261016-001/foo.pdf"]
+    assert uploads.attachment_paths("no block docs/uploads/x/y.pdf (1 KB)") == []
+    # saved under the new message id, listed in the body, delivered in the QRL-INBOX line, never executable
+    db = LabDB()
+    mid = db.researcher_send("δες αυτά", attachments=[("λογος.pdf", b"%PDF"), ("run.sh", b"#!/bin/sh\nexit 1")], root=TMP)
+    m = db.message(mid)
+    paths = uploads.attachment_paths(m["body"])
+    assert paths == [f"docs/uploads/{mid}/λογος.pdf", f"docs/uploads/{mid}/run.sh"], paths
+    assert open(os.path.join(TMP, paths[0]), "rb").read() == b"%PDF"
+    assert not os.access(os.path.join(TMP, paths[1]), os.X_OK)
+    line = [l for l in watch_cycle(db) if mid in l][0]
+    assert f"attachments=[{paths[0]}, {paths[1]}]" in line, line
+    only = db.researcher_send("", attachments=[("a.txt", b"x")], root=TMP)  # attachment-only message
+    assert uploads.attachment_paths(db.message(only)["body"]) == [f"docs/uploads/{only}/a.txt"]
+    expect_error(lambda: db.researcher_send("", attachments=None), "κενό")
+    uploads.MAX_BYTES, old = 3, uploads.MAX_BYTES
+    try:
+        n0 = len(db.threads(1000))
+        try:
+            db.researcher_send("x", attachments=[("big", b"1234")], root=TMP)
+            raise AssertionError("cap not enforced")
+        except uploads.UploadError:
+            pass
+        assert len(db.threads(1000)) == n0, "failed upload must not create a message"
+    finally:
+        uploads.MAX_BYTES = old
+    ok("uploads: traversal, collisions, size cap, per-message dir, body block, bridge line")
 
 
 def test_k8s_view():
@@ -515,6 +542,11 @@ def test_dashboard():
     assert any("Codex (OpenAI) · gpt-6-sol**" in v for v in caps), caps
     assert any(v.startswith("**Συντονιστής (Claude Opus)** ·") for v in caps), caps  # no model: author only
     ok("dashboard: model label rendered")
+    amid = db.researcher_send("με αρχείο", thread_id=cur, attachments=[("n.txt", b"hello")], root=TMP)
+    at.run()
+    assert not at.exception, at.exception
+    assert len(at.get("download_button")) >= 1, "download button missing"
+    assert any("?path=" in md.value and "uploads" in md.value for md in at.markdown), "deep link missing"
     at.run()
     assert not at.exception, at.exception
     assert len(at.tabs) >= 9 and any("Kubernetes" in tb.label for tb in at.tabs), [tb.label for tb in at.tabs]

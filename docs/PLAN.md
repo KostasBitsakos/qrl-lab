@@ -296,7 +296,8 @@ parts, so typing is never lost. Greek UI.
 1. **💬 Συνομιλία** — one ongoing chat, like a chat app: it opens on the most recently active thread («Κύρια συζήτηση»;
    created by the first message if none exists), messages oldest to newest with the newest at the bottom, and a
    `st.chat_input` at the bottom (Enter sends, Shift+Enter = new line; files are attached through the same input and
-   saved under `docs/uploads/<date>/`, max 50 MB each, listed in the body as `Συνημμένα:`). New messages reply to the
+   saved under `docs/uploads/<message id>/`, max 200 MB each, listed in the body as `Συνημμένα:`; each attachment has a
+   download button and a 📁 Αρχεία link, the QRL-INBOX line lists the paths, and files are never executed). New messages reply to the
    latest message of the current thread; a new thread only via «➕ Νέο θέμα»; the topic list is a collapsible
    expander. While your latest message is acknowledged/in_progress an isolated auto-refreshing fragment shows
    «⏳ ο συντονιστής δουλεύει…» plus the active agents; the input is never inside a fragment. Types: μήνυμα, πρόταση

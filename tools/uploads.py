@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Save researcher uploads under docs/uploads/<date>/ safely, and format the attachments block for a message."""
-import datetime as dt
+"""Save researcher uploads under docs/uploads/<message id>/ safely, and format the attachments block for a message.
+Files are only ever written and offered for download; nothing here executes them."""
 import os
 import re
 import unicodedata
 
-MAX_BYTES = 50 * 1024 * 1024  # per file; keep equal to server.maxUploadSize (MB) in .streamlit/config.toml
+MAX_BYTES = 200 * 1024 * 1024  # per file; keep equal to server.maxUploadSize (MB) in .streamlit/config.toml
 _BAD = re.compile(r"[^\w.\-]", re.UNICODE)  # \w keeps letters (incl. Greek), digits, underscore
 
 
@@ -30,10 +30,11 @@ def _free_path(d, name):
     return p
 
 
-def save_uploads(files, root, today=None):
-    """files: iterable of (filename, bytes). Returns list of (relative_path, size). Never overwrites."""
+def save_uploads(files, root, subdir):
+    """files: iterable of (filename, bytes) saved under docs/uploads/<subdir>/ (subdir = the message id).
+    Returns list of (relative_path, size). Never overwrites."""
     base = os.path.realpath(os.path.join(root, "docs", "uploads"))
-    day = (today or dt.date.today()).isoformat()
+    day = sanitize_filename(subdir)
     out = []
     for fname, data in files:
         if len(data) > MAX_BYTES:
@@ -69,3 +70,16 @@ def attachments_block(saved):
 def body_with_attachments(text, saved):
     parts = [(text or "").strip(), attachments_block(saved)]
     return "\n\n".join(p for p in parts if p)
+
+
+def attachment_paths(body):
+    """Paths listed in the `Συνημμένα:` block of a message body (as written by attachments_block)."""
+    if "Συνημμένα:" not in (body or ""):
+        return []
+    tail = body.split("Συνημμένα:", 1)[1]
+    out = []
+    for line in tail.splitlines():
+        m = re.match(r"^- (docs/uploads/\S.*?) \(\d+(?:\.\d+)? (?:KB|MB)\)$", line.strip())
+        if m:
+            out.append(m.group(1))
+    return out

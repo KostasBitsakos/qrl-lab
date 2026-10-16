@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 from labdb import DECISIONS, LabDB, LabError, map_choice  # noqa: E402
 import file_view  # noqa: E402
 import k8s_view  # noqa: E402
-from uploads import UploadError, body_with_attachments, save_uploads  # noqa: E402
+from uploads import UploadError, attachment_paths  # noqa: E402
 
 LAB = os.path.join(ROOT, ".lab")
 DB_PATH = os.path.join(LAB, "lab.db")
@@ -311,6 +311,14 @@ with tab_chat:
                         st.caption(f"**{label}** · {fmt_ts(m['ts'])} · {KIND_LABEL.get(m['kind'], m['kind'])}"
                                    f"{extra} · `{m['id']}`")
                         st.markdown(file_view.linkify(m["body"]))  # render-time only; stored text unchanged
+                        for ap in attachment_paths(m["body"]):
+                            full = os.path.realpath(os.path.join(ROOT, ap))
+                            up_root = os.path.realpath(os.path.join(ROOT, "docs", "uploads"))
+                            if full.startswith(up_root + os.sep) and os.path.isfile(full):
+                                ac1, ac2 = st.columns([1, 1])
+                                ac1.download_button(f"⬇️ {os.path.basename(full)}", lambda p=full: open(p, "rb").read(),
+                                                    file_name=os.path.basename(full), key=f"dl_{m['id']}_{ap}")
+                                ac2.markdown(f"[📁 Αρχεία]({file_view.deep_link(full)})")
                 st.html("<div id='chat-end'></div>")
             for m in msgs:
                 if m["author"] == "researcher" and m["status"] == "delivered" and (since(m["updated_at"]) or 0) > 180:
@@ -347,16 +355,16 @@ with tab_chat:
         text = getattr(sub, "text", sub) if not isinstance(sub, str) else sub
         files = list(getattr(sub, "files", None) or [])
         try:
-            saved = save_uploads([(f.name, f.getvalue()) for f in files], ROOT) if files else []
             dd = db()
             target = None if new_topic else cur
             reply_to = None
             if target:
                 thr = dd.thread(target)
                 reply_to = thr[-1]["id"] if thr else None
-            mid = dd.researcher_send(body_with_attachments(text, saved), kind=kind or "message",
+            mid = dd.researcher_send(text, kind=kind or "message",
                                      thread_id=target, reply_to=reply_to,
-                                     req_model=req_model or None, req_effort=req_effort)
+                                     req_model=req_model or None, req_effort=req_effort,
+                                     attachments=[(f.name, f.getvalue()) for f in files] or None, root=ROOT)
             dd.close()
             st.session_state["pending_thread"] = target or mid
             st.session_state["new_topic"] = False
