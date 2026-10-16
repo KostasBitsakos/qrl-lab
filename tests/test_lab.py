@@ -131,6 +131,22 @@ def test_decisions():
     expect_error(lambda: db.decide(q, "answer", ""), "Γράψε")
     assert db.decide(q, "answer", "redis-exp") == "answered"
     expect_error(lambda: db.ask("approval", "x", "y", options=["answer"]), "not valid")
+    # proposals stored, validated, mapped
+    import labdb
+    pr = db.ask("question", "Ποιο;", "σώμα", proposals=["x", "y", "z"], recommended=3)
+    r = db.request(pr)
+    assert json.loads(r["proposals"]) == ["x", "y", "z"] and r["recommended"] == 3
+    expect_error(lambda: db.ask("question", "t", "b", proposals=list("abcd")), "At most 3")
+    expect_error(lambda: db.ask("question", "t", "b", proposals=["a"], recommended=2), "recommended")
+    expect_error(lambda: db.ask("question", "t", "b", recommended=1), "recommended")
+    assert labdb.map_choice(r, "p3") == ("answer", "Επιλέχθηκε η Πρόταση 3: z")
+    assert labdb.map_choice(r, "own", "κάτι")[0] == "answer"
+    expect_error(lambda: labdb.map_choice(r, "yes"), "δεν επιτρέπεται")
+    expect_error(lambda: labdb.map_choice(r, "own", ""), "Γράψε")
+    ap = db.request(db.ask("approval", "t", "b", proposals=["a"]))
+    assert labdb.map_choice(ap, "p1")[0] == "approve" and labdb.map_choice(ap, "no")[0] == "reject"
+    assert labdb.map_choice(ap, "own", "t")[0] == "changes"
+    expect_error(lambda: db.decide(pr, "answer", "x", actor="coordinator"), "Only the researcher")
     ok("decisions validated (allowed options, required text, researcher only, once) and delivered once")
 
 
@@ -426,28 +442,48 @@ def test_dashboard():
     at.chat_input[0].set_value("νέο θέμα AppTest3").run()
     assert not at.exception, at.exception
     assert len(db.threads(100)) == n_threads + 1 and db.threads(1)[0]["thread_id"] != tid
-    # approve one request and reject another from the Decisions tab
-    a = db.ask("approval", "AppTest approve me", "σώμα", scope="research")
+    # Decisions tab: one request at a time, oldest first, with proposals
+    for r in db.requests(state="open"):
+        db.withdraw(r["id"], reason="test cleanup")
+    a = db.ask("approval", "AppTest approve me", "σώμα", scope="research", proposals=["Α-πρόταση", "Β-πρόταση"],
+               recommended=2)
     b = db.ask("approval", "AppTest reject me", "σώμα", scope="research")
+    c = db.ask("proposal", "AppTest own", "σώμα", scope="research")
     at.run()
-    labels = [x.label for x in at.button]
-    # forms render in ts order; find the buttons of each request by their form key
-    def click(req_id, label):
-        for btn in at.button:
-            if btn.label == label and req_id in str(btn.form_id):
-                btn.click()
-                return
-        raise AssertionError(f"button {label} for {req_id} not found in {labels}")
-    click(a, "✅ Έγκριση"); at.run()
     assert not at.exception, at.exception
-    assert db.request(a)["state"] == "approved"
-    click(b, "⛔ Απόρριψη"); at.run()
+    assert any("Αίτημα 1 από 3" in md.value for md in at.markdown), "n of N missing"
+    assert [r.key for r in at.radio if str(r.key).startswith("choice_")] == [f"choice_{a}"], "one at a time"
+    opts = at.radio(key=f"choice_{a}").options
+    assert any("Πρόταση 2: Β-πρόταση" in o and "⭐" in o for o in opts) and not any("Πρόταση 1" in o and "⭐" in o for o in opts), opts
+    def submit():
+        [x for x in at.button if x.label == "Υποβολή απόφασης"][0].click()
+        at.run()
+        assert not at.exception, at.exception
+    # no choice -> refused
+    submit()
+    assert db.request(a)["state"] == "open" and any("Διάλεξε" in e.value for e in at.error)
+    at.radio(key=f"choice_{a}").set_value("p2"); submit()
+    ra = db.request(a)
+    assert ra["state"] == "approved" and "Πρόταση 2: Β-πρόταση" in ra["decision_text"], ra
+    assert any("Πρόταση 2: Β-πρόταση" in l for l in watch_cycle(db)), "bridge line lacks proposal text"
+    # next one shown automatically (b); navigate next/prev
+    assert [r.key for r in at.radio if str(r.key).startswith("choice_")] == [f"choice_{b}"]
+    at.button(key="dec_next").click().run()
+    assert [r.key for r in at.radio if str(r.key).startswith("choice_")] == [f"choice_{c}"]
+    at.button(key="dec_prev").click().run()
+    at.radio(key=f"choice_{b}").set_value("no"); submit()
     assert db.request(b)["state"] == "rejected"
-    # changes without text must be refused with a visible error, state unchanged
-    c = db.ask("proposal", "AppTest changes", "σώμα", scope="research")
-    at.run()
-    click(c, "✏️ Ζητώ αλλαγές"); at.run()
+    # own proposal without text must be refused with a visible error, state unchanged
+    at.radio(key=f"choice_{c}").set_value("own"); submit()
     assert db.request(c)["state"] == "open" and any("Γράψε" in e.value for e in at.error)
+    at.text_area(key=f"note_{c}").set_value("κάνε το αλλιώς"); submit()
+    rc = db.request(c)
+    assert rc["state"] == "changes_requested" and "Δική μου πρόταση: κάνε το αλλιώς" in rc["decision_text"], rc
+    # old request without proposals, question kind
+    q = db.ask("question", "AppTest q", "σώμα", scope="research")
+    at.run()
+    at.radio(key=f"choice_{q}").set_value("own"); at.text_area(key=f"note_{q}").set_value("redis-exp"); submit()
+    assert db.request(q)["state"] == "answered"
     # the author/model label is rendered
     cur = db.threads(1)[0]["thread_id"]
     db.post("codex", "labelled", cur, kind="contribution", model="gpt-6-sol")

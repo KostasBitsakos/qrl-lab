@@ -33,7 +33,7 @@ def emit_message(m):
 
 
 def emit_decision(r):
-    text = f" note: \"{one_line(r['decision_text'], 200)}\"" if r["decision_text"] else ""
+    text = f" note: \"{one_line(r['decision_text'], 400)}\"" if r["decision_text"] else ""
     print(f"QRL-DECISION {r['id']} [{r['kind']}/{r['scope']}] \"{one_line(r['title'], 80)}\" -> {r['state']}{text}",
           flush=True)
 

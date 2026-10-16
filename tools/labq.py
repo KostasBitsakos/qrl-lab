@@ -11,7 +11,7 @@ Conversation (researcher <-> agents):
 Requests (agents -> researcher):
   labq.py ask --kind approval|question|proposal|info --title "..." --body-file f.md
               [--scope sim|real|qpu|research|external|other] [--options approve,reject,changes]
-              [--blocking] [--cost "..."] [--link path] [--thread M-...] [--spec spec.json]
+              [--blocking] [--proposal "text" (repeat, max 3) [--recommended N]] [--cost "..."] [--link path] [--thread M-...] [--spec spec.json]
   labq.py request R-...                      show a request and its decision
   labq.py withdraw R-... "reason"
   labq.py pending                            open requests and open researcher messages
@@ -82,7 +82,8 @@ def cmd_ask(a, db):
             spec = json.load(f)
     rid = db.ask(a.kind, a.title, _body(a), author=a.author, scope=a.scope,
                  options=[o.strip() for o in a.options.split(",")] if a.options else None,
-                 blocking=a.blocking, cost=a.cost, links=a.link, thread_id=a.thread, spec=spec)
+                 blocking=a.blocking, cost=a.cost, links=a.link, thread_id=a.thread, spec=spec,
+                 proposals=a.proposal, recommended=a.recommended)
     print(rid)
 
 
@@ -156,6 +157,8 @@ def main():
     s.add_argument("--link", action="append")
     s.add_argument("--thread", default=None)
     s.add_argument("--spec", default=None)
+    s.add_argument("--proposal", action="append", help="a concrete option you propose (repeat, max 3)")
+    s.add_argument("--recommended", type=int, default=None, help="1-based number of the proposal you recommend")
     s.add_argument("--author", default="coordinator")
     s.set_defaults(func=cmd_ask)
 

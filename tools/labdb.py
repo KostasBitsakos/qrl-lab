@@ -141,15 +141,23 @@ class LabDB:
         self._migrate()
         self.conn.execute("INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
 
+    # column -> type, per table; added idempotently to databases created by older versions
+    MIGRATIONS = {
+        "messages": {"model": "TEXT"},
+        "requests": {"proposals": "TEXT", "recommended": "INTEGER"},
+    }
+
     def _migrate(self):
         """Idempotent, additive migrations for databases created by older versions."""
-        cols = {r[1] for r in self.conn.execute("PRAGMA table_info(messages)")}
-        if "model" not in cols:
-            try:
-                self.conn.execute("ALTER TABLE messages ADD COLUMN model TEXT")
-            except sqlite3.OperationalError:
-                if "model" not in {r[1] for r in self.conn.execute("PRAGMA table_info(messages)")}:
-                    raise  # lost a race with another process that added it: fine
+        for table, wanted in self.MIGRATIONS.items():
+            for col, typ in wanted.items():
+                if col in {r[1] for r in self.conn.execute(f"PRAGMA table_info({table})")}:
+                    continue
+                try:
+                    self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")
+                except sqlite3.OperationalError:
+                    if col not in {r[1] for r in self.conn.execute(f"PRAGMA table_info({table})")}:
+                        raise  # lost a race with another process that added it: fine
 
     def close(self):
         self.conn.close()
@@ -274,7 +282,7 @@ class LabDB:
 
     # ---------- requests ----------
     def ask(self, kind, title, body, author="coordinator", scope="other", options=None, blocking=False,
-            cost=None, links=None, thread_id=None, spec=None, spec_store_dir=None):
+            cost=None, links=None, thread_id=None, spec=None, spec_store_dir=None, proposals=None, recommended=None):
         if kind not in REQUEST_KINDS:
             raise LabError(f"Unknown request kind {kind}.")
         if scope not in REQUEST_SCOPES:
@@ -288,6 +296,11 @@ class LabDB:
             raise LabError(f"Options {bad} are not valid for kind {kind}; allowed: {allowed}.")
         if spec is not None and kind != "approval":
             raise LabError("A run spec can only be attached to an approval request.")
+        proposals = [p.strip() for p in (proposals or []) if p and p.strip()]
+        if len(proposals) > 3:
+            raise LabError("At most 3 proposals per request.")
+        if recommended is not None and not (proposals and 1 <= int(recommended) <= len(proposals)):
+            raise LabError("--recommended must be the number (1-based) of one of the proposals.")
         with self.tx() as c:
             rid = self._new_id(c, "requests", "id", "R")
             spec_path = spec_hash = None
@@ -303,9 +316,11 @@ class LabDB:
                     json.dump(spec, f, indent=2, ensure_ascii=False, sort_keys=True)
                 os.chmod(spec_path, 0o444)
             c.execute("INSERT INTO requests(id, ts, author, kind, scope, title, body, options, blocking, cost, links,"
-                      " thread_id, spec_path, spec_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                      " thread_id, spec_path, spec_hash, proposals, recommended) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                       (rid, now(), author, kind, scope, title.strip(), body.strip(), json.dumps(options),
-                       int(bool(blocking)), cost, json.dumps(links or []), thread_id, spec_path, spec_hash))
+                       int(bool(blocking)), cost, json.dumps(links or []), thread_id, spec_path, spec_hash,
+                       json.dumps(proposals, ensure_ascii=False) if proposals else None,
+                       int(recommended) if recommended is not None else None))
             self._audit(c, author, "ask", rid, f"{kind}/{scope}")
         return rid
 
@@ -382,6 +397,37 @@ class LabDB:
 
     def audit(self, limit=100):
         return [dict(r) for r in self.conn.execute("SELECT * FROM audit ORDER BY id DESC LIMIT ?", (limit,))]
+
+
+def map_choice(req, choice, note=""):
+    """Map a dashboard radio choice to (decision, text) for LabDB.decide. choice is 'p1'..'p3', 'yes', 'no' or 'own'.
+    The result is still validated by decide(); this only translates."""
+    allowed = json.loads(req["options"])
+    note = (note or "").strip()
+    props = json.loads(req.get("proposals") or "[]")
+    positive = "approve" if "approve" in allowed else ("answer" if "answer" in allowed else None)
+    if choice.startswith("p") and choice[1:].isdigit():
+        n = int(choice[1:])
+        if not 1 <= n <= len(props) or positive is None:
+            raise LabError("Μη έγκυρη επιλογή πρότασης.")
+        text = f"Επιλέχθηκε η Πρόταση {n}: {props[n - 1]}"
+        return positive, text + (f" — σχόλιο: {note}" if note else "")
+    if choice == "yes":
+        if "approve" not in allowed:
+            raise LabError("Η έγκριση δεν επιτρέπεται για αυτό το αίτημα.")
+        return "approve", note or "Ναι / έγκριση"
+    if choice == "no":
+        if "reject" not in allowed:
+            raise LabError("Η απόρριψη δεν επιτρέπεται για αυτό το αίτημα.")
+        return "reject", note or "Όχι / απόρριψη"
+    if choice == "own":
+        if not note:
+            raise LabError("Γράψε τη δική σου πρόταση.")
+        dec = "changes" if "changes" in allowed else ("answer" if "answer" in allowed else None)
+        if dec is None:
+            raise LabError("Δεν επιτρέπεται δική σου πρόταση για αυτό το αίτημα.")
+        return dec, f"Δική μου πρόταση: {note}"
+    raise LabError("Διάλεξε μία επιλογή.")
 
 
 def validate_spec(spec):

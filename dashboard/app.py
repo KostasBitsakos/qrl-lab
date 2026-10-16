@@ -24,7 +24,7 @@ import streamlit as st
 ROOT = os.environ.get("QRL_LAB_DIR") or os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 os.environ["QRL_LAB_DIR"] = ROOT
 sys.path.insert(0, os.path.join(ROOT, "tools"))
-from labdb import DECISIONS, LabDB, LabError  # noqa: E402
+from labdb import DECISIONS, LabDB, LabError, map_choice  # noqa: E402
 import file_view  # noqa: E402
 import k8s_view  # noqa: E402
 from uploads import UploadError, body_with_attachments, save_uploads  # noqa: E402
@@ -362,10 +362,23 @@ with tab_dec:
     if top[1].button("🔄 Ανανέωση", key="refresh_dec"):
         st.rerun()
     d = db()
+    # oldest blocking request first, then the oldest overall; one at a time
     open_reqs = sorted(d.requests(state="open"), key=lambda r: (-r["blocking"], r["ts"]))
     if not open_reqs:
         st.success("Δεν υπάρχει τίποτα που να περιμένει απόφασή σου.", icon="✅")
-    for r in open_reqs:
+    else:
+        N = len(open_reqs)
+        idx = min(max(int(st.session_state.get("dec_idx", 0)), 0), N - 1)
+        st.session_state["dec_idx"] = idx
+        nav = st.columns([1, 2, 1, 4])
+        if nav[0].button("◀ Προηγούμενο", key="dec_prev", disabled=idx == 0):
+            st.session_state["dec_idx"] = idx - 1
+            st.rerun()
+        nav[1].markdown(f"**Αίτημα {idx + 1} από {N}**")
+        if nav[2].button("Επόμενο ▶", key="dec_next", disabled=idx >= N - 1):
+            st.session_state["dec_idx"] = idx + 1
+            st.rerun()
+        r = open_reqs[idx]
         with st.container(border=True):
             badges = f"**{REQ_KIND[r['kind']]}** · {REQ_SCOPE.get(r['scope'], r['scope'])}"
             if r["blocking"]:
@@ -385,19 +398,39 @@ with tab_dec:
                     st.code(read_text(r["spec_path"]) or "(missing)", language="json")
                     st.caption(f"sha256: `{r['spec_hash']}` — αν αλλάξει το spec, η έγκριση ακυρώνεται.")
             options = json.loads(r["options"])
+            props = json.loads(r.get("proposals") or "[]")
             with st.form(f"decide_{r['id']}"):
-                note = st.text_area("Σχόλιο / απάντηση" + (" (υποχρεωτικό)" if r["kind"] == "question" else ""),
-                                    key=f"note_{r['id']}", height=80)
-                cols = st.columns(len(options))
-                labels = {"approve": "✅ Έγκριση", "reject": "⛔ Απόρριψη", "changes": "✏️ Ζητώ αλλαγές",
-                          "answer": "💬 Απάντηση", "ack": "👁️ Το είδα"}
-                pressed = None
-                for col, opt in zip(cols, options):
-                    if col.form_submit_button(labels.get(opt, opt), type="primary" if opt == "approve" else "secondary"):
-                        pressed = opt
+                if options == ["ack"]:
+                    choice = "ack"
+                    note = st.text_area("Σχόλιο (προαιρετικό)", key=f"note_{r['id']}", height=80)
+                    pressed = "ack" if st.form_submit_button("👁️ Το είδα") else None
+                else:
+                    choices, names = [], {}
+                    for i, ptxt in enumerate(props, 1):
+                        star = " ⭐ (προτείνεται)" if r.get("recommended") == i else ""
+                        choices.append(f"p{i}"); names[f"p{i}"] = f"Πρόταση {i}: {ptxt}{star}"
+                    if "approve" in options:
+                        choices.append("yes"); names["yes"] = "Ναι / έγκριση"
+                    if "reject" in options:
+                        choices.append("no"); names["no"] = "Όχι / απόρριψη"
+                    if "changes" in options or "answer" in options:
+                        choices.append("own"); names["own"] = "Δική μου πρόταση"
+                    choice = st.radio("Η απόφασή σου", choices, index=None, format_func=names.get,
+                                      key=f"choice_{r['id']}")
+                    note = st.text_area("Σχόλιο — ή η δική σου πρόταση (υποχρεωτικό αν διάλεξες «Δική μου πρόταση»)",
+                                        key=f"note_{r['id']}", height=100)
+                    sent = st.form_submit_button("Υποβολή απόφασης", type="primary")
+                    pressed = choice if sent else None
+                    if sent and not choice:
+                        st.error("Διάλεξε μία επιλογή.")
+                        pressed = None
             if pressed:
                 try:
-                    state = d.decide(r["id"], pressed, note, actor="researcher")
+                    if pressed == "ack":
+                        dec, text = "ack", note
+                    else:
+                        dec, text = map_choice(r, pressed, note)
+                    state = d.decide(r["id"], dec, text, actor="researcher")
                     st.toast(f"{r['id']}: {REQ_STATE[state][1]}", icon=REQ_STATE[state][0])
                     st.rerun()
                 except LabError as e:
