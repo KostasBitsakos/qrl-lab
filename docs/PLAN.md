@@ -1,6 +1,8 @@
 # QRL-Lab — Plan and Operating Manual
 
-Version 0.1 · 2026-10-15 · owner: the researcher (Kostas). Maintainer: the coordinator (Claude Opus).
+Version 0.2 · 2026-10-16 · owner: the researcher (Kostas). Maintainer: the coordinator (Claude Opus).
+Changes since 0.1: see `CHANGELOG.md` (Codex only through the official plugin; dashboard v1 with two-way messaging;
+approval enforced by the run launcher; F7).
 
 This file is the single source of truth for every agent working on this project, Claude and Codex alike.
 Read it before acting. Only the coordinator edits it, and only §13 (decisions) and §11 (timeline status)
@@ -115,6 +117,15 @@ with a circuit cannot reduce space.
 ### F6. Where the rest of the code lives
 Neither `evaluation` nor `main` on GitHub contains Kubernetes/Redis code, YAMLs or real-world logs. They are
 on the VM. The GitHub repository is **public** (anyone can read F1–F4).
+`vm_check` (2026-10-15) lists candidate directories: `~/simulations` (git repo `redisk8s`), `~/redis`
+(git repo `autoscaling-redis-cluster-hpa-kubernetes`), `~/k8s`, `~/prometheus-grafana`, and `~/all.zip` (2024-04).
+Which of them produced the published runs is `[TO VERIFY]` in the inventory. ChatGPT independently confirmed
+F1–F5 at code level on the same commit (2026-10-16).
+
+### F7. The Kubernetes API server is not reachable `[VERIFIED 2026-10-15, vm_check]`
+`kubectl` (client v1.28.2, context `kubernetes-admin@kubernetes`) gets `connection refused` from
+`10.0.1.28:6443`. The cluster must be brought back up (by the researcher, or by an agent with per-item
+approval) before any real-environment work. Simulation work does not depend on it.
 
 ---
 
@@ -130,11 +141,11 @@ on the VM. The GitHub repository is **public** (anyone can read F1–F4).
                   │ COORDINATOR  Claude Code, Opus 5.5, in tmux "lab"        │
                   │   ├─ Claude subagents: Explore(Haiku) runner(Haiku)      │
                   │   │   engineer(Sonnet) scholar(Sonnet) writer(Sonnet)    │
-                  │   ├─ Codex: plugin codex@openai-codex + `codex mcp-server`│
-                  │   ├─ lab-bridge plugin monitor ← .lab/inbox.jsonl        │
+                  │   ├─ Codex: plugin codex@openai-codex (codex-rescue)     │
+                  │   ├─ lab-bridge monitor ← .lab/lab.db (new messages)     │
                   │   └─ hooks → .lab/events.jsonl (agent timeline)          │
-                  │ Experiments (nohup/tmux, checkpoints) → .lab/lab.db      │
-                  │ Dashboard (Streamlit, 127.0.0.1:8501) ↔ .lab/*           │
+                  │ launch_run.py (checks approval) → runs → .lab/runs/      │
+                  │ Dashboard (Streamlit, 127.0.0.1:8501) ↔ .lab/lab.db      │
                   │ K8s + Redis (real environment)    IBM Quantum (outbound) │
                   └──────────────────────────────────────────────────────────┘
 ```
@@ -155,26 +166,29 @@ on the VM. The GitHub repository is **public** (anyone can read F1–F4).
   sessions.
 
 **Event paths.**
-- researcher → coordinator: chat (any surface), or the dashboard inbox. The dashboard appends a JSON line to
-  `.lab/inbox.jsonl`; the `lab-bridge` plugin monitor (`tail -n0 -F`) delivers it to the running session as a
-  notification. Plugin monitors run for the whole interactive session. `[VERIFIED 2026-10-15, plugin docs]`
-- coordinator → researcher: chat; `PushNotification` (desktop + phone when Remote Control is connected)
-  `[VERIFIED]`; the dashboard request queue `.lab/requests.jsonl` (badge + optional browser notification
-  while the tab is open).
+- researcher → coordinator: the dashboard writes the message to `.lab/lab.db` (status `new`). The `lab-bridge`
+  plugin monitor (`tools/lab_bridge_watch.py`, runs for the whole interactive session) prints one `QRL-INBOX` line
+  per new message, which Claude Code delivers to the session as a notification; status becomes `delivered`.
+  Messages delivered but never taken are re-delivered when the session restarts. Chat on any surface also works.
+- coordinator → researcher: `labq.py post` writes the reply into the same thread (visible in the dashboard),
+  sets the status (`in_progress` / `waiting_approval` / `done` / `failed`); `PushNotification` for blocking items.
+- decisions: the researcher decides in the dashboard (validated in `labdb.py`); the monitor prints `QRL-DECISION`.
+- The dashboard heartbeat (`.lab/bridge_heartbeat`, written by the monitor) shows whether the coordinator is online.
 - Channels (`--channels`) are not used: custom channels need a development flag during the research preview.
 
 **Directory layout on the VM** (`~/qrl-lab`, a new local git repo; nothing pushed without approval):
 
 ```
 ~/qrl-lab/
-  CLAUDE.md  AGENTS.md  .mcp.json  .claude/ (settings, agents, skills)
+  CLAUDE.md  AGENTS.md  CHANGELOG.md  SETUP.md  .claude/ (settings, agents, skills)  .streamlit/
   docs/      PLAN.md  INVENTORY.md  VENUES.md  DECISIONS.md
   code/      git worktree of K8s_Redis_DeepRL on branch qrl-dev (from the confirmed baseline)
   sim/       Simulation v2 (if kept outside code/)
   dashboard/ Streamlit app
   paper/     LaTeX scaffold (sections/, generated/, refs.bib, venue mains)
   tools/     scripts, hooks, lab-bridge plugin
-  .lab/      lab.db  events.jsonl  requests.jsonl  inbox.jsonl  council/  runs/
+  tests/     test_lab.py (plumbing tests)
+  .lab/      lab.db  events.jsonl  bridge_heartbeat  specs/  outbox/  council/  runs/   (not in git)
 ```
 Original VM directories are added read-only through `permissions.additionalDirectories` after the inventory.
 
@@ -184,7 +198,7 @@ Original VM directories are added read-only through `permissions.additionalDirec
 
 | Agent | Engine (default → escalation) | When | Writes to |
 |---|---|---|---|
-| **coordinator** (main session) | Opus 5.5, effort medium → high for design decisions | always | PLAN §11 §13, `.lab/requests.jsonl`, task routing |
+| **coordinator** (main session) | Opus 5.5, effort medium → high for design decisions | always | PLAN §11 §13, dashboard threads and requests (`labq.py`), task routing |
 | **Explore** (overrides built-in) | Haiku | code/log/directory search | summaries only |
 | **runner** | Haiku | start/monitor approved runs, collect results | `.lab/runs/`, `lab.db` via scripts |
 | **engineer** | Sonnet → Opus per call for circuit/simulator design | implementation, tests, dashboard | `code/`, `sim/`, `dashboard/`, `tools/` |
@@ -219,19 +233,26 @@ Four modes. The coordinator picks one per task and logs it.
    The researcher decides. Max two rounds unless the researcher asks for more.
 2. **Pair**: one implements, the other reviews the diff before it is used for results. Who implements depends
    on quota and fit (Codex tends to take the quantum circuit code; Claude the simulator and orchestration).
-3. **Delegate**: a self-contained task goes to Codex via `/codex:rescue --background` and returns via
-   `/codex:result`.
-4. **Adversarial review** at milestones: `/codex:adversarial-review` on the method, the experiment protocol and
-   the paper claims. The automatic review gate stays **off** (the plugin warns it can loop and drain limits).
+3. **Delegate**: a self-contained task goes to Codex through the `codex:codex-rescue` subagent (background).
+4. **Adversarial review** at milestones (method, experiment protocol, paper claims): the coordinator asks Codex
+   through `codex-rescue` with a read-only adversarial prompt; the researcher can also type
+   `/codex:adversarial-review` himself. The automatic review gate stays **off** (it can loop and drain limits).
 
-Interfaces:
-- Official OpenAI plugin `codex@openai-codex`: `/codex:review`, `/codex:adversarial-review`, `/codex:rescue`
-  (`--background --wait --resume --fresh --model --effort`), `/codex:status`, `/codex:result`, `/codex:cancel`,
-  `/codex:setup`. Needs Node ≥ 18.18 and the local Codex CLI. `[VERIFIED 2026-10-15, plugin README]`
-- `codex mcp-server` registered in `.mcp.json`: tools `codex` (new thread) and `codex-reply` (continue a thread)
-  let the coordinator hold a multi-turn discussion directly. `[TO VERIFY in smoke test S3: tool names, threadId,
-  sandbox/approval parameters on codex-cli 0.162.1]`
-- Shared rules: `AGENTS.md` (Codex reads it natively; Claude Code also loads it as project instructions).
+Every Codex contribution that reaches the researcher is shown in the dashboard thread as **Codex**, separate from
+the coordinator's synthesis. The ChatGPT web chat is not part of the system; it stays available to the researcher
+for independent second opinions (connecting it would need a paid API and is out of scope).
+
+Interfaces `[VERIFIED 2026-10-16 from the plugin source, v1.0.6]`:
+- Official OpenAI plugin `codex@openai-codex`, the only Codex interface. `codex mcp-server` is deprecated since
+  codex-cli 0.149.1 and is not used (the v0.1 `.mcp.json` is removed).
+- The coordinator calls Codex through the Agent tool with `subagent_type: "codex:codex-rescue"`, which forwards to
+  the plugin's `task` runtime: `--fresh` / `--resume` (continue the latest Codex thread in this repo), `--model`,
+  `--effort`. Without `--write` the Codex sandbox is **read-only**; the forwarder adds `--write` unless the prompt
+  asks for read-only, so every non-implementation prompt says `READ-ONLY`.
+- `/codex:review`, `/codex:adversarial-review`, `/codex:status`, `/codex:result`, `/codex:cancel` have
+  `disable-model-invocation: true`: only the researcher can type them (terminal or app). The coordinator gets
+  reviews through `codex-rescue` with a read-only review prompt.
+- Shared rules: `AGENTS.md` (Codex reads it natively; `CLAUDE.md` imports it with `@AGENTS.md`).
 
 ---
 
@@ -252,31 +273,50 @@ Interfaces:
 
 An approval covers exactly what it lists. It is never a blanket permission.
 
+**Enforcement, not only instructions.**
+- Experiments start only through `tools/launch_run.py`. It refuses unless the request is an approved `approval`
+  whose frozen spec (`.lab/specs/R-….json`, read-only, sha256 recorded) is unchanged, the entry has attempts left,
+  and, for scope `real`, the current kubectl context equals `real.kube_context`. A detached supervisor enforces
+  `limits.wall_clock_hours` and the dashboard's stop requests.
+- `.claude/settings.json`: auto permission mode with the classifier; `deny` for kubectl mutations, Helm, force
+  push, edits to the original directories, edits to `.lab/lab.db` and `.lab/specs/`, `sqlite3`, and the researcher-only
+  `labq.py decide/say`; `ask` for push, worktrees, sudo, installs, `rm -rf`, context switches.
+- Decisions are validated in `tools/labdb.py` (allowed options per kind, text where required, researcher only,
+  once). The dashboard never executes typed commands.
+- Residual risk: all of this runs as the same Unix user, so it is a guard against mistakes, not an OS security
+  boundary. For real-cluster runs, a namespace-scoped kubeconfig/service account is the next step (D11).
+
 ---
 
 ## 7. Dashboard
 
-**Tech.** Streamlit + Plotly, bound to `127.0.0.1:8501`. State in `.lab/lab.db` (SQLite) and the JSONL streams.
-Built once by the engineer from this spec; updates by refresh, no LLM tokens.
+**v1 (implemented, `dashboard/app.py`, tested by `tests/test_lab.py`).** Streamlit + Plotly on `127.0.0.1:8501`,
+state in `.lab/lab.db`; auto-refresh every 3–30 s (no LLM tokens). Text inputs are never inside auto-refreshing
+parts, so typing is never lost. Greek UI.
+1. **💬 Συνομιλία** — threads with the coordinator; each message shows its author (Εσύ / Συντονιστής / Codex /
+   subagent) and the status of your messages (νέο → παραδόθηκε → το ανέλαβε → σε εξέλιξη / περιμένει έγκριση →
+   ολοκληρώθηκε / απέτυχε). Types: μήνυμα, πρόταση ιδέας, ερώτηση για τον κώδικα. Warns when a delivered message
+   is not taken within 3 minutes.
+2. **✅ Αποφάσεις** — open requests (blocking first) with body, attached files, the frozen run spec and its hash;
+   Approve / Reject / Request changes (comment required for changes), Answer for questions; history.
+3. **🤖 Πράκτορες** — who is working now (active subagents), timeline of actions per agent (fixed colour per agent,
+   labelled lanes), counts, table of recent actions; banner when the coordinator waits for a permission prompt.
+4. **📈 Πειράματα** — runs with status, progress bar, duration, approval id, code commit; metric curves from
+   `metrics.jsonl` (up to 8 runs); stop request with confirmation.
+5. **⚖️ Council** — brief, decision card, Claude's and Codex's proposals side by side.
+6. **🖥️ Πόροι** — CPU, RAM, disk, load, GPU; read-only Kubernetes check on demand.
+7. **📄 Paper & συνέδρια** — deadlines with countdown (`docs/deadlines.json`, verified sources only), `docs/VENUES.md`,
+   `paper/claims.md`, section status.
+8. **🧾 Ιστορικό** — audit log of every send, take, decision, launch and stop.
+Planned for v2 (when data exists): quantum resource panel (qubits, depth, gates, shots, circuit calls per decision),
+compare view with bootstrap CIs, budget/usage notes.
 
-**Tabs.**
-1. **Overview** — current phase, timeline vs CCGrid deadlines, open requests count, last events.
-2. **Runs** — live table of runs (status, progress bar, ETA, seed, config hash, code commit); live reward/loss
-   curves; stop button that files a request (never kills directly).
-3. **Compare** — pick runs or code versions; reward, SLA violations, p95/p99 latency, pods over time;
-   bootstrap CIs; parameter count, checkpoint size, peak RAM, wall-clock, env steps to target.
-4. **Agents** — swimlane timeline per agent (coordinator, subagents, Codex threads) from `events.jsonl`:
-   who is working, on what, which model, duration; a graph view task → agent → artifact.
-5. **Inbox** — requests from agents (approval / question / proposal) with Approve / Reject / Request changes +
-   comment; a free-text box for the researcher's own proposals. Writes to `.lab/inbox.jsonl`.
-6. **Resources** — VM CPU/RAM/GPU/disk, K8s pods and nodes in the experiment namespace.
-7. **Quantum** — per model: qubits, depth, gate counts, two-qubit gates, shots, circuit evaluations per decision,
-   simulator time per update; IBM jobs and QPU seconds used.
-8. **Paper & venues** — section status, claim → evidence table, venue table with deadlines.
-9. **Budget** — Claude and Codex usage notes; escalations log. `[optional: Claude Code OpenTelemetry token metrics]`
+**Experiment telemetry contract.** A run writes to `$QRL_RUN_DIR`: `metrics.jsonl` (one JSON object per line with
+`step` and numeric metrics such as `reward`, `loss`, `sla_violation_rate`, `p95_latency`, `pods`) and optionally
+`progress.json` (`{"step": n, "total": N}`). The launcher writes `spec_entry.json`, `output.log`, `launcher.json`.
 
-**Notifications.** Phone: `PushNotification` from the coordinator via Remote Control. Browser: the dashboard
-raises a notification for new requests while its tab is open (cannot work with the tab or laptop closed).
+**Notifications.** Phone: `PushNotification` from the coordinator via Remote Control (best effort). In the browser:
+sidebar counters and toasts while the tab is open. The stored request state in the database is the source of truth.
 
 **Security.** Bound to localhost; reached only through the SSH tunnel. Exposing it beyond the VM needs a
 security review and the researcher's approval.
@@ -408,7 +448,7 @@ symmetric "not X but Y" constructions, no generic punchlines, no self-promotion.
 
 | Week | Dates (2026) | Work | Status |
 |---|---|---|---|
-| 0 | Oct 15–18 | VM setup, smoke tests S1–S6, read-only inventory, confirm baseline, decisions D1–D8 | open |
+| 0 | Oct 15–18 | VM setup, acceptance tests T0 and A1–A8 (§12), read-only inventory, confirm baseline, decisions D1–D8 | open |
 | 1 | Oct 19–25 | Sim v2 + calibration + sanity gates; fix F2/F3 in `qrl-dev`; dashboard v1; scaffold + related work start | open |
 | 2 | Oct 26–Nov 1 | DInos+T (fixed) on Sim v2; screening of quantum candidates; researcher picks 2–3 | open |
 | 3 | Nov 2–8 | Full simulation evaluation + ablations + controls | open |
@@ -423,22 +463,23 @@ the coordinator stops and brings it to the researcher before any quantum work co
 
 ## 12. Setup and smoke tests
 
-Done by the researcher on the VM with the coordinator's guidance (see chat for the exact commands):
-1. `tools/vm_check.sh` (read-only) → paste the output.
-2. Claude Code on the VM + `/login`; Node LTS via nvm (user-local); Codex CLI; `codex login --device-auth`
-   (device-code login must be enabled in ChatGPT settings → Security) `[TO VERIFY]`.
-3. Create `~/qrl-lab` from this kit; `/plugin marketplace add openai/codex-plugin-cc`,
-   `/plugin install codex@openai-codex`, `/codex:setup`; `pyright-lsp@claude-plugins-official` + pyright.
-4. `tools/start-coordinator.sh`, enable push notifications in the Claude app.
+Steps for the researcher: `SETUP.md` (Greek). Acceptance tests (adopted from the ChatGPT handoff of 2026-10-16).
+Nobody claims the system works until the relevant tests pass on the VM:
 
-Smoke tests (pass before touching research code):
-- **S1** `/codex:setup` reports Codex installed and authenticated.
-- **S2** In `sandbox/` (dummy file, no private data): `/codex:rescue --wait` read-only review → `/codex:result`.
-- **S3** `/mcp` shows `codex` connected; coordinator starts a thread with `codex`, continues it with `codex-reply`.
-- **S4** `council` dry run on a toy question; decision card appears in `.lab/requests.jsonl`.
-- **S5** `python3 tools/labq.py say "ping"` → coordinator reacts without being prompted (monitor works);
-  `PushNotification` reaches the phone.
-- **S6** a subagent task produces lines in `.lab/events.jsonl` with `SubagentStart/SubagentStop`.
+| Test | Pass when | Status |
+|---|---|---|
+| T0 | `.venv/bin/python tests/test_lab.py` → `ALL PASSED (6)` on the VM (plumbing without Claude) | open |
+| A1 | `codex login status` on the VM says logged in; `/codex:setup` passes | open |
+| A2 | Coordinator sends a read-only task on `sandbox/demo.py` to Codex (`codex-rescue`), gets the answer, and a `--resume` follow-up works | open |
+| A3 | One coordinator session in tmux, reachable from claude.ai/code and the phone; no duplicate sessions | open |
+| A4 | "hello dashboard" sent from the dashboard gets a visible reply in its thread, including a Codex contribution when asked | open |
+| A5 | A test approval request appears in the dashboard; reject → `launch_run.py` refuses; approve → a toy run starts and shows in Πειράματα | open |
+| A6 | Coordinator offline → dashboard says offline and keeps the message `new`; after restart it is delivered | open |
+| A7 | Every run directory has spec, code commit, seed, metrics; originals untouched (`git status` clean in original repos) | open |
+| A8 | Dashboard reachable only through the SSH tunnel; no secrets in git or `.lab/events.jsonl` | open |
+
+Until A4–A5 pass, the terminal/app remain the primary interface. Until A1–A3 pass, the Claude–Codex link is not
+claimed to work.
 
 Then: read-only inventory of the VM (Explore) → `docs/INVENTORY.md` with evidence for the latest version
 (git history, job scripts, logs, checkpoints, configs, timestamps — not folder dates alone) → the researcher
@@ -460,6 +501,8 @@ confirms the baseline → `git worktree add` for `qrl-dev`.
 | D8 | How to handle F1/F5 with respect to published work and the public repo | researcher only |
 | D9 | IBM Quantum plan / QPU minutes | pending |
 | D10 | Kubernetes version, namespace and context for real runs | from inventory |
+| D11 | Bring the K8s cluster back up (F7); namespace-scoped credentials for agent-launched real runs | pending |
+| D12 | ChatGPT handoff 2026-10-16 adopted: codex mcp-server dropped, approvals enforced in the launcher, acceptance tests A1–A8 | accepted by the researcher (applied the .mcp.json change) |
 
 Accepted decisions are copied to `docs/DECISIONS.md` with date and who decided.
 
@@ -467,16 +510,24 @@ Accepted decisions are copied to `docs/DECISIONS.md` with date and who decided.
 
 ## 14. Data formats
 
-`.lab/requests.jsonl` (agents → researcher), one object per line:
-`{"id":"R-20261015-001","ts":"...","from":"coordinator","kind":"approval|question|proposal|info",
-  "title":"...","body":"markdown","options":["approve","reject","changes"],"blocking":true,
-  "cost":"est. CPU-h / QPU-s / tokens","links":["runs/...","council/..."]}`
+`.lab/lab.db` (SQLite, WAL; schema and transitions in `tools/labdb.py`; CLI `tools/labq.py`):
+- `messages(id M-YYYYMMDD-NNN, thread_id, reply_to, author researcher|coordinator|codex|agent:<name>,
+  kind message|proposal|code_question|reply|contribution|status, body, status, delivered_count)`;
+  status of researcher messages: new → delivered → acknowledged → in_progress | waiting_approval → done | failed.
+- `requests(id R-…, kind approval|question|proposal|info, scope sim|real|qpu|research|external|other, title, body,
+  options, blocking, cost, links, thread_id, spec_path, spec_hash, state open|approved|rejected|changes_requested|
+  answered|acknowledged|withdrawn, decision_text, decided_at, decision_delivered)`.
+- `runs(run_id, request_id, spec_hash, entry, attempt, scope, cmd, cwd, run_dir, code_sha, status
+  starting|running|done|failed|stopped, pid, exit_code, stop_requested, …)`.
+- `audit(ts, actor, action, target, detail)`.
 
-`.lab/inbox.jsonl` (researcher → agents):
-`{"id":"I-...","ts":"...","reply_to":"R-...|null","decision":"approve|reject|changes|null","text":"..."}`
+Run spec (attached to an approval with `labq.py ask --spec`; frozen at filing):
+`{"name", "scope": "sim|real|qpu", "cwd" (relative to ~/qrl-lab), "entries": [{"name", "seed", "cmd": [argv…]}],
+  "max_parallel": 1, "max_attempts": 1, "limits": {"wall_clock_hours": h},
+  "real": {"kube_context", "namespace", "rollback"}}` (`real` required for scope real).
 
-`.lab/events.jsonl` (hooks, no secrets, truncated):
+`.lab/events.jsonl` (hooks, whitelisted fields, truncated, never tool outputs):
 `{"ts":..., "hook_event_name":"PreToolUse", "agent_type":"engineer", "tool_name":"Edit", "summary":"code/sim/env_v2.py"}`
 
-Runs: `.lab/runs/<run_id>/` with `spec.yaml` (code commit, config hash, seed, workload, model),
-`metrics.jsonl` (step-level), `summary.json`; registered in `lab.db`.
+Runs: `.lab/runs/<run_id>/` with `spec_entry.json` (request, spec hash, entry, seed, code commit, limits),
+`output.log`, `metrics.jsonl`, `progress.json`, `launcher.json`; registered in `lab.db`.

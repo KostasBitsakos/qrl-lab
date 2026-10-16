@@ -1,0 +1,11 @@
+{
+  "name": "toy-A5",
+  "scope": "sim",
+  "cwd": "sandbox",
+  "entries": [
+    {"name": "toy-seed0", "seed": 0, "cmd": ["../.venv/bin/python", "toy_run.py", "0"]}
+  ],
+  "max_parallel": 1,
+  "max_attempts": 1,
+  "limits": {"wall_clock_hours": 0.1}
+}

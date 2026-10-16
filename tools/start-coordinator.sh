@@ -1,36 +1,45 @@
 #!/usr/bin/env bash
-# Start the QRL-Lab coordinator in tmux on the VM, or attach if it is already running.
-#   tools/start-coordinator.sh          start a new coordinator session (or attach)
-#   tools/start-coordinator.sh resume   continue the most recent conversation in this directory
-# The session is reachable from claude.ai/code and the Claude app through Remote Control.
+# Start (or re-attach to) the QRL-Lab tmux session "lab" on the VM:
+#   window "coordinator": Claude Code with Remote Control and the lab-bridge plugin (dashboard -> coordinator)
+#   window "dashboard":   Streamlit on 127.0.0.1:8501 (reach it from the laptop through an SSH tunnel)
+# Usage:
+#   tools/start-coordinator.sh          start, or attach if already running (adds a missing dashboard window)
+#   tools/start-coordinator.sh resume   start the coordinator continuing the most recent conversation
+# Detach without stopping anything: Ctrl+b then d.
 set -euo pipefail
 
 LAB="${QRL_LAB_DIR:-$HOME/qrl-lab}"
 TMUX_SESSION="lab"
 RC_NAME="qrl-lab"
 
-if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
-  exec tmux attach -t "$TMUX_SESSION"
-fi
-
-# Node from nvm (needed by the Codex CLI and the Codex plugin); does not touch system Node or Python envs.
 export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
 # shellcheck disable=SC1091
 [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+NODE_MAJOR=$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)
+if [ "$NODE_MAJOR" -lt 18 ]; then
+  echo "Node >= 18.18 is needed by the Codex plugin; found: $(node --version 2>/dev/null || echo none)." >&2
+  echo "Run: nvm install --lts" >&2
+  exit 1
+fi
 
 mkdir -p "$LAB/.lab"
-touch "$LAB/.lab/inbox.jsonl" "$LAB/.lab/requests.jsonl" "$LAB/.lab/events.jsonl"
+
+start_dashboard_window() {
+  if [ -x "$LAB/.venv/bin/streamlit" ] && ! tmux list-windows -t "$TMUX_SESSION" -F '#W' | grep -qx dashboard; then
+    tmux new-window -d -t "$TMUX_SESSION" -n dashboard -c "$LAB" \
+      "./.venv/bin/streamlit run dashboard/app.py; exec bash"
+  fi
+}
+
+if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+  start_dashboard_window
+  exec tmux attach -t "$TMUX_SESSION"
+fi
 
 CONT=""
 [ "${1:-}" = "resume" ] && CONT="--continue"
 
 tmux new-session -d -s "$TMUX_SESSION" -n coordinator -c "$LAB" \
   "claude $CONT --remote-control $RC_NAME --plugin-dir ./tools/lab-bridge; exec bash"
-
-# Dashboard window, once the engineer has built it.
-if [ -f "$LAB/dashboard/app.py" ]; then
-  tmux new-window -t "$TMUX_SESSION" -n dashboard -c "$LAB" \
-    "./.venv/bin/streamlit run dashboard/app.py --server.address 127.0.0.1 --server.port 8501; exec bash"
-fi
-
+start_dashboard_window
 exec tmux attach -t "$TMUX_SESSION"

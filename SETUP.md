@@ -1,88 +1,73 @@
-# QRL-Lab — Εγκατάσταση βήμα βήμα
+# QRL-Lab v0.2 — τελευταία βήματα
 
-Όλα γίνονται στο **VM**. Στο laptop δεν εγκαθιστάς τίποτα. Χρειάζεσαι μόνο VS Code (Remote-SSH), browser και VPN.
-Το Node 12 του laptop δεν μας αφορά πια.
+Από το v0.1: τα Node, Codex login και plugins τα έχεις ήδη κάνει, οπότε δεν τα ξαναεγκαθιστάς.
+Μετά από αυτά τα βήματα δουλεύεις από το dashboard. Τα tests του PLAN §12 (T0, A1–A8) δείχνουν πότε αυτό ισχύει.
+Κωδικούς, tokens και κλειδιά δεν τα επικολλάς ποτέ σε συνομιλία.
 
-Κανόνας: tokens, κωδικούς και κλειδιά δεν τα επικολλάς ποτέ σε συνομιλία.
-
----
-
-## 0. Προετοιμασία (μία φορά)
-- **Κινητό:** εγκατάστησε το Claude app και κάνε login με τον ίδιο λογαριασμό (Pro).
-- **ChatGPT:** για login του Codex μέσα από SSH χρειάζεται device code. Αν δεν είναι ενεργό, ενεργοποίησέ το στο
-  ChatGPT → Settings → Security. Αυτό το βήμα το βρήκα σε οδηγό τρίτου, όχι σε επίσημα docs, οπότε επιβεβαίωσέ το εκεί.
-- **Αντιγραφή του kit στο VM** (από το laptop):
-  ```bash
-  scp qrl-lab-kit.zip <vm>:~
-  ```
-
-## 1. Έλεγχος του VM (μόνο ανάγνωση, δεν αλλάζει τίποτα)
+## Laptop
 ```bash
-cd ~ && unzip qrl-lab-kit.zip            # δημιουργεί το ~/qrl-lab
-bash ~/qrl-lab/tools/vm_check.sh 2>&1 | tee ~/vm_check.txt
-```
-Στείλε μου το `~/vm_check.txt`. Αν κάποια γραμμή στο «outbound https» δείχνει `000`, σταματάμε εκεί.
-Χωρίς έξοδο προς τα έξω δεν δουλεύει τίποτα από τα παρακάτω.
-
-## 2. Εργαλεία (στον χρήστη σου, χωρίς sudo, χωρίς να αγγίξουν τα Python envs των πειραμάτων)
-```bash
-# Claude Code: μόνο αν το vm_check έγραψε "claude not installed"
-curl -fsSL https://claude.ai/install.sh | bash
-
-# Node LTS μέσω nvm (το Codex plugin θέλει Node ≥ 18.18).
-# Πάρε την εντολή εγκατάστασης του nvm από το README του https://github.com/nvm-sh/nvm, μετά:
-nvm install --lts
-
-# Codex CLI + login με device code (δεν χρειάζεται browser στο VM)
-npm install -g @openai/codex
-codex login --device-auth        # ανοίγεις το URL στο laptop/κινητό και βάζεις τον κωδικό
-codex login status
-
-# Python language server για το pyright-lsp plugin (λιγότερα tokens: πλοήγηση ανά σύμβολο)
-npm install -g pyright
+scp qrl-lab-kit-v0.2.zip <vm>:~
 ```
 
-## 3. Το project
+## VM — 1. Έλεγχος (A1)
 ```bash
-cd ~/qrl-lab && git init && git add -A && git commit -m "QRL-Lab bootstrap kit v0.1"
-chmod +x tools/*.sh tools/*.py
+cd ~/qrl-lab
+node --version        # ≥ v18.18 · αν δεν βρεθεί: source ~/.nvm/nvm.sh
+codex login status    # πρέπει να λέει logged in
+claude --version
+```
+
+## VM — 2. Ενημέρωση του kit
+```bash
+tmux kill-session -t lab 2>/dev/null       # κλείνει τον παλιό συντονιστή, αν τρέχει
+cd ~ && unzip -o qrl-lab-kit-v0.2.zip      # αντικαθιστά μόνο αρχεία του kit· δεν αγγίζει τα .lab/ και code/
+cd ~/qrl-lab && chmod +x tools/*.sh tools/*.py
+bash tools/setup_dashboard_env.sh          # .venv μόνο για το dashboard (δεν αγγίζει το conda)
+.venv/bin/python tests/test_lab.py         # T0: πρέπει να τελειώσει με "ALL PASSED (6)"
+git add -A && git commit -m "QRL-Lab kit v0.2"
+```
+Προαιρετικό, αλλά το προτείνω: ένα αντίγραφο ασφαλείας των αρχικών φακέλων. Το `tar` μόνο τους διαβάζει,
+δεν τους αλλάζει. Δες πρώτα το μέγεθος με `du -sh ~/simulations ~/redis ~/k8s ~/prometheus-grafana`.
+```bash
+tar czf ~/originals-backup-20261016.tgz -C ~ simulations redis k8s prometheus-grafana
+```
+
+## VM — 3. Εκκίνηση
+```bash
 bash tools/start-coordinator.sh
 ```
-Μέσα στο Claude Code που ανοίγει:
+Ανοίγει tmux με δύο παράθυρα: `coordinator` (Claude) και `dashboard` (Streamlit). Αλλάζεις παράθυρο με
+`Ctrl+b` και μετά `n`. Βγαίνεις χωρίς να σταματήσει τίποτα με `Ctrl+b` και μετά `d`.
+Στο Claude:
 ```
-/login                                            (αν ζητηθεί· το URL το ανοίγεις στο laptop)
-/plugin marketplace add openai/codex-plugin-cc
-/plugin install codex@openai-codex
-/plugin install pyright-lsp@claude-plugins-official
-/reload-plugins
 /codex:setup
-/mcp                                              (έγκρινε τον project server "codex")
-/status                                           (πρέπει να δείχνει Pro και Opus)
+/status
 ```
-Αν δεις `Marketplace "claude-plugins-official" not found`, τρέξε πρώτα
-`/plugin marketplace add anthropics/claude-plugins-official`.
+Αν ζητήσει να εμπιστευτείς τον φάκελο ή να εγκρίνεις τα hooks, απάντησε ναι. Στις πρόσθετες προσβάσεις στους
+αρχικούς φακέλους, οι κανόνες επιτρέπουν μόνο ανάγνωση.
+Μετά γράψε στο Claude: **«Τρέξε το acceptance test A2 του docs/PLAN.md §12 και ανέφερε.»**
 
-## 4. Πρόσβαση από παντού
-- **VS Code:** στο integrated terminal του Remote-SSH γράφεις `tmux attach -t lab`. Για έξοδο χωρίς να σταματήσει
-  τίποτα: `Ctrl+b` και μετά `d`.
-- **Browser:** claude.ai/code → session `qrl-lab`.
-- **Κινητό:** Claude app → Code → `qrl-lab`. Δέξου τις ειδοποιήσεις όταν σου τις ζητήσει.
-- **Dashboard** (μόλις φτιαχτεί): από το laptop `ssh -N -L 8501:127.0.0.1:8501 <vm>` και μετά `http://localhost:8501`.
-- Μην ανοίγεις άλλα Claude panels στο VS Code για αυτό το project. Θα ήταν ξεχωριστές sessions, ασυντόνιστες.
+## Κινητό (A3)
+Claude app → Code → session `qrl-lab`. Δέξου τις ειδοποιήσεις.
 
-## 5. Smoke tests
-Γράψε στον συντονιστή: **«Τρέξε τα smoke tests S1–S6 του docs/PLAN.md §12 και ανέφερε.»**
-Για το S5, σε δεύτερο terminal:
+## Laptop — dashboard
 ```bash
-cd ~/qrl-lab && python3 tools/labq.py say "ping από τον Κώστα"
+ssh -N -L 8501:127.0.0.1:8501 <vm>        # με τις ίδιες επιλογές VPN/SSH που χρησιμοποιείς πάντα
 ```
-Ο συντονιστής πρέπει να απαντήσει χωρίς να του γράψεις τίποτα άλλο.
+Browser: **http://localhost:8501**
 
-## 6. Μετά τα smoke tests
-1. Δώσε στον συντονιστή τα paths των φακέλων σου: simulation, real-world, YAMLs, logs.
-2. Θα κάνει read-only inventory (`docs/INVENTORY.md`) και θα σου προτείνει ποια είναι η τελευταία έκδοση, με τεκμήρια.
-3. Επιβεβαιώνεις εσύ. Μετά (με έγκρισή σου) φτιάχνει το worktree `code/` στο branch `qrl-dev`.
+Στο dashboard, καρτέλα 💬 Συνομιλία → Νέο θέμα:
+1. **A4**: «hello dashboard — ρώτα και τον Codex τι βρίσκει στο sandbox/demo.py». Περιμένεις δύο απαντήσεις στο θέμα,
+   μία από τον Codex και μία από τον Συντονιστή.
+2. **A5**: «Κάνε το A5: κατέθεσε δύο αιτήματα έγκρισης με το sandbox/toy_spec.json». Στο ✅ Αποφάσεις απορρίπτεις το
+   πρώτο και εγκρίνεις το δεύτερο. Ο συντονιστής δοκιμάζει να τρέξει και τα δύο. Το πρώτο πρέπει να αρνηθεί,
+   το δεύτερο να φανεί στο 📈 Πειράματα.
+3. **A6**: στο VM κλείσε το Claude (`/exit` στο παράθυρο coordinator) και στείλε ένα μήνυμα από το dashboard. Το
+   dashboard πρέπει να γράφει «offline» και το μήνυμα να μένει «νέο». Μετά τρέξε
+   `bash tools/start-coordinator.sh resume`. Το μήνυμα πρέπει να παραδοθεί και να απαντηθεί.
 
-## Επανεκκίνηση
-- Αν το VM επανεκκινηθεί, η συνομιλία συνεχίζει με `bash ~/qrl-lab/tools/start-coordinator.sh resume`.
-- Τα πειράματα τρέχουν ανεξάρτητα από τη session, με checkpoints.
+Όταν περάσουν T0 και A1–A6, η συνεργασία γίνεται από το dashboard. Το terminal και το app χρειάζονται μόνο αν
+το dashboard δείξει ότι ο συντονιστής περιμένει άδεια (🔐).
+
+## Επανεκκίνηση του VM
+`bash ~/qrl-lab/tools/start-coordinator.sh resume`. Τα runs έχουν checkpoints και καταγράφονται στη βάση.

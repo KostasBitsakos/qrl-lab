@@ -7,8 +7,23 @@
     "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "1"
   },
   "permissions": {
+    "defaultMode": "auto",
+    "additionalDirectories": [
+      "~/simulations",
+      "~/redis",
+      "~/k8s",
+      "~/prometheus-grafana"
+    ],
     "allow": [
-      "Bash(python3 tools/labq.py *)",
+      "Bash(python3 tools/labq.py take *)",
+      "Bash(python3 tools/labq.py show *)",
+      "Bash(python3 tools/labq.py post *)",
+      "Bash(python3 tools/labq.py status *)",
+      "Bash(python3 tools/labq.py ask *)",
+      "Bash(python3 tools/labq.py request *)",
+      "Bash(python3 tools/labq.py withdraw *)",
+      "Bash(python3 tools/labq.py pending)",
+      "Bash(python3 tools/launch_run.py *)",
       "Bash(python3 -I tools/sanity_trivial_policies.py *)",
       "Bash(kubectl get *)",
       "Bash(kubectl describe *)",
@@ -16,9 +31,9 @@
       "Bash(kubectl top *)",
       "Bash(kubectl version *)",
       "Bash(kubectl config get-contexts *)",
+      "Bash(kubectl config current-context)",
       "Bash(nvidia-smi *)",
       "Bash(tmux ls *)",
-      "Bash(tmux capture-pane *)",
       "Bash(git -C code status *)",
       "Bash(git -C code diff *)",
       "Bash(git -C code log *)",
@@ -26,17 +41,9 @@
       "Bash(git -C code commit *)"
     ],
     "ask": [
-      "Bash(kubectl apply *)",
-      "Bash(kubectl create *)",
-      "Bash(kubectl scale *)",
-      "Bash(kubectl delete *)",
-      "Bash(kubectl patch *)",
-      "Bash(kubectl edit *)",
-      "Bash(kubectl rollout *)",
-      "Bash(kubectl config use-context *)",
-      "Bash(helm *)",
       "Bash(git push *)",
       "Bash(git worktree *)",
+      "Bash(kubectl config use-context *)",
       "Bash(sudo *)",
       "Bash(pip install *)",
       "Bash(npm install *)",
@@ -44,8 +51,32 @@
       "Bash(rm -rf *)"
     ],
     "deny": [
+      "Bash(python3 tools/labq.py decide *)",
+      "Bash(python3 tools/labq.py say *)",
+      "Bash(sqlite3 *)",
+      "Bash(kubectl apply *)",
+      "Bash(kubectl create *)",
+      "Bash(kubectl scale *)",
+      "Bash(kubectl delete *)",
+      "Bash(kubectl patch *)",
+      "Bash(kubectl edit *)",
+      "Bash(kubectl rollout *)",
+      "Bash(kubectl replace *)",
+      "Bash(helm *)",
       "Bash(git push --force *)",
       "Bash(git push -f *)",
+      "Edit(~/simulations/**)",
+      "Write(~/simulations/**)",
+      "Edit(~/redis/**)",
+      "Write(~/redis/**)",
+      "Edit(~/k8s/**)",
+      "Write(~/k8s/**)",
+      "Edit(~/prometheus-grafana/**)",
+      "Write(~/prometheus-grafana/**)",
+      "Edit(.lab/lab.db)",
+      "Write(.lab/lab.db)",
+      "Edit(.lab/specs/**)",
+      "Write(.lab/specs/**)",
       "Read(~/.ssh/**)",
       "Read(~/.codex/auth.json)",
       "Read(~/.qiskit/**)",
@@ -56,6 +87,9 @@
     ]
   },
   "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR\"/tools/lab_event_hook.py" } ] }
+    ],
     "SubagentStart": [
       { "hooks": [ { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR\"/tools/lab_event_hook.py" } ] }
     ],
@@ -66,6 +100,9 @@
       { "hooks": [ { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR\"/tools/lab_event_hook.py" } ] }
     ],
     "PostToolUse": [
+      { "hooks": [ { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR\"/tools/lab_event_hook.py" } ] }
+    ],
+    "Notification": [
       { "hooks": [ { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR\"/tools/lab_event_hook.py" } ] }
     ],
     "Stop": [

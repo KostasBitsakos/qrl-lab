@@ -14,8 +14,10 @@ Scope:
   Never push.
 - Python environments: use the project virtual environment; installing packages there is fine, system-wide
   installs need approval (ask the coordinator).
-- Reproducibility: every experiment entry point takes a seed and a config file, logs the git commit and config
-  hash, and writes metrics through the shared logger into `.lab/runs/<run_id>/`.
+- Reproducibility: every experiment entry point takes a seed and a config file and follows the telemetry
+  contract of `docs/PLAN.md` §7: append `{"step": n, <numeric metrics>}` lines to `$QRL_RUN_DIR/metrics.jsonl` and
+  write `$QRL_RUN_DIR/progress.json` (`{"step": n, "total": N}`). Experiments are started only by
+  `tools/launch_run.py` after approval; you may run quick tests, never full experiments.
 - Quantum code: PennyLane with `lightning.qubit` and adjoint differentiation for training unless told otherwise;
   report qubits, depth, gate counts and trainable parameters for every circuit you build.
 - Never fake a result, a passing test or a benchmark. If something does not work, say so.

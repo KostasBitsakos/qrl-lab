@@ -10,7 +10,8 @@ import os
 import sys
 import time
 
-KEEP = ("hook_event_name", "session_id", "agent_id", "agent_type", "tool_name", "tool_use_id")
+KEEP = ("hook_event_name", "session_id", "agent_id", "agent_type", "tool_name", "tool_use_id",
+        "notification_type", "source", "model")
 MAX = 140
 
 
@@ -41,8 +42,11 @@ def main():
         data = json.load(sys.stdin)
     except Exception:
         return 0
-    rec = {k: data[k] for k in KEEP if k in data}
+    rec = {k: data[k] for k in KEEP if k in data and isinstance(data[k], (str, int, float))}
     rec["ts"] = round(time.time(), 3)
+    if data.get("hook_event_name") == "Notification":
+        # e.g. "Claude needs your permission to use Bash" - the dashboard shows it as a banner
+        rec["summary"] = str(data.get("message", ""))[:MAX]
     s = summarize(str(data.get("tool_name", "")), data.get("tool_input"))
     if s:
         rec["summary"] = s

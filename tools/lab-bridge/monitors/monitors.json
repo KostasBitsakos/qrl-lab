@@ -1,7 +1,7 @@
 [
   {
     "name": "dashboard-inbox",
-    "command": "mkdir -p .lab && touch .lab/inbox.jsonl && tail -n0 -F .lab/inbox.jsonl",
-    "description": "New messages from the researcher posted in the QRL-Lab dashboard, one JSON object per line. A line with reply_to answers a request; a line without it is a new proposal. Handle as CLAUDE.md > Researcher channels says."
+    "command": "python3 tools/lab_bridge_watch.py",
+    "description": "QRL-Lab dashboard bridge. Lines starting QRL-INBOX are new messages from the researcher: run the command shown (labq.py take), then follow the inbox skill. Lines starting QRL-DECISION are the researcher's decisions on your requests: act only on what the decision allows."
   }
 ]

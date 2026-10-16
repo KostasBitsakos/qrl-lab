@@ -1,0 +1,17 @@
+[server]
+# Only reachable from the VM itself; the researcher uses an SSH tunnel. Never expose this port.
+address = "127.0.0.1"
+port = 8501
+headless = true
+runOnSave = false
+
+[browser]
+gatherUsageStats = false
+serverAddress = "localhost"
+
+[theme]
+base = "light"
+primaryColor = "#2a78d6"
+
+[client]
+toolbarMode = "minimal"

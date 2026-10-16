@@ -1,0 +1,18 @@
+[
+  {
+    "venue": "IEEE CCGrid 2027",
+    "what": "abstract registration",
+    "due": "2026-11-25T11:59:00+00:00",
+    "due_label": "24/11/2026 23:59 AoE",
+    "source": "https://easychair.org/cfp/ccgrid27",
+    "verified": "2026-10-15"
+  },
+  {
+    "venue": "IEEE CCGrid 2027",
+    "what": "paper submission (10 pp IEEE incl. refs)",
+    "due": "2026-12-02T11:59:00+00:00",
+    "due_label": "01/12/2026 23:59 AoE",
+    "source": "https://easychair.org/cfp/ccgrid27",
+    "verified": "2026-10-15"
+  }
+]

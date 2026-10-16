@@ -1,144 +1,184 @@
 #!/usr/bin/env python3
-"""Request/inbox queue between QRL-Lab agents and the researcher.
+"""QRL-Lab message and approval CLI (agents' side of the dashboard). Run from ~/qrl-lab.
 
-  requests.jsonl  agents -> researcher   (questions, proposals, approval requests)
-  inbox.jsonl     researcher -> agents   (answers and free proposals; the coordinator is notified per line)
+Conversation (researcher <-> agents):
+  labq.py take M-...                         pick up a researcher message: prints the thread, marks it acknowledged
+  labq.py show M-...                         print a thread without changing anything
+  labq.py post --reply-to M-... --body-file f.md [--author coordinator|codex|agent:<name>]
+               [--kind reply|contribution|status] [--status in_progress|waiting_approval|done|failed]
+  labq.py status M-... done                  set the status of a researcher message
 
-Usage:
-  labq.py ask --kind approval --title "..." --body-file f.md [--options approve,reject,changes] [--blocking] [--cost "..."]
-  labq.py pending                      # requests without an answer
-  labq.py reply R-... approve "text"   # answer a request from the command line (the dashboard does the same)
-  labq.py say "free text"              # new message/proposal to the coordinator
+Requests (agents -> researcher):
+  labq.py ask --kind approval|question|proposal|info --title "..." --body-file f.md
+              [--scope sim|real|qpu|research|external|other] [--options approve,reject,changes]
+              [--blocking] [--cost "..."] [--link path] [--thread M-...] [--spec spec.json]
+  labq.py request R-...                      show a request and its decision
+  labq.py withdraw R-... "reason"
+  labq.py pending                            open requests and open researcher messages
+
+Researcher only (from your own terminal; agents are denied these in .claude/settings.json):
+  labq.py say "text" [--kind message|proposal|code_question] [--thread M-...]
+  labq.py decide R-... approve|reject|changes|answer|ack ["text"]
 """
 import argparse
-import datetime as dt
 import json
 import os
 import sys
 
-ROOT = os.environ.get("QRL_LAB_DIR") or os.getcwd()
-LAB = os.path.join(ROOT, ".lab")
-REQ = os.path.join(LAB, "requests.jsonl")
-INBOX = os.path.join(LAB, "inbox.jsonl")
-KINDS = ("approval", "question", "proposal", "info")
-DECISIONS = ("approve", "reject", "changes")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from labdb import LabDB, LabError  # noqa: E402
+
+AUTHOR_LABEL = {"researcher": "Κώστας", "coordinator": "Συντονιστής", "codex": "Codex"}
 
 
-def now():
-    return dt.datetime.now(dt.timezone.utc).astimezone().isoformat(timespec="seconds")
-
-
-def read(path):
-    if not os.path.exists(path):
-        return []
-    out = []
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                try:
-                    out.append(json.loads(line))
-                except json.JSONDecodeError:
-                    pass
-    return out
-
-
-def append(path, obj):
-    os.makedirs(LAB, exist_ok=True)
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(obj, ensure_ascii=False) + "\n")
-
-
-def next_id(prefix, items):
-    day = dt.date.today().strftime("%Y%m%d")
-    n = sum(1 for x in items if str(x.get("id", "")).startswith(f"{prefix}-{day}-")) + 1
-    return f"{prefix}-{day}-{n:03d}"
-
-
-def cmd_ask(a):
-    if a.body_file:
+def _body(a):
+    if getattr(a, "body_file", None):
         with open(a.body_file, encoding="utf-8") as f:
-            body = f.read()
-    else:
-        body = a.body or ""
-    req = {
-        "id": next_id("R", read(REQ)),
-        "ts": now(),
-        "from": a.sender,
-        "kind": a.kind,
-        "title": a.title,
-        "body": body,
-        "options": [o.strip() for o in a.options.split(",")] if a.options else [],
-        "blocking": a.blocking,
-        "cost": a.cost,
-        "links": a.link or [],
-    }
-    append(REQ, req)
-    print(req["id"])
+            return f.read()
+    return getattr(a, "body", None) or ""
 
 
-def answered_ids():
-    return {m.get("reply_to") for m in read(INBOX) if m.get("reply_to")}
+def _print_thread(thread, full_id=None, clip=600):
+    for m in thread:
+        who = AUTHOR_LABEL.get(m["author"], m["author"])
+        st = f" [{m['status']}]" if m["status"] else ""
+        body = m["body"]
+        if m["id"] != full_id and len(body) > clip:
+            body = body[:clip] + f" … (+{len(body) - clip} chars; labq.py show {m['id']} --full)"
+        print(f"--- {m['id']} · {m['ts']} · {who} · {m['kind']}{st}")
+        print(body)
 
 
-def cmd_pending(_):
-    done = answered_ids()
-    open_reqs = [r for r in read(REQ) if r.get("id") not in done and r.get("kind") != "info"]
-    if not open_reqs:
-        print("no pending requests")
-    for r in open_reqs:
-        flag = "BLOCKING " if r.get("blocking") else ""
-        print(f'{r["id"]}  {flag}[{r.get("kind")}] {r.get("title")}')
+def cmd_take(a, db):
+    m, thread = db.take(a.id)
+    print(f"thread {m['thread_id']} ({len(thread)} messages). Reply with: "
+          f"python3 tools/labq.py post --reply-to {m['id']} --body-file <file> --status done")
+    _print_thread(thread, full_id=m["id"])
 
 
-def cmd_reply(a):
-    ids = {r.get("id") for r in read(REQ)}
-    if a.request_id not in ids:
-        sys.exit(f"unknown request id: {a.request_id}")
-    msg = {"id": next_id("I", read(INBOX)), "ts": now(), "reply_to": a.request_id,
-           "decision": a.decision, "text": a.text or ""}
-    append(INBOX, msg)
-    print(msg["id"])
+def cmd_show(a, db):
+    m = db.message(a.id)
+    if not m:
+        raise LabError(f"Unknown message {a.id}")
+    thread = db.thread(m["thread_id"])
+    _print_thread(thread, full_id=a.id, clip=10**9 if a.full else 600)
 
 
-def cmd_say(a):
-    msg = {"id": next_id("I", read(INBOX)), "ts": now(), "reply_to": None, "decision": None, "text": a.text}
-    append(INBOX, msg)
-    print(msg["id"])
+def cmd_post(a, db):
+    print(db.post(a.author, _body(a), a.reply_to, kind=a.kind, set_status=a.status))
+
+
+def cmd_status(a, db):
+    db.set_status(a.id, a.status)
+    print("ok")
+
+
+def cmd_ask(a, db):
+    spec = None
+    if a.spec:
+        with open(a.spec, encoding="utf-8") as f:
+            spec = json.load(f)
+    rid = db.ask(a.kind, a.title, _body(a), author=a.author, scope=a.scope,
+                 options=[o.strip() for o in a.options.split(",")] if a.options else None,
+                 blocking=a.blocking, cost=a.cost, links=a.link, thread_id=a.thread, spec=spec)
+    print(rid)
+
+
+def cmd_request(a, db):
+    r = db.request(a.id)
+    if not r:
+        raise LabError(f"Unknown request {a.id}")
+    for k in ("id", "ts", "kind", "scope", "state", "title", "decision_text", "decided_at", "spec_hash", "spec_path"):
+        print(f"{k}: {r[k]}")
+    print("---")
+    print(r["body"])
+
+
+def cmd_withdraw(a, db):
+    db.withdraw(a.id, reason=a.reason)
+    print("ok")
+
+
+def cmd_pending(a, db):
+    reqs = db.requests(state="open")
+    msgs = db.researcher_open()
+    if not reqs and not msgs:
+        print("nothing pending")
+    for r in reqs:
+        flag = "BLOCKING " if r["blocking"] else ""
+        print(f"request {r['id']}  {flag}[{r['kind']}/{r['scope']}] {r['title']}")
+    for m in msgs:
+        first = m["body"].strip().splitlines()[0][:100] if m["body"].strip() else ""
+        print(f"message {m['id']}  [{m['status']}] {first}")
+
+
+def cmd_say(a, db):
+    print(db.researcher_send(a.text, kind=a.kind, thread_id=a.thread))
+
+
+def cmd_decide(a, db):
+    print(db.decide(a.id, a.decision, a.text, actor="researcher"))
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
 
+    s = sub.add_parser("take"); s.add_argument("id"); s.set_defaults(func=cmd_take)
+    s = sub.add_parser("show"); s.add_argument("id"); s.add_argument("--full", action="store_true")
+    s.set_defaults(func=cmd_show)
+
+    s = sub.add_parser("post")
+    s.add_argument("--reply-to", required=True)
+    g = s.add_mutually_exclusive_group(required=True)
+    g.add_argument("--body-file"); g.add_argument("--body")
+    s.add_argument("--author", default="coordinator")
+    s.add_argument("--kind", default="reply", choices=["reply", "contribution", "status"])
+    s.add_argument("--status", choices=["in_progress", "waiting_approval", "done", "failed"])
+    s.set_defaults(func=cmd_post)
+
+    s = sub.add_parser("status"); s.add_argument("id")
+    s.add_argument("status", choices=["acknowledged", "in_progress", "waiting_approval", "done", "failed"])
+    s.set_defaults(func=cmd_status)
+
     s = sub.add_parser("ask")
-    s.add_argument("--kind", choices=KINDS, required=True)
+    s.add_argument("--kind", required=True, choices=["approval", "question", "proposal", "info"])
     s.add_argument("--title", required=True)
-    g = s.add_mutually_exclusive_group()
-    g.add_argument("--body-file")
-    g.add_argument("--body")
+    g = s.add_mutually_exclusive_group(required=True)
+    g.add_argument("--body-file"); g.add_argument("--body")
+    s.add_argument("--scope", default="other", choices=["sim", "real", "qpu", "research", "external", "other"])
     s.add_argument("--options", default="")
     s.add_argument("--blocking", action="store_true")
-    s.add_argument("--cost", default="")
+    s.add_argument("--cost", default=None)
     s.add_argument("--link", action="append")
-    s.add_argument("--from", dest="sender", default="coordinator")
+    s.add_argument("--thread", default=None)
+    s.add_argument("--spec", default=None)
+    s.add_argument("--author", default="coordinator")
     s.set_defaults(func=cmd_ask)
 
-    s = sub.add_parser("pending")
-    s.set_defaults(func=cmd_pending)
+    s = sub.add_parser("request"); s.add_argument("id"); s.set_defaults(func=cmd_request)
+    s = sub.add_parser("withdraw"); s.add_argument("id"); s.add_argument("reason", nargs="?", default="")
+    s.set_defaults(func=cmd_withdraw)
+    s = sub.add_parser("pending"); s.set_defaults(func=cmd_pending)
 
-    s = sub.add_parser("reply")
-    s.add_argument("request_id")
-    s.add_argument("decision", choices=DECISIONS)
-    s.add_argument("text", nargs="?", default="")
-    s.set_defaults(func=cmd_reply)
-
-    s = sub.add_parser("say")
-    s.add_argument("text")
+    s = sub.add_parser("say"); s.add_argument("text")
+    s.add_argument("--kind", default="message", choices=["message", "proposal", "code_question"])
+    s.add_argument("--thread", default=None)
     s.set_defaults(func=cmd_say)
 
+    s = sub.add_parser("decide"); s.add_argument("id")
+    s.add_argument("decision", choices=["approve", "reject", "changes", "answer", "ack"])
+    s.add_argument("text", nargs="?", default="")
+    s.set_defaults(func=cmd_decide)
+
     a = p.parse_args()
-    a.func(a)
+    db = LabDB()
+    try:
+        a.func(a, db)
+    except LabError as e:
+        sys.exit(f"error: {e}")
+    finally:
+        db.close()
 
 
 if __name__ == "__main__":
