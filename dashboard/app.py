@@ -64,6 +64,8 @@ REQ_SCOPE = {"sim": "προσομοίωση", "real": "πραγματικό clus
 REQ_STATE = {"open": ("🟡", "ανοιχτό"), "approved": ("✅", "εγκρίθηκε"), "rejected": ("⛔", "απορρίφθηκε"),
              "changes_requested": ("✏️", "ζητήθηκαν αλλαγές"), "answered": ("💬", "απαντήθηκε"),
              "acknowledged": ("👁️", "το είδες"), "withdrawn": ("↩️", "αποσύρθηκε")}
+MODEL_CHOICES = {None: "Αυτόματα", "haiku": "Γρήγορο · Haiku", "sonnet": "Κανονικό · Sonnet", "opus": "Βαθύ · Opus",
+                 "codex": "Codex"}
 RUN_STATUS = {"starting": ("🔵", "ξεκινά"), "running": ("🟢", "τρέχει"), "done": ("✅", "ολοκληρώθηκε"),
               "failed": ("❌", "απέτυχε"), "stopped": ("⏹️", "διακόπηκε")}
 
@@ -303,6 +305,8 @@ with tab_chat:
                         if m["author"] == "researcher" and m["status"]:
                             si, sl = MSG_STATUS.get(m["status"], ("", m["status"]))
                             extra = f" · {si} {sl}"
+                            if m.get("req_model") or m.get("req_effort") not in (None, "med"):
+                                extra += f" · 🎛️ {m.get('req_model') or 'auto'}/{m.get('req_effort') or 'med'}"
                         label = f"{name} · {m['model']}" if m.get("model") else name
                         st.caption(f"**{label}** · {fmt_ts(m['ts'])} · {KIND_LABEL.get(m['kind'], m['kind'])}"
                                    f"{extra} · `{m['id']}`")
@@ -331,6 +335,11 @@ with tab_chat:
 
     kind = st.segmented_control("Τύπος μηνύματος", ["message", "proposal", "code_question"],
                                 format_func=lambda k: KIND_LABEL[k], default="message", key="composer_kind")
+    sel_l, sel_r, _sp = st.columns([2, 2, 4])
+    req_model = sel_l.selectbox("Μοντέλο", list(MODEL_CHOICES), format_func=MODEL_CHOICES.get, key="req_model_sel",
+                                help="Ποιο μοντέλο απαντά σε αυτό το μήνυμα. Αυτόματα = αποφασίζει ο συντονιστής.")
+    req_effort = sel_r.selectbox("Ένταση", ["low", "med", "high"], index=1, key="req_effort_sel",
+                                 help="Πόση προσπάθεια/σκέψη θα καταναλώσει η απάντηση.")
     # Enter sends, Shift+Enter = newline. Not inside any fragment, so typing is never refreshed away.
     sub = st.chat_input("Γράψε εδώ… (Enter = αποστολή, Shift+Enter = νέα γραμμή)", accept_file="multiple",
                         key="composer")
@@ -346,7 +355,8 @@ with tab_chat:
                 thr = dd.thread(target)
                 reply_to = thr[-1]["id"] if thr else None
             mid = dd.researcher_send(body_with_attachments(text, saved), kind=kind or "message",
-                                     thread_id=target, reply_to=reply_to)
+                                     thread_id=target, reply_to=reply_to,
+                                     req_model=req_model or None, req_effort=req_effort)
             dd.close()
             st.session_state["pending_thread"] = target or mid
             st.session_state["new_topic"] = False

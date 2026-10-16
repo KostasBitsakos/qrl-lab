@@ -105,6 +105,21 @@ def test_model_label():
     ok("model stored via API and CLI; migration of a DB without the column is idempotent")
 
 
+def test_routing_tags():
+    db = LabDB()
+    m1 = db.researcher_send("plain routing", kind="message")
+    m2 = db.researcher_send("fast one", req_model="haiku", req_effort="low")
+    expect_error(lambda: db.researcher_send("x", req_model="gpt"), "μοντέλο")
+    expect_error(lambda: db.researcher_send("x", req_effort="max"), "ένταση")
+    assert db.message(m2)["req_model"] == "haiku" and db.message(m2)["req_effort"] == "low"
+    assert db.message(m1)["req_model"] is None
+    lines = watch_cycle(db)
+    l1 = [l for l in lines if m1 in l][0]
+    l2 = [l for l in lines if m2 in l][0]
+    assert "[model=" not in l1 and f"thread={m2}: " not in l2 and "[model=haiku effort=low]" in l2, lines
+    ok("routing tags stored on the message and included in the QRL-INBOX line")
+
+
 def test_redelivery_after_restart():
     db = LabDB()
     mid = db.researcher_send("μήνυμα πριν από restart", kind="proposal")
@@ -426,6 +441,13 @@ def test_dashboard():
     assert [m["body"] for m in thr if m["author"] == "researcher"][-1] == "δεύτερο μήνυμα AppTest2", thr
     assert thr[-1]["reply_to"] == sent[0]["id"] and thr[-1]["thread_id"] == tid, thr
     assert db.threads(1)[0]["thread_id"] == tid
+    at.selectbox(key="req_model_sel").set_value("sonnet"); at.selectbox(key="req_effort_sel").set_value("high")
+    at.chat_input[0].set_value("routed AppTestR").run()
+    rm = [m for m in db.thread(tid) if "AppTestR" in m["body"]][0]
+    assert (rm["req_model"], rm["req_effort"]) == ("sonnet", "high"), rm
+    assert any("sonnet/high" in x.value for x in at.caption), "tag not shown"
+    at.selectbox(key="req_model_sel").set_value(None); at.selectbox(key="req_effort_sel").set_value("med")
+    thr = db.thread(tid)
     n_threads = len(db.threads(100))
     # in_progress shows the live indicator
     with db.tx() as c:
@@ -513,6 +535,7 @@ if __name__ == "__main__":
     try:
         test_message_round_trip()
         test_model_label()
+        test_routing_tags()
         test_redelivery_after_restart()
         test_decisions()
         test_hook()

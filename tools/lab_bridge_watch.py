@@ -28,7 +28,10 @@ def one_line(text, n=CLIP):
 def emit_message(m):
     kind = {"message": "message", "proposal": "PROPOSAL", "code_question": "CODE QUESTION"}.get(m["kind"], m["kind"])
     redo = " (re-delivery)" if m["status"] == "delivered" else ""
-    print(f"QRL-INBOX {kind} {m['id']} thread={m['thread_id']}{redo}: \"{one_line(m['body'])}\" "
+    route = ""
+    if m.get("req_model") or m.get("req_effort") not in (None, "med"):
+        route = f" [model={m.get('req_model') or 'auto'} effort={m.get('req_effort') or 'med'}]"
+    print(f"QRL-INBOX {kind} {m['id']} thread={m['thread_id']}{redo}{route}: \"{one_line(m['body'])}\" "
           f"-> handle with: python3 tools/labq.py take {m['id']}", flush=True)
 
 

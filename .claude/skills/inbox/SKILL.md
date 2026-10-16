@@ -6,6 +6,13 @@ description: Handle a researcher message from the QRL-Lab dashboard (a QRL-INBOX
 # Handle a dashboard message
 
 1. **Take it**: `python3 tools/labq.py take <M-id>`. This prints the thread and marks the message acknowledged.
+   **Routing**: the QRL-INBOX line may carry `[model=<haiku|sonnet|opus|codex|auto> effort=<low|med|high>]`
+   (also stored as `req_model`/`req_effort` on the message). If the model is not `auto`, do not answer yourself:
+   delegate the reply to a subagent of that model via the Agent tool `model` param (`haiku`, `sonnet`, `opus`);
+   for `codex` use `codex:codex-rescue` with `--effort <low|medium|high>` (med = medium). Give the subagent the full
+   thread (from `labq.py take`), then post its answer (Greek, short) with `--model` set to the model that wrote it
+   (e.g. "Haiku 4.5", "Sonnet 5.5", "Opus 5.5", "gpt-6-sol"). `auto` (or no tag) = you decide as usual.
+   Effort is a hint for depth: low = short answer, high = careful, verified answer.
 2. **Classify** and act:
    - *Question about the project or results* → answer from PLAN.md, run data or files, with pointers.
    - *Question about the existing code* (`CODE QUESTION`) → delegate the search to `Explore` (Haiku) with a precise

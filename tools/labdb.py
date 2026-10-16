@@ -20,6 +20,8 @@ from contextlib import contextmanager
 SCHEMA_VERSION = 2
 
 MESSAGE_STATUSES = ("new", "delivered", "acknowledged", "in_progress", "waiting_approval", "done", "failed")
+REQ_MODELS = ("haiku", "sonnet", "opus", "codex")
+REQ_EFFORTS = ("low", "med", "high")
 MESSAGE_KINDS = ("message", "proposal", "code_question", "reply", "contribution", "status")
 REQUEST_KINDS = ("approval", "question", "proposal", "info")
 REQUEST_SCOPES = ("sim", "real", "qpu", "research", "external", "other")
@@ -143,7 +145,7 @@ class LabDB:
 
     # column -> type, per table; added idempotently to databases created by older versions
     MIGRATIONS = {
-        "messages": {"model": "TEXT"},
+        "messages": {"model": "TEXT", "req_model": "TEXT", "req_effort": "TEXT"},
         "requests": {"proposals": "TEXT", "recommended": "INTEGER"},
     }
 
@@ -191,20 +193,27 @@ class LabDB:
         return dict(r) if r is not None else None
 
     # ---------- messages ----------
-    def researcher_send(self, body, kind="message", thread_id=None, title=None, reply_to=None):
+    def researcher_send(self, body, kind="message", thread_id=None, title=None, reply_to=None,
+                        req_model=None, req_effort=None):
         body = (body or "").strip()
         if not body:
             raise LabError("Το μήνυμα είναι κενό.")
         if kind not in ("message", "proposal", "code_question"):
             raise LabError(f"Άγνωστος τύπος μηνύματος: {kind}")
+        req_model, req_effort = req_model or None, req_effort or None
+        if req_model is not None and req_model not in REQ_MODELS:
+            raise LabError(f"Άγνωστο μοντέλο: {req_model}")
+        if req_effort is not None and req_effort not in REQ_EFFORTS:
+            raise LabError(f"Άγνωστη ένταση: {req_effort}")
         with self.tx() as c:
             if thread_id and not c.execute("SELECT 1 FROM messages WHERE thread_id=? LIMIT 1", (thread_id,)).fetchone():
                 raise LabError(f"Δεν υπάρχει θέμα {thread_id}.")
             mid = self._new_id(c, "messages", "id", "M")
             t = now()
-            c.execute("INSERT INTO messages(id, ts, thread_id, reply_to, author, kind, title, body, status, updated_at)"
-                      " VALUES (?,?,?,?,?,?,?,?,?,?)",
-                      (mid, t, thread_id or mid, reply_to, "researcher", kind, title, body, "new", t))
+            c.execute("INSERT INTO messages(id, ts, thread_id, reply_to, author, kind, title, body, status, updated_at,"
+                      " req_model, req_effort) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                      (mid, t, thread_id or mid, reply_to, "researcher", kind, title, body, "new", t,
+                       req_model, req_effort))
             self._audit(c, "researcher", "send", mid, kind)
         return mid
 
