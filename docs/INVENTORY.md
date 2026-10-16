@@ -85,3 +85,17 @@ file was modified. Mtimes are disk times. Paper claims are numbered as in `docs/
 
 - The DEXA paper was submitted in March 2025 (researcher, 2026-10-16). That fits `bf98cac` (2025-02-28) and the
   February agent in `experiments/lstmtransfer/`, not `vector_redis/` (April). The remaining questions are asked in the dashboard chat.
+
+## 5. Paper figures traced to files (2026-10-16, coordinator; figures extracted from the PDF with pypdf)
+
+- **Fig.6 right (DInos)** shows the same plot as
+  `~/simulations/redisk8s/timeseries/Pytorch/lstm_transfer/final_metrics_lstm/model_5/evaluation_metrics.jpg`
+  (2025-02-03 13:33). This was a visual comparison. The bytes differ because the PDF re-encodes images. VMs stay at 1–2 most of the time, with a few points at 3–5.
+- **Fig.5** comes from `~/simulations/redisk8s/timeseries/Pytorch/all_metrics_plotted_final.py` (2025-02-28).
+  - The values are hard-coded and marked `# Approx`: DERP `[200000, 180000, 240000, 210000, 220000]`, DInos `[3.55e6, 3.65e6, 3.80e6, 3.30e6, 3.05e6]`.
+  - The measured sums of 5 episodes:
+    - DInos (`lstm_transfer/final_metrics_lstm`): 3.28 / 3.62 / 3.62 / 2.82 / 3.23 ×10^6
+    - DERP (`dense/final_metrics_dense`): 286,672 / 259,386 / 218,389 / 197,408 / 152,188
+- **C5 ratio (17.3×).** `dense/doubledeepfinal.py:27` creates the environment once and does not reset it between the 5 evaluation episodes. Episodes 2–5 of DERP therefore score about 0, and the DERP "total" is effectively one episode. DInos (`lstm_transfer.py`) resets the environment every episode.
+  - Per episode: DInos ≈723k (model_2/5) vs DERP 152k–287k, a ratio of about 2.5–4.8×.
+- **Reproduction (R-20261016-012, `--legacy`, 3 seeds).** It reproduces the stored DInos per-episode rewards within about 1% for models 2/5/10/20. Model_1 varies strongly across seeds. Mean VMs are 1.09 for models 2/5.
