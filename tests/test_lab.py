@@ -273,6 +273,58 @@ def test_uploads():
     ok("uploads: traversal, collisions, size cap, body block")
 
 
+def test_k8s_view():
+    import k8s_view as kv
+    from unittest import mock
+    pod_crash = {"kind": "Pod", "metadata": {"name": "w1", "namespace": "dinos", "creationTimestamp": "2026-10-16T00:00:00Z"},
+                 "spec": {"nodeName": "n1", "containers": [{"name": "c"}]},
+                 "status": {"phase": "Running", "conditions": [{"type": "Ready", "status": "False"}],
+                            "containerStatuses": [{"name": "c", "ready": False, "restartCount": 7,
+                                                   "state": {"waiting": {"reason": "CrashLoopBackOff"}}}]}}
+    pod_pend = {"kind": "Pod", "metadata": {"name": "p2", "namespace": "dinos"}, "spec": {"containers": [{"name": "c"}]},
+                "status": {"phase": "Pending", "conditions": [{"type": "PodScheduled", "status": "False",
+                                                               "reason": "Unschedulable", "message": "0/1 nodes"}]}}
+    pod_ok = {"kind": "Pod", "metadata": {"name": "r", "namespace": "kube-system"}, "spec": {"nodeName": "n1"},
+              "status": {"phase": "Running", "conditions": [{"type": "Ready", "status": "True"}],
+                         "containerStatuses": [{"name": "c", "ready": True, "restartCount": 0}]}}
+    dep = {"kind": "Deployment", "metadata": {"name": "d", "namespace": "dinos"}, "spec": {"replicas": 2},
+           "status": {"readyReplicas": 1, "availableReplicas": 1, "updatedReplicas": 2}}
+    node = {"kind": "Node", "metadata": {"name": "n1"}, "status": {"capacity": {"cpu": "4", "memory": "8Gi"},
+            "conditions": [{"type": "Ready", "status": "False", "reason": "KubeletNotReady"}]}}
+    data = {"items": [pod_crash, pod_pend, pod_ok, dep, node]}
+    v = kv.parse_snapshot(data)
+    assert v["pods"][0]["health"] == "failing" and "c: CrashLoopBackOff" in v["pods"][0]["reasons"]
+    assert v["pods"][0]["restarts"] == 7 and v["pods"][0]["ready"] == "0/1"
+    assert v["pods"][1]["reasons"][0].startswith("Pending: Unschedulable")
+    assert v["pods"][2]["health"] == "ok"
+    assert v["deployments"][0]["ready"] == "1/2" and v["deployments"][0]["health"] == "degraded"
+    assert v["nodes"][0]["health"] == "failing" and "NotReady" in v["nodes"][0]["reasons"][0]
+    k = kv.kpis(v)
+    assert (k["nodes_ready"], k["pods_running"], k["pods_pending"], k["deploys_ok"]) == (0, 2, 1, 0), k
+    assert len(kv.failing_items(v)) == 4 and kv.pods_by_phase(v)["dinos"] == {"Running": 1, "Pending": 1}
+    assert [p["name"] for p in kv.parse_snapshot(data, "kube-system")["pods"]] == ["r"]
+    # allowlist
+    for bad in (["apply", "-f", "x"], ["delete", "pod", "x"], ["exec", "x"], ["config", "use-context", "y"], []):
+        try:
+            kv.run_kubectl(bad)
+            raise AssertionError(f"not refused: {bad}")
+        except kv.K8sRefused:
+            pass
+    kv.check_allowed(["get", "pods"]); kv.check_allowed(["version"]); kv.check_allowed(["config", "current-context"])
+    # cluster down (mock subprocess)
+    refused = "E: dial tcp 127.0.0.1:6443: connect: connection refused\nmore"
+    def fake(cmd, **kw):
+        if "current-context" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, "kind-x\n", "")
+        return subprocess.CompletedProcess(cmd, 1, "", refused)
+    kv.clear_cache()
+    with mock.patch.object(subprocess, "run", fake):
+        s = kv.fetch()
+    assert not s["up"] and s["context"] == "kind-x" and "connection refused" in s["error"] and "more" not in s["error"]
+    kv.clear_cache()
+    ok("k8s_view: parsing, allowlist, cluster-down")
+
+
 def test_dashboard():
     from streamlit.testing.v1 import AppTest
     db = LabDB()
@@ -339,6 +391,10 @@ def test_dashboard():
     assert any("Codex (OpenAI) · gpt-6-sol**" in v for v in caps), caps
     assert any(v.startswith("**Συντονιστής (Claude Opus)** ·") for v in caps), caps  # no model: author only
     ok("dashboard: model label rendered")
+    at.run()
+    assert not at.exception, at.exception
+    assert len(at.tabs) >= 9 and any("Kubernetes" in tb.label for tb in at.tabs), [tb.label for tb in at.tabs]
+    ok("dashboard: Kubernetes tab renders without exception (cluster down or up)")
 
 
 if __name__ == "__main__":
@@ -351,6 +407,7 @@ if __name__ == "__main__":
         test_hook()
         test_launcher()
         test_uploads()
+        test_k8s_view()
         try:
             import streamlit  # noqa: F401
             test_dashboard()

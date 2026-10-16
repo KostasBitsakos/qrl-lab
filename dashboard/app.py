@@ -25,6 +25,7 @@ ROOT = os.environ.get("QRL_LAB_DIR") or os.path.abspath(os.path.join(os.path.dir
 os.environ["QRL_LAB_DIR"] = ROOT
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 from labdb import DECISIONS, LabDB, LabError  # noqa: E402
+import k8s_view  # noqa: E402
 from uploads import UploadError, body_with_attachments, save_uploads  # noqa: E402
 
 LAB = os.path.join(ROOT, ".lab")
@@ -226,9 +227,9 @@ with st.sidebar:
 d0 = db()
 n_open = len(d0.requests(state="open"))
 d0.close()
-tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_paper, tab_audit = st.tabs([
+tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_paper, tab_audit = st.tabs([
     "💬 Συνομιλία", f"✅ Αποφάσεις ({n_open})", "🤖 Πράκτορες", "📈 Πειράματα", "⚖️ Council",
-    "🖥️ Πόροι", "📄 Paper & συνέδρια", "🧾 Ιστορικό"])
+    "🖥️ Πόροι", "☸️ Kubernetes", "📄 Paper & συνέδρια", "🧾 Ιστορικό"])
 
 # ================================================================ conversation
 with tab_chat:
@@ -622,20 +623,68 @@ with tab_res:
         else:
             st.caption("GPU: δεν υπάρχει NVIDIA GPU στο VM.")
     resources()
-    st.markdown("##### Kubernetes (μόνο ανάγνωση)")
-    if st.button("Έλεγχος cluster", key="k8s_check"):
-        try:
-            ctx = subprocess.run(["kubectl", "config", "current-context"], capture_output=True, text=True,
-                                 timeout=5).stdout.strip()
-            out = subprocess.run(["kubectl", "get", "pods", "-A", "-o", "wide"], capture_output=True, text=True,
-                                 timeout=8)
-            st.caption(f"context: `{ctx or '—'}`")
-            if out.returncode != 0:
-                st.error("Το Kubernetes API δεν απαντά:\n\n" + (out.stderr.strip().splitlines() or ["—"])[-1])
-            else:
-                st.code(out.stdout[-6000:] or "(κανένα pod)")
-        except (OSError, subprocess.SubprocessError) as e:
-            st.error(f"kubectl: {e}")
+    st.caption("Kubernetes: δες την καρτέλα ☸️ Kubernetes.")
+
+# ================================================================ kubernetes (read-only)
+BADGE = {"ok": "🟢", "degraded": "🟠", "failing": "🔴"}
+with tab_k8s:
+    kc1, kc2, kc3 = st.columns([2, 1, 1])
+    snap0 = k8s_view.fetch()
+    nss = k8s_view.namespaces(snap0["data"]) if snap0["up"] else []
+    ns_sel = kc1.selectbox("Namespace", ["(όλα)"] + nss, key="k8s_ns")
+    auto = kc3.toggle("Αυτόματη ανανέωση (30 δ.)", value=False, key="k8s_auto")
+    if kc2.button("Ανανέωση", key="k8s_refresh"):
+        k8s_view.clear_cache()
+
+    @st.fragment(run_every=30 if auto else None)
+    def k8s_panel(ns):
+        snap = k8s_view.fetch()
+        st.caption(f"context: `{snap['context'] or '—'}` · read-only (`kubectl get`)")
+        if not snap["up"]:
+            st.error("Το cluster δεν είναι διαθέσιμο (API server δεν απαντά)\n\n`" + (snap["error"] or "—") + "`")
+            return
+        v = k8s_view.parse_snapshot(snap["data"], None if ns == "(όλα)" else ns)
+        k = k8s_view.kpis(v)
+        c = st.columns(4)
+        c[0].metric("Nodes ready", f"{k['nodes_ready']}/{k['nodes_total']}")
+        c[1].metric("Pods Running", k["pods_running"])
+        c[2].metric("Pods Pending / Failed", f"{k['pods_pending']} / {k['pods_failed']}")
+        c[3].metric("Deployments υγιή", f"{k['deploys_ok']}/{k['deploys_total']}")
+        bad = k8s_view.failing_items(v)
+        if bad:
+            st.markdown("##### Προβλήματα")
+            st.dataframe(pd.DataFrame([{"": BADGE[h], "Είδος": kd, "Όνομα": nm, "Αιτία": r} for kd, nm, h, r in bad]),
+                         hide_index=True, use_container_width=True)
+        else:
+            st.success("Όλα υγιή.")
+        ph = k8s_view.pods_by_phase(v)
+        if ph:
+            fig = go.Figure()
+            colors = {"Running": "#2e9e5b", "Pending": "#e0a100", "Failed": "#d64545", "Succeeded": "#5b8bd6"}
+            for phase in ("Running", "Pending", "Failed", "Succeeded", "Unknown"):
+                fig.add_bar(name=phase, x=list(ph), y=[ph[n].get(phase, 0) for n in ph],
+                            marker_color=colors.get(phase, "#888"))
+            fig.update_layout(barmode="stack", height=240, margin=dict(l=0, r=0, t=10, b=0), yaxis_title="pods")
+            st.plotly_chart(fig, use_container_width=True)
+        st.markdown("##### Pods")
+        st.dataframe(pd.DataFrame([{"": BADGE[p["health"]], "Όνομα": p["name"], "Namespace": p["namespace"],
+                                    "Phase": p["phase"], "Ready": p["ready"], "Restarts": p["restarts"],
+                                    "Age": p["age"], "Node": p["node"]} for p in v["pods"]]),
+                     hide_index=True, use_container_width=True)
+        st.markdown("##### Deployments")
+        st.dataframe(pd.DataFrame([{"": BADGE[d["health"]], "Όνομα": d["name"], "Namespace": d["namespace"],
+                                    "Ready": d["ready"], "Up-to-date": d["up_to_date"], "Available": d["available"]}
+                                   for d in v["deployments"]]), hide_index=True, use_container_width=True)
+        st.markdown("##### Services")
+        st.dataframe(pd.DataFrame(v["services"]), hide_index=True, use_container_width=True)
+        st.markdown("##### Nodes")
+        st.dataframe(pd.DataFrame([{"": BADGE[n["health"]], "Όνομα": n["name"], "Ready": "Ναι" if n["ready"] else "ΟΧΙ",
+                                    "CPU": n["cpu"], "Μνήμη": n["memory"]} for n in v["nodes"]]),
+                     hide_index=True, use_container_width=True)
+        if v["hpas"]:
+            st.markdown("##### HPAs")
+            st.dataframe(pd.DataFrame(v["hpas"]), hide_index=True, use_container_width=True)
+    k8s_panel(ns_sel)
 
 # ================================================================ paper & venues
 with tab_paper:

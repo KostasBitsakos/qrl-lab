@@ -309,7 +309,8 @@ parts, so typing is never lost. Greek UI.
 4. **📈 Πειράματα** — runs with status, progress bar, duration, approval id, code commit; metric curves from
    `metrics.jsonl` (up to 8 runs); stop request with confirmation.
 5. **⚖️ Council** — brief, decision card, Claude's and Codex's proposals side by side.
-6. **🖥️ Πόροι** — CPU, RAM, disk, load, GPU; read-only Kubernetes check on demand.
+6. **🖥️ Πόροι** — CPU, RAM, disk, load, GPU.
+   **☸️ Kubernetes** — read-only (`tools/k8s_view.py`, verbs `get`/`version`/`config current-context` only, 5 s timeout, 10 s cache): KPI tiles, health badges, failing items with reasons, pods/deployments/services/nodes/HPAs; clear Greek message when the API server is down.
 7. **📄 Paper & συνέδρια** — deadlines with countdown (`docs/deadlines.json`, verified sources only), `docs/VENUES.md`,
    `paper/claims.md`, section status.
 8. **🧾 Ιστορικό** — audit log of every send, take, decision, launch and stop.
