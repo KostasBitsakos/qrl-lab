@@ -327,6 +327,12 @@ parts, so typing is never lost. Greek UI.
 5. **⚖️ Council** — brief, decision card, Claude's and Codex's proposals side by side.
 6. **🖥️ Πόροι** — CPU, RAM, disk, load, GPU.
    **☸️ Kubernetes** — read-only (`tools/k8s_view.py`, verbs `get`/`version`/`config current-context` only, 5 s timeout, 10 s cache): KPI tiles, health badges, failing items with reasons, pods/deployments/services/nodes/HPAs; clear Greek message when the API server is down.
+   **📡 Prometheus** — live, read-only (`tools/prom_view.py`: GET only on `query`, `query_range`, `label/__name__/values`;
+   base URL `QRL_PROM_URL`, default `http://10.0.1.28:30000`). Curated PromQL catalogue by category (Node via cAdvisor
+   root cgroup because the cluster has no node-exporter, Redis pods in `default`/`qrl-calib`, Kubernetes, Prometheus),
+   9 default charts, per-category multiselects (entries without data are marked ⚠), an «Advanced» search over all
+   metric names (counters shown as `rate(…[5m])`), range 15 m/1 h/6 h/24 h, Plotly, isolated fragment refreshing every 15 s
+   with the selectors outside it.
 7. **🎓 Συνέδρια** (split from the former «Paper & συνέδρια» tab) — deadlines with countdown (`docs/deadlines.json`,
    verified sources only), `docs/VENUES.md`, `paper/claims.md`.
    **📝 Paper** — the «Paper — συγγραφή» chat with writer/reviewer selection, plus the manuscript tools (`tools/paper_build.py`, outside auto-refresh fragments): venue selector

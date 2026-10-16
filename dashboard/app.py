@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 from labdb import DECISIONS, PAPER_REVIEWERS, PAPER_THREAD_TITLE, PAPER_WRITERS, LabDB, LabError, map_choice  # noqa: E402
 import file_view  # noqa: E402
 import k8s_view  # noqa: E402
+import prom_view  # noqa: E402
 import web_terminal  # noqa: E402
 import summarize_runs  # noqa: E402
 import paper_plots  # noqa: E402
@@ -352,7 +353,7 @@ FILES_TAB = "📁 Αρχεία"
 _open_files = "path" in st.query_params and not st.session_state.get("fb_tab_done")
 st.session_state["fb_tab_done"] = True
 TAB_NAMES = ["💬 Συνομιλία", f"✅ Αποφάσεις ({n_open})", "🤖 Πράκτορες", "📈 Πειράματα", "⚖️ Council",
-             "🖥️ Πόροι", "☸️ Kubernetes", FILES_TAB, "📝 Paper", "🎓 Συνέδρια", "🧾 Ιστορικό", "⌨️ Terminal"]
+             "🖥️ Πόροι", "☸️ Kubernetes", "📡 Prometheus", FILES_TAB, "📝 Paper", "🎓 Συνέδρια", "🧾 Ιστορικό", "⌨️ Terminal"]
 _term_url = web_terminal.iframe_url() if web_terminal.running() else ""
 _side = bool(_term_url) and st.sidebar.toggle("Terminal στα δεξιά", key="term_side")
 if _side:  # tabs in the left column, the terminal in a right-hand column
@@ -360,10 +361,10 @@ if _side:  # tabs in the left column, the terminal in a right-hand column
     with _right:
         st.iframe(_term_url, height=700)
     with _left:
-        (tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_files, tab_paper, tab_venues,
+        (tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_prom, tab_files, tab_paper, tab_venues,
          tab_audit, tab_term) = st.tabs(TAB_NAMES, default=FILES_TAB if _open_files else None)
 else:
-    (tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_files, tab_paper, tab_venues,
+    (tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_prom, tab_files, tab_paper, tab_venues,
      tab_audit, tab_term) = st.tabs(TAB_NAMES, default=FILES_TAB if _open_files else None)
 
 # ================================================================ conversation
@@ -1014,6 +1015,81 @@ with tab_k8s:
             st.markdown("##### HPAs")
             st.dataframe(pd.DataFrame(v["hpas"]), hide_index=True, use_container_width=True)
     k8s_panel(ns_sel)
+
+# ================================================================ prometheus (read-only, live)
+@st.cache_data(ttl=300, show_spinner=False)
+def _prom_avail():
+    return prom_view.availability()
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _prom_names():
+    return prom_view.metric_names()
+
+
+with tab_prom:
+    st.caption(f"Prometheus `{prom_view.BASE_URL}` · μόνο GET (`query`, `query_range`, `label/__name__/values`). "
+               "Δεν υπάρχει node-exporter: τα «Node» βγαίνουν από το cAdvisor (root cgroup).")
+    try:
+        _avail = _prom_avail()
+    except Exception:  # noqa: BLE001
+        _avail = {}
+    _defaults = [k for k, v in prom_view.CATALOGUE.items() if v["default"]]
+
+    def _plabel(k):
+        v = prom_view.CATALOGUE[k]
+        return v["title"] + ("" if _avail.get(k, True) else "  ⚠ χωρίς δεδομένα")
+
+    pr1, pr2 = st.columns([1, 3])
+    p_range = pr1.radio("Εύρος", list(prom_view.RANGES), index=1, horizontal=True, key="prom_range")
+    p_auto = pr1.toggle("Αυτόματη ανανέωση (15 δ.)", value=True, key="prom_auto")
+    p_sel = []
+    with pr2:
+        for cat in prom_view.CATEGORIES:
+            keys = [k for k, v in prom_view.CATALOGUE.items() if v["category"] == cat]
+            p_sel += st.multiselect(cat, keys, default=[k for k in keys if k in _defaults], format_func=_plabel,
+                                    key=f"prom_cat_{cat}")
+    p_names = []
+    try:
+        p_names = _prom_names()
+    except prom_view.PromError as e:
+        st.warning(f"Δεν φορτώθηκε η λίστα μετρικών: {e}")
+    pa1, pa2 = st.columns([2, 1])
+    p_adv = pa1.multiselect("Advanced — οποιαδήποτε μετρική (αναζήτηση)", p_names, key="prom_adv",
+                            help="Counters (…_total/_count/_sum/_bucket) εμφανίζονται ως rate(…[5m]).")
+    p_custom = {n: prom_view.default_expr_for_metric(n) for n in p_adv}
+
+    @st.fragment(run_every=15 if p_auto else None)
+    def prom_panel(sel, custom, rng):
+        minutes = prom_view.RANGES[rng]
+        items = [(prom_view.CATALOGUE[k]["title"], prom_view.CATALOGUE[k]["expr"], prom_view.CATALOGUE[k]["unit"])
+                 for k in sel] + [(n, e, "") for n, e in custom.items()]
+        if not items:
+            st.info("Διάλεξε τουλάχιστον μία μετρική.")
+            return
+        cols = st.columns(2)
+        for i, (title, expr, unit) in enumerate(items):
+            with cols[i % 2]:
+                try:
+                    series = prom_view.query_range(expr, minutes)
+                except prom_view.PromError as e:
+                    st.error(f"{title}: {e}")
+                    continue
+                fig = go.Figure()
+                for lbl, pts in series[:30]:
+                    fig.add_scatter(x=[dt.datetime.fromtimestamp(t) for t, _ in pts], y=[v for _, v in pts],
+                                    mode="lines", name=lbl)
+                fig.update_layout(title=dict(text=title, font=dict(size=13)), height=260,
+                                  margin=dict(l=0, r=0, t=36, b=0), yaxis_title=unit or None,
+                                  showlegend=len(series) > 1, legend=dict(font=dict(size=9)))
+                if not series:
+                    st.warning(f"{title}: καμία τιμή στο εύρος.")
+                else:
+                    st.plotly_chart(fig, use_container_width=True)
+                with st.expander("PromQL", expanded=False):
+                    st.code(expr, language="promql")
+        st.caption(f"Ανανεώθηκε {dt.datetime.now().strftime('%H:%M:%S')}")
+    prom_panel(p_sel, p_custom, p_range)
 
 # ================================================================ paper & venues
 with tab_paper:

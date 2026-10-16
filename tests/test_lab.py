@@ -19,6 +19,7 @@ TMP = tempfile.mkdtemp(prefix="qrl-test-")
 for sub in ("tools", "dashboard", "docs", ".streamlit", "paper"):
     shutil.copytree(os.path.join(KIT, sub), os.path.join(TMP, sub), ignore=shutil.ignore_patterns("build"))
 os.environ["QRL_LAB_DIR"] = TMP
+os.environ["QRL_PROM_URL"] = "http://127.0.0.1:9"  # tests never hit the live Prometheus; the tab shows its error path
 os.chdir(TMP)
 sys.path.insert(0, os.path.join(TMP, "tools"))
 
@@ -633,6 +634,81 @@ def test_paper_tab():
     ok("paper tab: renders; chat creates the thread and stores writer/reviewer selections")
 
 
+def test_prom_view():
+    import prom_view as pv
+    import urllib.request
+    from unittest import mock
+    # allowlist
+    for bad in ("/api/v1/admin/tsdb/delete_series", "/api/v1/series", "/-/reload", "/api/v1/query/../x"):
+        try:
+            pv.check_path(bad)
+            raise AssertionError(bad)
+        except pv.PromRefused:
+            pass
+    # query building
+    p = pv.build_range_params("up", 60, now=10000)
+    assert p == {"query": "up", "start": 10000 - 3600, "end": 10000, "step": 15}, p
+    assert pv.build_range_params("up", 1440, now=10000)["step"] == 360
+    assert pv.default_expr_for_metric("foo_total") == "rate(foo_total[5m])"
+    assert pv.default_expr_for_metric("foo_bytes") == "foo_bytes"
+    assert pv.default_expr_for_metric("foo_bytes", is_counter=True) == "rate(foo_bytes[5m])"
+    ds = [v for v in pv.CATALOGUE.values() if v["default"]]
+    assert 5 <= len(ds) <= 10, len(ds)
+    assert {v["category"] for v in ds} >= {"Node", "Redis pods", "Kubernetes", "Prometheus"}
+    # parsing
+    mat = {"status": "success", "data": {"resultType": "matrix", "result": [
+        {"metric": {"namespace": "default", "pod": "redis-0"}, "values": [[1, "0.5"], [2, "NaN"], [3, "+Inf"], [4, "1.5"]]},
+        {"metric": {"phase": "Running"}, "values": [[1, "3"]]}, {"metric": {"pod": "x"}, "values": []}]}}
+    ser = pv.parse_matrix(mat)
+    assert ser == [("default/redis-0", [(1.0, 0.5), (4.0, 1.5)]), ("Running", [(1.0, 3.0)])], ser
+    assert pv.parse_vector({"status": "success", "data": {"result": [{"metric": {}, "value": [1, "9"]}]}}) == [("series", 9.0)]
+    try:
+        pv.parse_matrix({"status": "error", "error": "bad query"})
+        raise AssertionError("no error")
+    except pv.PromError:
+        pass
+    assert pv.parse_names({"status": "success", "data": ["b", "a"]}) == ["a", "b"]
+
+    # HTTP through a mocked urlopen: GET only, correct URL
+    class R:
+        def __init__(self, body): self.body = body
+        def read(self): return json.dumps(self.body).encode()
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+    seen = []
+    def fake(req, timeout=None):
+        seen.append((req.get_method(), req.full_url))
+        return R(mat)
+    with mock.patch.object(urllib.request, "urlopen", fake):
+        out = pv.query_range("up", 15, base="http://h:1", now=5000)
+        assert out[0][0] == "default/redis-0"
+    vec = {"status": "success", "data": {"result": [{"metric": {}, "value": [1, "1"]}]}}
+    with mock.patch.object(urllib.request, "urlopen", lambda req, timeout=None: R(vec)):
+        assert pv.has_data("up", base="http://h:1")
+    with mock.patch.object(urllib.request, "urlopen", lambda req, timeout=None: R({"status": "success", "data": {"result": []}})):
+        assert pv.has_data("up", base="http://h:1") is False
+    assert seen[0][0] == "GET" and seen[0][1].startswith("http://h:1/api/v1/query_range?query=up&start=4100&end=5000&step=15"), seen
+    def boom(req, timeout=None): raise OSError("down")
+    with mock.patch.object(urllib.request, "urlopen", boom):
+        assert pv.has_data("up", base="http://h:1") is False
+        try:
+            pv.metric_names(base="http://h:1")
+            raise AssertionError("no error")
+        except pv.PromError:
+            pass
+    ok("prom_view: allowlist, query building, parsing, mocked GET")
+
+
+def test_prom_tab():
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_file(os.path.join(TMP, "dashboard", "app.py"), default_timeout=60).run()
+    assert not at.exception, at.exception
+    assert "📡 Prometheus" in [t.label for t in at.tabs]
+    assert any(r.label == "Εύρος" for r in at.radio)
+    assert any(m.label == "Redis pods" for m in at.multiselect)
+    ok("dashboard: Prometheus tab renders (server unreachable in tests)")
+
+
 def test_dashboard():
     from streamlit.testing.v1 import AppTest
     db = LabDB()
@@ -979,6 +1055,7 @@ if __name__ == "__main__":
         test_deputy()
         test_voice()
         test_k8s_view()
+        test_prom_view()
         test_file_view()
         test_web_terminal()
         test_paper_plots()
@@ -988,6 +1065,7 @@ if __name__ == "__main__":
             test_dashboard()
             test_agents_tab_roles()
             test_paper_tab()
+            test_prom_tab()
         except ImportError:
             print("  --  dashboard test skipped (streamlit not installed in this interpreter)")
         print(f"ALL PASSED ({len(PASSED)})")
