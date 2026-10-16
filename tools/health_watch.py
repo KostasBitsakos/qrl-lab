@@ -68,8 +68,14 @@ def sample():
         return "", False, None
     target = f"{SESSION}:{WINDOW}"
     _, text = _run(["tmux", "capture-pane", "-p", "-t", target])
-    _, cmd = _run(["tmux", "display-message", "-p", "-t", target, "#{pane_current_command}"])
-    return text, True, cmd.strip() or None
+    # The window command is `bash -c "claude ...; exec bash"`, so tmux always reports a shell. Claude is running
+    # iff that shell has a child process; after claude exits the shell is replaced by `exec bash` (no children).
+    _, info = _run(["tmux", "display-message", "-p", "-t", target, "#{pane_pid} #{pane_current_command}"])
+    parts = info.split()
+    if len(parts) == 2 and parts[0].isdigit():
+        rc, _ = _run(["pgrep", "-P", parts[0]])
+        return text, True, (None if rc == 0 else parts[1])
+    return text, True, None
 
 
 def _atomic_write(path, obj):
