@@ -293,11 +293,14 @@ An approval covers exactly what it lists. It is never a blanket permission.
 **v1 (implemented, `dashboard/app.py`, tested by `tests/test_lab.py`).** Streamlit + Plotly on `127.0.0.1:8501`,
 state in `.lab/lab.db`; auto-refresh every 3–30 s (no LLM tokens). Text inputs are never inside auto-refreshing
 parts, so typing is never lost. Greek UI.
-1. **💬 Συνομιλία** — threads with the coordinator; each message shows its author (Εσύ / Συντονιστής / Codex /
-   subagent) and the status of your messages (νέο → παραδόθηκε → το ανέλαβε → σε εξέλιξη / περιμένει έγκριση →
-   ολοκληρώθηκε / απέτυχε). Types: μήνυμα, πρόταση ιδέας, ερώτηση για τον κώδικα. Warns when a delivered message
-   is not taken within 3 minutes. Files can be attached to any message (max 50 MB each); they are saved
-   under `docs/uploads/<date>/` (git-ignored, never overwritten) and listed in the message body as `Συνημμένα:`.
+1. **💬 Συνομιλία** — one ongoing chat, like a chat app: it opens on the most recently active thread («Κύρια συζήτηση»;
+   created by the first message if none exists), messages oldest to newest with the newest at the bottom, and a
+   `st.chat_input` at the bottom (Enter sends, Shift+Enter = new line; files are attached through the same input and
+   saved under `docs/uploads/<date>/`, max 50 MB each, listed in the body as `Συνημμένα:`). New messages reply to the
+   latest message of the current thread; a new thread only via «➕ Νέο θέμα»; the topic list is a collapsible
+   expander. While your latest message is acknowledged/in_progress an isolated auto-refreshing fragment shows
+   «⏳ ο συντονιστής δουλεύει…» plus the active agents; the input is never inside a fragment. Types: μήνυμα, πρόταση
+   ιδέας, ερώτηση για τον κώδικα. Warns when a delivered message is not taken within 3 minutes.
 2. **✅ Αποφάσεις** — open requests (blocking first) with body, attached files, the frozen run spec and its hash;
    Approve / Reject / Request changes (comment required for changes), Answer for questions; history.
 3. **🤖 Πράκτορες** — who is working now (active subagents), timeline of actions per agent (fixed colour per agent,

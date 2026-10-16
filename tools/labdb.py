@@ -172,7 +172,7 @@ class LabDB:
         return dict(r) if r is not None else None
 
     # ---------- messages ----------
-    def researcher_send(self, body, kind="message", thread_id=None, title=None):
+    def researcher_send(self, body, kind="message", thread_id=None, title=None, reply_to=None):
         body = (body or "").strip()
         if not body:
             raise LabError("Το μήνυμα είναι κενό.")
@@ -185,7 +185,7 @@ class LabDB:
             t = now()
             c.execute("INSERT INTO messages(id, ts, thread_id, reply_to, author, kind, title, body, status, updated_at)"
                       " VALUES (?,?,?,?,?,?,?,?,?,?)",
-                      (mid, t, thread_id or mid, None, "researcher", kind, title, body, "new", t))
+                      (mid, t, thread_id or mid, reply_to, "researcher", kind, title, body, "new", t))
             self._audit(c, "researcher", "send", mid, kind)
         return mid
 
@@ -246,7 +246,7 @@ class LabDB:
             " (SELECT body FROM messages m2 WHERE m2.id = m.thread_id) AS first_body,"
             " (SELECT status FROM messages m2 WHERE m2.id = m.thread_id) AS root_status,"
             " (SELECT kind FROM messages m2 WHERE m2.id = m.thread_id) AS root_kind"
-            " FROM messages m GROUP BY thread_id ORDER BY last DESC LIMIT ?", (limit,)).fetchall()
+            " FROM messages m GROUP BY thread_id ORDER BY last DESC, MAX(rowid) DESC LIMIT ?", (limit,)).fetchall()
         return [dict(r) for r in rows]
 
     def thread(self, thread_id):

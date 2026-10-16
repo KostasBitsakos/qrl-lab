@@ -153,6 +153,18 @@ def read_events(max_lines=6000):
     return pd.DataFrame(rows)
 
 
+def active_agent_keys(ev):
+    """Agents with a SubagentStart not yet matched by a SubagentStop; the coordinator is always first."""
+    active_ids = {}
+    for _, e in ev[ev["event"].isin(["SubagentStart", "SubagentStop"])].iterrows() if not ev.empty else []:
+        if e["agent_id"]:
+            if e["event"] == "SubagentStart":
+                active_ids[e["agent_id"]] = e
+            else:
+                active_ids.pop(e["agent_id"], None)
+    return ["coordinator"] + sorted({e["agent"] for e in active_ids.values()} - {"coordinator"})
+
+
 def read_text(path):
     try:
         with open(path, encoding="utf-8") as f:
@@ -223,81 +235,117 @@ with tab_chat:
     d = db()
     threads = d.threads(limit=100)
     d.close()
+    ids = [t["thread_id"] for t in threads]
+    by_id = {t["thread_id"]: t for t in threads}
+    # Default rule: the thread whose latest message is newest (threads() is ordered by that); none yet -> the first
+    # message sent creates «Κύρια συζήτηση».
     if "pending_thread" in st.session_state:
         st.session_state["thread_sel"] = st.session_state.pop("pending_thread")
-    options = ["__new__"] + [t["thread_id"] for t in threads]
-    by_id = {t["thread_id"]: t for t in threads}
-    if st.session_state.get("thread_sel") not in options:
-        st.session_state["thread_sel"] = "__new__"
+    if st.session_state.get("thread_sel") not in ids:
+        st.session_state["thread_sel"] = ids[0] if ids else None
+    cur = st.session_state["thread_sel"]
 
     def thread_label(tid):
-        if tid == "__new__":
-            return "➕ Νέο θέμα"
         t = by_id[tid]
         icon = MSG_STATUS.get(t["root_status"] or "", ("💬", ""))[0]
         fb = (t["first_body"] or "").strip()
         first = (t["title"] or (fb.splitlines()[0] if fb else ""))[:60]
         return f"{icon} {first}  ·  {fmt_ts(t['last'])}"
 
-    left, right = st.columns([1, 2.2], gap="large")
-    with left:
-        st.markdown("**Θέματα**")
-        with st.container(height=560):
-            st.radio("Θέματα", options, key="thread_sel", format_func=thread_label, label_visibility="collapsed")
-    sel = st.session_state["thread_sel"]
+    def _leave_new_topic():
+        st.session_state["new_topic"] = False
 
-    with right:
-        if sel != "__new__":
-            @st.fragment(run_every=refresh)
-            def show_thread(tid):
-                dd = db()
-                msgs = dd.thread(tid)
-                dd.close()
-                root = msgs[0]
-                icon, label = MSG_STATUS.get(root["status"] or "", ("", ""))
-                st.markdown(f"**{KIND_LABEL.get(root['kind'], root['kind'])}** · `{tid}` · κατάσταση: {icon} {label}")
-                with st.container(height=470):
-                    for m in msgs:
-                        name, avatar = author_info(m["author"])
-                        with st.chat_message("user" if m["author"] == "researcher" else "assistant", avatar=avatar):
-                            extra = ""
-                            if m["author"] == "researcher" and m["status"]:
-                                si, sl = MSG_STATUS.get(m["status"], ("", m["status"]))
-                                extra = f" · {si} {sl}"
-                            st.caption(f"**{name}** · {fmt_ts(m['ts'])} · {KIND_LABEL.get(m['kind'], m['kind'])}"
-                                       f"{extra} · `{m['id']}`")
-                            st.markdown(m["body"])
+    top_l, top_r = st.columns([5, 1])
+    with top_l:
+        with st.expander(f"📚 Θέματα ({len(ids)})"):
+            if ids:
+                with st.container(height=260):
+                    st.radio("Θέματα", ids, key="thread_sel", format_func=thread_label,
+                             label_visibility="collapsed", on_change=_leave_new_topic)
+            else:
+                st.caption("Δεν υπάρχουν ακόμη θέματα.")
+    with top_r:
+        if st.button("➕ Νέο θέμα", width="stretch", help="Το επόμενο μήνυμα ανοίγει νέο θέμα"):
+            st.session_state["new_topic"] = True
+            st.rerun()
+    new_topic = bool(st.session_state.get("new_topic")) or cur is None
+
+    if new_topic:
+        st.markdown("**Νέο θέμα** — γράψε ερώτηση, ιδέα για δοκιμή, ή ερώτηση για τον υπάρχοντα κώδικα. "
+                    "Ο συντονιστής θα συνεννοηθεί με τον Codex όπου χρειάζεται και θα απαντήσει εδώ.")
+        if ids and st.button("↩️ Επιστροφή στη «Κύρια συζήτηση»"):
+            st.session_state["new_topic"] = False
+            st.rerun()
+    else:
+        @st.fragment(run_every=refresh)
+        def show_thread(tid):
+            dd = db()
+            msgs = dd.thread(tid)
+            dd.close()
+            if not msgs:
+                return
+            root = msgs[0]
+            icon, label = MSG_STATUS.get(root["status"] or "", ("", ""))
+            first = (root["title"] or (root["body"] or "").strip().splitlines()[0])[:80] if root["body"] else tid
+            st.markdown(f"**Κύρια συζήτηση** · {first} · `{tid}` · {icon} {label}")
+            with st.container(height=480):  # oldest first, newest at the bottom
                 for m in msgs:
-                    if m["author"] == "researcher" and m["status"] == "delivered" and (since(m["updated_at"]) or 0) > 180:
-                        st.info(f"Το {m['id']} παραδόθηκε αλλά ο συντονιστής δεν το έχει αναλάβει ακόμη "
-                                "(απασχολημένος, offline ή σε όριο χρήσης).", icon="⏳")
-                        break
-            show_thread(sel)
-        else:
-            st.markdown("**Νέο θέμα** — γράψε ερώτηση, ιδέα για δοκιμή, ή ερώτηση για τον υπάρχοντα κώδικα. "
-                        "Ο συντονιστής θα συνεννοηθεί με τον Codex όπου χρειάζεται και θα απαντήσει εδώ.")
+                    name, avatar = author_info(m["author"])
+                    with st.chat_message("user" if m["author"] == "researcher" else "assistant", avatar=avatar):
+                        extra = ""
+                        if m["author"] == "researcher" and m["status"]:
+                            si, sl = MSG_STATUS.get(m["status"], ("", m["status"]))
+                            extra = f" · {si} {sl}"
+                        st.caption(f"**{name}** · {fmt_ts(m['ts'])} · {KIND_LABEL.get(m['kind'], m['kind'])}"
+                                   f"{extra} · `{m['id']}`")
+                        st.markdown(m["body"])
+                st.html("<div id='chat-end'></div>")
+            for m in msgs:
+                if m["author"] == "researcher" and m["status"] == "delivered" and (since(m["updated_at"]) or 0) > 180:
+                    st.info(f"Το {m['id']} παραδόθηκε αλλά ο συντονιστής δεν το έχει αναλάβει ακόμη "
+                            "(απασχολημένος, offline ή σε όριο χρήσης).", icon="⏳")
+                    break
 
-        with st.form("composer", clear_on_submit=True):
-            kind = st.segmented_control("Τύπος", ["message", "proposal", "code_question"],
-                                        format_func=lambda k: KIND_LABEL[k], default="message",
-                                        key="composer_kind")
-            text = st.text_area("Μήνυμα", height=130, placeholder="Γράψε εδώ… (Markdown επιτρέπεται)",
-                                key="composer_text")
-            files = st.file_uploader("Επισύναψη αρχείων (έως 50 MB το καθένα)", accept_multiple_files=True,
-                                     key="composer_files")
-            sent = st.form_submit_button("Αποστολή" if sel == "__new__" else "Απάντηση στο θέμα", type="primary")
-        if sent:
-            try:
-                saved = save_uploads([(f.name, f.getvalue()) for f in files or []], ROOT) \
-                    if files else []
-                dd = db()
-                mid = dd.researcher_send(body_with_attachments(text, saved), kind=kind or "message", thread_id=None if sel == "__new__" else sel)
-                dd.close()
-                st.session_state["pending_thread"] = mid if sel == "__new__" else sel
-                st.toast(f"Στάλθηκε ({mid})", icon="📨")
-                st.rerun()
-            except (LabError, UploadError) as e:
-                st.error(str(e))
+        @st.fragment(run_every=refresh)
+        def working_indicator(tid):
+            # isolated from the input: only this small block refreshes
+            dd = db()
+            msgs = dd.thread(tid)
+            dd.close()
+            mine = [m for m in msgs if m["author"] == "researcher"]
+            if not mine or mine[-1]["status"] not in ("acknowledged", "in_progress"):
+                return
+            names = [AGENTS.get(k, (k,))[0] for k in active_agent_keys(read_events(400)) if k != "coordinator"]
+            st.info("⏳ ο συντονιστής δουλεύει…" + (" · ενεργοί τώρα: " + ", ".join(names) if names else ""))
+
+        show_thread(cur)
+        working_indicator(cur)
+
+    kind = st.segmented_control("Τύπος μηνύματος", ["message", "proposal", "code_question"],
+                                format_func=lambda k: KIND_LABEL[k], default="message", key="composer_kind")
+    # Enter sends, Shift+Enter = newline. Not inside any fragment, so typing is never refreshed away.
+    sub = st.chat_input("Γράψε εδώ… (Enter = αποστολή, Shift+Enter = νέα γραμμή)", accept_file="multiple",
+                        key="composer")
+    if sub:
+        text = getattr(sub, "text", sub) if not isinstance(sub, str) else sub
+        files = list(getattr(sub, "files", None) or [])
+        try:
+            saved = save_uploads([(f.name, f.getvalue()) for f in files], ROOT) if files else []
+            dd = db()
+            target = None if new_topic else cur
+            reply_to = None
+            if target:
+                thr = dd.thread(target)
+                reply_to = thr[-1]["id"] if thr else None
+            mid = dd.researcher_send(body_with_attachments(text, saved), kind=kind or "message",
+                                     thread_id=target, reply_to=reply_to)
+            dd.close()
+            st.session_state["pending_thread"] = target or mid
+            st.session_state["new_topic"] = False
+            st.toast(f"Στάλθηκε ({mid})", icon="📨")
+            st.rerun()
+        except (LabError, UploadError) as e:
+            st.error(str(e))
 
 # ================================================================ decisions
 with tab_dec:
@@ -371,14 +419,7 @@ with tab_agents:
         now_ = dt.datetime.now()
         # who is working now
         st.markdown("##### Τώρα")
-        active_ids = {}
-        for _, e in ev[ev["event"].isin(["SubagentStart", "SubagentStop"])].iterrows():
-            if e["agent_id"]:
-                if e["event"] == "SubagentStart":
-                    active_ids[e["agent_id"]] = e
-                else:
-                    active_ids.pop(e["agent_id"], None)
-        keys = ["coordinator"] + sorted({e["agent"] for e in active_ids.values()} - {"coordinator"})
+        keys = active_agent_keys(ev)
         cols = st.columns(min(4, max(1, len(keys))))
         for i, k in enumerate(keys):
             sub = ev[(ev["agent"] == k) & (ev["event"].isin(["PreToolUse", "PostToolUse", "SubagentStart"]))]

@@ -245,18 +245,35 @@ def test_dashboard():
     at = AppTest.from_file(os.path.join(TMP, "dashboard", "app.py"), default_timeout=60)
     at.run()
     assert not at.exception, at.exception
-    # send a new message from the composer
-    at.text_area(key="composer_text").input("hello dashboard από το AppTest")
-    at.button[[b.label for b in at.button].index("Αποστολή")].click()
-    at.run()
+    # send a message through st.chat_input (text path; AppTest cannot attach files to chat_input)
+    at.chat_input[0].set_value("hello dashboard από το AppTest").run()
     assert not at.exception, at.exception
-    sent = [m for m in db.thread(db.threads(1)[0]["thread_id"]) if "AppTest" in m["body"]]
+    tid = db.threads(1)[0]["thread_id"]
+    sent = [m for m in db.thread(tid) if "AppTest" in m["body"]]
     assert sent and sent[0]["status"] == "new" and sent[0]["author"] == "researcher", sent
+    # a second message in a row lands in the same thread, replying to the latest message
+    at.chat_input[0].set_value("δεύτερο μήνυμα AppTest2").run()
+    assert not at.exception, at.exception
+    thr = db.thread(tid)
+    assert [m["body"] for m in thr if m["author"] == "researcher"][-1] == "δεύτερο μήνυμα AppTest2", thr
+    assert thr[-1]["reply_to"] == sent[0]["id"] and thr[-1]["thread_id"] == tid, thr
+    assert db.threads(1)[0]["thread_id"] == tid
+    n_threads = len(db.threads(100))
+    # in_progress shows the live indicator
+    with db.tx() as c:
+        c.execute("UPDATE messages SET status='in_progress' WHERE id=?", (thr[-1]["id"],))
+    at.run()
+    assert any("ο συντονιστής δουλεύει" in (i.value or "") for i in at.info), "indicator missing"
     # coordinator replies; the thread shows it
-    db.post("coordinator", "Απάντηση συντονιστή στο AppTest", sent[0]["id"], set_status="done")
+    db.post("coordinator", "Απάντηση συντονιστή στο AppTest", thr[-1]["id"], set_status="done")
     at.run()
     assert not at.exception, at.exception
     assert any("Απάντηση συντονιστή στο AppTest" in md.value for md in at.markdown), "reply not rendered"
+    # explicit «Νέο θέμα» opens a new thread
+    at.button[[b.label for b in at.button].index("➕ Νέο θέμα")].click().run()
+    at.chat_input[0].set_value("νέο θέμα AppTest3").run()
+    assert not at.exception, at.exception
+    assert len(db.threads(100)) == n_threads + 1 and db.threads(1)[0]["thread_id"] != tid
     # approve one request and reject another from the Decisions tab
     a = db.ask("approval", "AppTest approve me", "σώμα", scope="research")
     b = db.ask("approval", "AppTest reject me", "σώμα", scope="research")
