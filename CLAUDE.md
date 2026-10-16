@@ -20,6 +20,10 @@ at the start of every session, the rest when relevant. The rules in AGENTS.md (i
 8. Write to the researcher in Greek, short and direct. Code, LaTeX and these files stay in English.
 
 ## Dashboard protocol
+- **At the start of every session** (and after a usage-limit pause): run `python3 tools/labq.py pending`, then read
+  and handle every open researcher message and decision, oldest first, before anything else (researcher, 2026-10-16).
+- Questions for the researcher go in the chat or the Decisions tab, with `~/` paths so they render as links.
+  Never only in docs files.
 - A notification starting `QRL-INBOX` is a researcher message → follow skill `inbox`. Every message gets a visible
   reply in its thread (`python3 tools/labq.py post ...`), and its status always ends as done, failed or
   waiting_approval. If work takes more than a few minutes, post a short interim reply with `--status in_progress`.

@@ -81,9 +81,7 @@ file was modified. Mtimes are disk times. Paper claims are numbered as in `docs/
 - **Monitoring.** `~/prometheus-grafana` runs in namespace `monitoring` (NodePorts 30000/31000/32000) plus kube-state-metrics. The agent does not query Prometheus.
 - **kubectl.** Client v1.28.2, one context `kubernetes-admin@kubernetes`. The API server is down (PLAN F7).
 
-## 4. Open questions for the researcher
+## 4. Researcher answers
 
-1. Which commit or date was the DEXA submission? This would settle the simulation baseline.
-2. How was C5 computed: a sum over 5 episodes, or a single episode?
-3. Which run or file is behind C7 and Fig.7?
-4. Was the 2025 real-cluster agent in `experiments/lstmtransfer/` (Feb) or in `vector_redis/` (Apr)?
+- The DEXA paper was submitted in March 2025 (researcher, 2026-10-16). That fits `bf98cac` (2025-02-28) and the
+  February agent in `experiments/lstmtransfer/`, not `vector_redis/` (April). The remaining questions are asked in the dashboard chat.
