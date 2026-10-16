@@ -2,3 +2,5 @@ streamlit>=1.50
 plotly>=5.20
 pandas>=2.0
 psutil>=5.9
+faster-whisper>=1.2,<2
+av<17  # faster-whisper 1.2.1 breaks with PyAV 17+

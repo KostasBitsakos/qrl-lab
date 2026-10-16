@@ -609,6 +609,11 @@ def test_dashboard():
     assert not at.exception, at.exception
     assert any("labq.py" in (md.value or "") for md in at.markdown), "file preview missing"
     ok("dashboard: Αρχεία tab renders a deep link")
+    at = AppTest.from_file(os.path.join(TMP, "dashboard", "app.py"), default_timeout=60)
+    at.run()
+    assert not at.exception and at.get("audio_input"), "voice recorder widget missing"
+    assert any("Φωνητικό" in (w.proto.label or "") for w in at.get("audio_input"))
+    ok("dashboard: voice recorder widget renders in the chat")
 
 
 def test_deputy():
@@ -696,6 +701,40 @@ def test_deputy():
     ok("deputy: stops on ok")
 
 
+def test_voice():
+    import voice
+
+    class Seg:
+        def __init__(self, t): self.text = t
+
+    class Info:
+        def __init__(self, l): self.language = l
+
+    class Fake:
+        def __init__(self, by_lang): self.by_lang, self.calls = by_lang, []
+
+        def transcribe(self, audio, language=None, **kw):
+            self.calls.append(language)
+            return iter([Seg(x) for x in self.by_lang.get(language, [])]), Info(language or "en")
+    f = Fake({"el": [" Καλημέρα ", "κόσμε "]})
+    assert voice.transcribe(b"RIFFxx", f) == ("Καλημέρα κόσμε", "el") and f.calls == ["el"]
+    f = Fake({None: ["hello"]})
+    assert voice.transcribe(b"RIFFxx", f) == ("hello", "en") and f.calls == ["el", None], "auto fallback"
+    assert voice.transcribe(b"RIFFxx", Fake({})) == ("", None)
+    assert voice.transcribe(b"", f) == ("", None)
+    os.environ["QRL_WHISPER_MODEL"] = "medium"
+    assert voice.model_name() == "medium"
+    del os.environ["QRL_WHISPER_MODEL"]
+    assert voice.model_name() == "small"
+    # the recording is kept as docs/uploads/<M-id>/voice.wav via the normal send path
+    db = LabDB()
+    mid = db.researcher_send("φωνητικό κείμενο", attachments=[("voice.wav", b"RIFF....")], req_model="sonnet",
+                             req_effort="high", root=TMP)
+    assert os.path.exists(os.path.join(TMP, "docs", "uploads", mid, "voice.wav"))
+    assert "voice.wav" in db.message(mid)["body"] and db.message(mid)["req_model"] == "sonnet"
+    ok("voice: transcribe with mocked model, fallback, model env, wav kept as attachment")
+
+
 if __name__ == "__main__":
     print(f"QRL-Lab tests in {TMP}")
     try:
@@ -709,6 +748,7 @@ if __name__ == "__main__":
         test_uploads()
         test_health_watch()
         test_deputy()
+        test_voice()
         test_k8s_view()
         test_file_view()
         try:

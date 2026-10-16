@@ -393,6 +393,46 @@ with tab_chat:
                                 help="Ποιο μοντέλο απαντά σε αυτό το μήνυμα. Αυτόματα = αποφασίζει ο συντονιστής.")
     req_effort = sel_r.selectbox("Ένταση", ["low", "med", "high"], index=1, key="req_effort_sel",
                                  help="Πόση προσπάθεια/σκέψη θα καταναλώσει η απάντηση.")
+    # Voice input (local faster-whisper). Outside any fragment, so a recording is never refreshed away.
+    rec = st.audio_input("🎙️ Φωνητικό μήνυμα", key=f"voice_rec_{st.session_state.get('voice_n', 0)}")
+    voice_wav = None
+    if rec is not None:
+        wav = rec.getvalue()
+        sig = (len(wav), hash(wav))
+        if st.session_state.get("voice_sig") != sig:  # new recording -> transcribe once
+            try:
+                import voice
+                with st.spinner("Μεταγραφή…"):
+                    st.session_state["voice_text"] = voice.transcribe(wav)[0]
+            except Exception as e:
+                st.session_state["voice_text"] = ""
+                st.error(f"Η μεταγραφή απέτυχε: {type(e).__name__}: {e}")
+            st.session_state["voice_sig"] = sig
+            st.session_state["voice_edit"] = st.session_state["voice_text"]
+        voice_wav = wav
+        st.text_area("Μεταγραφή (διόρθωσέ την πριν την αποστολή)", key="voice_edit", height=120)
+        if st.button("Αποστολή", key="voice_send", type="primary"):
+            try:
+                dd = db()
+                target = None if new_topic else cur
+                reply_to = None
+                if target:
+                    thr = dd.thread(target)
+                    reply_to = thr[-1]["id"] if thr else None
+                mid = dd.researcher_send(st.session_state.get("voice_edit", ""), kind=kind or "message",
+                                         thread_id=target, reply_to=reply_to,
+                                         req_model=req_model or None, req_effort=req_effort,
+                                         attachments=[("voice.wav", voice_wav)], root=ROOT)
+                dd.close()
+                st.session_state["pending_thread"] = target or mid
+                st.session_state["new_topic"] = False
+                st.session_state["voice_n"] = st.session_state.get("voice_n", 0) + 1  # fresh recorder widget
+                st.session_state["voice_sig"] = None
+                st.session_state["voice_edit"] = ""
+                st.toast(f"Στάλθηκε ({mid})", icon="📨")
+                st.rerun()
+            except (LabError, UploadError) as e:
+                st.error(str(e))
     # Enter sends, Shift+Enter = newline. Not inside any fragment, so typing is never refreshed away.
     sub = st.chat_input("Γράψε εδώ… (Enter = αποστολή, Shift+Enter = νέα γραμμή)", accept_file="multiple",
                         key="composer")

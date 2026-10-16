@@ -303,6 +303,17 @@ parts, so typing is never lost. Greek UI.
    «⏳ ο συντονιστής δουλεύει…» plus the active agents; the input is never inside a fragment. Types: μήνυμα, πρόταση
    ιδέας, ερώτηση για τον κώδικα. Warns when a delivered message is not taken within 3 minutes. Every agent message
    shows its author and model («Codex · gpt-6-sol»); agents pass `labq.py post --model <free text>`.
+   **Voice input** — `st.audio_input` («🎙️ Φωνητικό μήνυμα», outside any fragment) transcribes locally with
+   faster-whisper (`tools/voice.py`; model `small`, env `QRL_WHISPER_MODEL=medium`; cpu, int8; Greek first, auto-language
+   fallback; first use downloads the model from Hugging Face, no account). The text appears in an editable box with
+   «Αποστολή» (same model/effort selectors, normal send path); the recording is kept as `docs/uploads/<M-id>/voice.wav`.
+   Needs `av<17` with faster-whisper 1.2.1.
+   **Codex deputy** — when health is `limit` (or `down` > 10 min) `health_watch` files one proposal «Να αναλάβει ο Codex
+   μέχρι …;» (author `system`, de-duplicated: none while one is open or answered < 6 h ago). Only after the researcher
+   approves it, `tools/deputy.py` (tmux window `deputy`, started by health_watch) takes new researcher messages as
+   `codex-deputy`, runs `codex exec` read-only (sandbox read-only, approval never, gpt-6-sol, medium), and posts the
+   Greek answer as «gpt-6-sol · αναπληρωτής». Answers needing execution set the message to `waiting_approval` and go to
+   `.lab/deputy_queue.jsonl` for Claude. It stops (note in the threads, approval consumed) when health is `ok`.
 0. **Health banner** — `tools/health_watch.py` (tmux window `health`, no LLM, every 20 s) classifies the coordinator pane
    (usage limit with reset time, permission prompt, API error/overloaded, coordinator not running) with a regex table,
    writes `.lab/health.json` and state changes to `.lab/events.jsonl`; the dashboard shows an exact Greek banner on
