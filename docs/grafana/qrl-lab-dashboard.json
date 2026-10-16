@@ -1,0 +1,613 @@
+{
+ "title": "QRL-Lab — Redis/K8s",
+ "uid": "qrl-lab-main",
+ "schemaVersion": 39,
+ "refresh": "15s",
+ "time": {
+  "from": "now-1h",
+  "to": "now"
+ },
+ "tags": [
+  "qrl-lab"
+ ],
+ "templating": {
+  "list": [
+   {
+    "name": "DS",
+    "type": "datasource",
+    "query": "prometheus",
+    "current": {}
+   }
+  ]
+ },
+ "panels": [
+  {
+   "id": 1,
+   "type": "timeseries",
+   "title": "[Node] CPU utilisation % (cAdvisor root cgroup / cores)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS}"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum(rate(container_cpu_usage_seconds_total{id=\"/\"}[5m])) / sum(machine_cpu_cores) * 100",
+     "legendFormat": ""
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 0
+   }
+  },
+  {
+   "id": 2,
+   "type": "timeseries",
+   "title": "[Node] Memory used % (working set / machine memory)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS}"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum(container_memory_working_set_bytes{id=\"/\"}) / sum(machine_memory_bytes) * 100",
+     "legendFormat": ""
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 0
+   }
+  },
+  {
+   "id": 3,
+   "type": "timeseries",
+   "title": "[Redis pods] CPU per pod (cores)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS}"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (namespace,pod) (rate(container_cpu_usage_seconds_total{namespace=~\"default|qrl-calib\",pod=~\"redis.*\",container!=\"\",container!=\"POD\"}[5m]))",
+     "legendFormat": ""
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 8
+   }
+  },
+  {
+   "id": 4,
+   "type": "timeseries",
+   "title": "[Redis pods] Memory working set per pod (MiB)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS}"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (namespace,pod) (container_memory_working_set_bytes{namespace=~\"default|qrl-calib\",pod=~\"redis.*\",container!=\"\",container!=\"POD\"}) / 1048576",
+     "legendFormat": ""
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "decmbytes"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 8
+   }
+  },
+  {
+   "id": 5,
+   "type": "timeseries",
+   "title": "[Redis pods] Memory working set vs container limit (% of 16Mi)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS}"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "container_memory_working_set_bytes{namespace=~\"default|qrl-calib\",pod=~\"redis.*\",container!=\"\",container!=\"POD\"} / on(namespace,pod,container) (container_spec_memory_limit_bytes{namespace=~\"default|qrl-calib\",pod=~\"redis.*\",container!=\"\",container!=\"POD\"} > 0) * 100",
+     "legendFormat": ""
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 16
+   }
+  },
+  {
+   "id": 6,
+   "type": "timeseries",
+   "title": "[Redis pods] CPU throttling ratio (throttled / total periods)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS}"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (namespace,pod) (rate(container_cpu_cfs_throttled_periods_total{namespace=~\"default|qrl-calib\",pod=~\"redis.*\",container!=\"\",container!=\"POD\"}[5m])) / sum by (namespace,pod) (rate(container_cpu_cfs_periods_total{namespace=~\"default|qrl-calib\",pod=~\"redis.*\",container!=\"\",container!=\"POD\"}[5m]))",
+     "legendFormat": ""
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percentunit"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 16
+   }
+  },
+  {
+   "id": 7,
+   "type": "timeseries",
+   "title": "[Redis pods] Pod count (Running)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS}"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "count(kube_pod_status_phase{namespace=~\"default|qrl-calib\",pod=~\"redis.*\",phase=\"Running\"} == 1)",
+     "legendFormat": ""
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 24
+   }
+  },
+  {
+   "id": 8,
+   "type": "timeseries",
+   "title": "[Kubernetes] Pods by phase",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS}"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (phase) (kube_pod_status_phase == 1)",
+     "legendFormat": ""
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 24
+   }
+  },
+  {
+   "id": 9,
+   "type": "timeseries",
+   "title": "[Kubernetes] Deployment replicas available",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS}"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "kube_deployment_status_replicas_available{namespace=~\"default|qrl-calib\"}",
+     "legendFormat": ""
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 32
+   }
+  },
+  {
+   "id": 10,
+   "type": "timeseries",
+   "title": "[Prometheus] Up targets",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS}"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum(up)",
+     "legendFormat": ""
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 32
+   }
+  },
+  {
+   "id": 11,
+   "type": "timeseries",
+   "title": "[Node] Network rx (B/s, root cgroup)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS}"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum(rate(container_network_receive_bytes_total{id=\"/\"}[5m]))",
+     "legendFormat": ""
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 40
+   }
+  },
+  {
+   "id": 12,
+   "type": "timeseries",
+   "title": "[Node] Network tx (B/s, root cgroup)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS}"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum(rate(container_network_transmit_bytes_total{id=\"/\"}[5m]))",
+     "legendFormat": ""
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 40
+   }
+  },
+  {
+   "id": 13,
+   "type": "timeseries",
+   "title": "[Node] Disk read (B/s, root cgroup)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS}"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum(rate(container_fs_reads_bytes_total{id=\"/\"}[5m]))",
+     "legendFormat": ""
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 48
+   }
+  },
+  {
+   "id": 14,
+   "type": "timeseries",
+   "title": "[Node] Disk write (B/s, root cgroup)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS}"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum(rate(container_fs_writes_bytes_total{id=\"/\"}[5m]))",
+     "legendFormat": ""
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 48
+   }
+  },
+  {
+   "id": 15,
+   "type": "timeseries",
+   "title": "[Node] load1 (node-exporter)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS}"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "node_load1",
+     "legendFormat": ""
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 56
+   }
+  },
+  {
+   "id": 16,
+   "type": "timeseries",
+   "title": "[Node] CPU utilisation % (node-exporter)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS}"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "100 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100",
+     "legendFormat": ""
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 56
+   }
+  },
+  {
+   "id": 17,
+   "type": "timeseries",
+   "title": "[Node] Memory used % (node-exporter)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS}"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100",
+     "legendFormat": ""
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 64
+   }
+  },
+  {
+   "id": 18,
+   "type": "timeseries",
+   "title": "[Node] Disk IO time (node-exporter)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS}"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "rate(node_disk_io_time_seconds_total[5m])",
+     "legendFormat": ""
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 64
+   }
+  },
+  {
+   "id": 19,
+   "type": "timeseries",
+   "title": "[Redis pods] Container restarts",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS}"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (namespace,pod) (kube_pod_container_status_restarts_total{namespace=~\"default|qrl-calib\",pod=~\"redis.*\"})",
+     "legendFormat": ""
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 72
+   }
+  },
+  {
+   "id": 20,
+   "type": "timeseries",
+   "title": "[Kubernetes] Deployment replicas desired",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS}"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "kube_deployment_spec_replicas{namespace=~\"default|qrl-calib\"}",
+     "legendFormat": ""
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 72
+   }
+  },
+  {
+   "id": 21,
+   "type": "timeseries",
+   "title": "[Prometheus] Up by job",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS}"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (job) (up)",
+     "legendFormat": ""
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 80
+   }
+  }
+ ]
+}
