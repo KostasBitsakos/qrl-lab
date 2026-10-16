@@ -29,7 +29,8 @@ def main():
     req = sys.argv[1]
     rows = []
     for d in sorted(glob.glob(os.path.join(LAB, "runs", f"*-{req}-e*"))):
-        entry = json.load(open(os.path.join(d, "spec_entry.json"))).get("name", os.path.basename(d))
+        se = json.load(open(os.path.join(d, "spec_entry.json")))
+        entry = (se.get("entry_spec") or {}).get("name") or se.get("name") or os.path.basename(d)
         status = json.load(open(os.path.join(d, "launcher.json"))).get("status") if os.path.exists(
             os.path.join(d, "launcher.json")) else "running"
         eps = [m for m in load(os.path.join(d, "metrics.jsonl")) if "reward" in m and "model" in m]
