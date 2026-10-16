@@ -2,6 +2,22 @@
 
 Newest first. Each entry: date, who decided, source, decision.
 
+## 2026-10-16 — Model routing and more OpenAI agents (decided by: researcher; source: R-20261016-016, option 2)
+
+**Rule:** every task uses the cheapest model that does it well.
+- Claude side: Explore → Haiku; engineer → Sonnet; Opus only for simulator or circuit design; scripts for repetitive work.
+- Codex roles, all through the ChatGPT subscription via the Codex CLI. No API keys.
+  - Models from `codex debug models`; luna and 6.1-sol were tested with one call each on 2026-10-16.
+
+| Role | Model / effort |
+|---|---|
+| codex-quick (simple questions) | `gpt-6-luna` / low |
+| codex-reviewer (code/results review) | `gpt-6.1-sol` / medium |
+| codex-researcher (literature/venues second opinion, read-only, verified sources) | `gpt-6.1-sol` / medium |
+| codex-architect (council: simulator, models, paper claims) | `gpt-6-astra` / high, with the reason logged |
+
+- The researcher also runs ChatGPT app tools by hand (Deep Research, agent mode) and uploads the results to the dashboard (📎). The coordinator then integrates them.
+
 ## 2026-10-16 — D2 Sim v2 design (decided by: researcher; source: R-20261016-013, council C-20261016-01)
 
 Option 1 of `.lab/council/C-20261016-01/card.md`: build Sim v2 now with provisional, labelled parameters.

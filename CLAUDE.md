@@ -36,7 +36,7 @@ at the start of every session, the rest when relevant. The rules in AGENTS.md (i
 ## Codex (OpenAI) — a co-researcher, not only a reviewer
 - Call Codex only through the Agent tool with `subagent_type: "codex:codex-rescue"` (official plugin).
   Prompt prefix: `--fresh` (new thread) or `--resume` (continue the latest Codex thread), then `--model` and
-  `--effort` (default `gpt-6-sol`/`medium`; Astra/`high` only for major decisions, logged with a reason), then
+  `--effort`: pick the role in `docs/DECISIONS.md` (quick `gpt-6-luna`/low, review `gpt-6.1-sol`/medium, major `gpt-6-astra`/high with a logged reason), then
   `READ-ONLY: research and review only, do not edit files.` unless it is approved implementation work.
 - Run Codex calls one at a time (`--resume` follows the latest thread in this repo).
 - Post Codex's answer into the thread with `--author codex --kind contribution`, then your own synthesis as
