@@ -511,7 +511,7 @@ confirms the baseline → `git worktree add` for `qrl-dev`.
 | D6 | Publication gate thresholds (§9) | pending |
 | D7 | Target venue CCGrid 2027 + alternatives from scholar | pending |
 | D8 | How to handle F1/F5 with respect to published work and the public repo | researcher only |
-| D9 | IBM Quantum plan / QPU minutes | pending |
+| D9 | IBM Quantum plan / QPU minutes | accepted 2026-10-16: account exists; hardware only when models are ready, per-job approval |
 | D10 | Kubernetes version, namespace and context for real runs | from inventory |
 | D11 | Bring the K8s cluster back up (F7); namespace-scoped credentials for agent-launched real runs | pending |
 | D13 | Planning-chat handoff 2026-10-16: environment facts and standing rules (`docs/DECISIONS.md`) | accepted by the researcher |

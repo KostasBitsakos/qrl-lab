@@ -2,6 +2,11 @@
 
 Newest first. Each entry: date, who decided, source, decision.
 
+## 2026-10-16 — D9 IBM Quantum (decided by: researcher; source: R-20261016-001)
+
+The researcher has an IBM Quantum account. No IBM jobs for now. Real-hardware tests come only once the quantum
+models are ready, and each job still needs per-job approval with estimated QPU seconds (PLAN §6).
+
 ## 2026-10-16 — standing rules (decided by: researcher; source: docs/handoffs/HANDOFF_2026-10-16_planning-chat.md §3)
 
 1. **The dashboard is the only channel.** The terminal and phone app are fallbacks for permission prompts and emergencies.
