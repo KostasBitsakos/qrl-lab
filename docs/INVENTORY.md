@@ -97,5 +97,5 @@ file was modified. Mtimes are disk times. Paper claims are numbered as in `docs/
     - DInos (`lstm_transfer/final_metrics_lstm`): 3.28 / 3.62 / 3.62 / 2.82 / 3.23 ×10^6
     - DERP (`dense/final_metrics_dense`): 286,672 / 259,386 / 218,389 / 197,408 / 152,188
 - **C5 ratio (17.3×).** `dense/doubledeepfinal.py:27` creates the environment once and does not reset it between the 5 evaluation episodes. Episodes 2–5 of DERP therefore score about 0, and the DERP "total" is effectively one episode. DInos (`lstm_transfer.py`) resets the environment every episode.
-  - Per episode: DInos ≈723k (model_2/5) vs DERP 152k–287k, a ratio of about 2.5–4.8×.
+  - Same model, per episode (DInos mean of 5 episodes vs DERP first episode): model_1 2.29×, model_2 2.80×, model_5 3.32×, model_10 2.87×, model_20 4.26×. An earlier "2.5–4.8×" mixed models; Codex corrected it. Codex verified the bug (dense/environment.py:66/89: episodes 2–5 run 1 step). Whether this script made the paper's Fig.5 is not provable from files alone.
 - **Reproduction (R-20261016-012, `--legacy`, 3 seeds).** It reproduces the stored DInos per-episode rewards within about 1% for models 2/5/10/20. Model_1 varies strongly across seeds. Mean VMs are 1.09 for models 2/5.
