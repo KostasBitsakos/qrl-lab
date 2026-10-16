@@ -2,6 +2,13 @@
 
 Newest first. Each entry: date, who decided, source, decision.
 
+## 2026-10-16 — Calibration setup (decided by: researcher; source: R-20261016-018, changes requested)
+
+The calibration uses a **stateless Deployment**, as in the original 2025 setup, not a StatefulSet. Pod start-up and removal must stay fast.
+- Losing test data in the calibration Redis is explicitly acceptable. The goal is to show optimal scaling decisions.
+- The coordinator's implementation: a copy of the researcher's Deployment in an isolated namespace `qrl-calib`. The `default` namespace is untouched, and rollback means deleting the namespace.
+- After each scale event the cluster is repaired with `redis-cli --cluster fix` and rebalance. The recovery time is measured and becomes part of the Sim v2 parameters d, δ and k.
+
 ## 2026-10-16 — Model routing and more OpenAI agents (decided by: researcher; source: R-20261016-016, option 2)
 
 **Rule:** every task uses the cheapest model that does it well.
