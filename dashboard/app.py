@@ -24,7 +24,7 @@ import streamlit as st
 ROOT = os.environ.get("QRL_LAB_DIR") or os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 os.environ["QRL_LAB_DIR"] = ROOT
 sys.path.insert(0, os.path.join(ROOT, "tools"))
-from labdb import DECISIONS, LabDB, LabError, map_choice  # noqa: E402
+from labdb import DECISIONS, PAPER_REVIEWERS, PAPER_THREAD_TITLE, PAPER_WRITERS, LabDB, LabError, map_choice  # noqa: E402
 import file_view  # noqa: E402
 import k8s_view  # noqa: E402
 import web_terminal  # noqa: E402
@@ -301,6 +301,48 @@ def health_banner():
 
 health_banner()
 
+# ---------------------------------------------------------------- shared chat rendering
+@st.fragment(run_every=refresh)
+def show_thread(tid, key="chat"):
+    dd = db()
+    msgs = dd.thread(tid)
+    dd.close()
+    if not msgs:
+        return
+    root = msgs[0]
+    icon, label = MSG_STATUS.get(root["status"] or "", ("", ""))
+    first = (root["title"] or (root["body"] or "").strip().splitlines()[0])[:80] if root["body"] else tid
+    st.markdown(f"**Κύρια συζήτηση** · {first} · `{tid}` · {icon} {label}")
+    with st.container(height=480):  # oldest first, newest at the bottom
+        for m in msgs:
+            name, avatar = author_info(m["author"])
+            with st.chat_message("user" if m["author"] == "researcher" else "assistant", avatar=avatar):
+                extra = ""
+                if m["author"] == "researcher" and m["status"]:
+                    si, sl = MSG_STATUS.get(m["status"], ("", m["status"]))
+                    extra = f" · {si} {sl}"
+                    if m.get("req_model") or m.get("req_effort") not in (None, "med"):
+                        extra += f" · 🎛️ {m.get('req_model') or 'auto'}/{m.get('req_effort') or 'med'}"
+                label = f"{name} · {m['model']}" if m.get("model") else name
+                st.caption(f"**{label}** · {fmt_ts(m['ts'])} · {KIND_LABEL.get(m['kind'], m['kind'])}"
+                           f"{extra} · `{m['id']}`")
+                st.markdown(file_view.linkify(m["body"]))  # render-time only; stored text unchanged
+                for ap in attachment_paths(m["body"]):
+                    full = os.path.realpath(os.path.join(ROOT, ap))
+                    up_root = os.path.realpath(os.path.join(ROOT, "docs", "uploads"))
+                    if full.startswith(up_root + os.sep) and os.path.isfile(full):
+                        ac1, ac2 = st.columns([1, 1])
+                        ac1.download_button(f"⬇️ {os.path.basename(full)}", lambda p=full: open(p, "rb").read(),
+                                            file_name=os.path.basename(full), key=f"dl_{key}_{m['id']}_{ap}")
+                        ac2.markdown(f"[📁 Αρχεία]({file_view.deep_link(full)})")
+        st.html("<div id='chat-end'></div>")
+    for m in msgs:
+        if m["author"] == "researcher" and m["status"] == "delivered" and (since(m["updated_at"]) or 0) > 180:
+            st.info(f"Το {m['id']} παραδόθηκε αλλά ο συντονιστής δεν το έχει αναλάβει ακόμη "
+                    "(απασχολημένος, offline ή σε όριο χρήσης).", icon="⏳")
+            break
+
+
 # ---------------------------------------------------------------- tabs
 d0 = db()
 n_open = len(d0.requests(state="open"))
@@ -371,46 +413,6 @@ with tab_chat:
             st.session_state["new_topic"] = False
             st.rerun()
     else:
-        @st.fragment(run_every=refresh)
-        def show_thread(tid):
-            dd = db()
-            msgs = dd.thread(tid)
-            dd.close()
-            if not msgs:
-                return
-            root = msgs[0]
-            icon, label = MSG_STATUS.get(root["status"] or "", ("", ""))
-            first = (root["title"] or (root["body"] or "").strip().splitlines()[0])[:80] if root["body"] else tid
-            st.markdown(f"**Κύρια συζήτηση** · {first} · `{tid}` · {icon} {label}")
-            with st.container(height=480):  # oldest first, newest at the bottom
-                for m in msgs:
-                    name, avatar = author_info(m["author"])
-                    with st.chat_message("user" if m["author"] == "researcher" else "assistant", avatar=avatar):
-                        extra = ""
-                        if m["author"] == "researcher" and m["status"]:
-                            si, sl = MSG_STATUS.get(m["status"], ("", m["status"]))
-                            extra = f" · {si} {sl}"
-                            if m.get("req_model") or m.get("req_effort") not in (None, "med"):
-                                extra += f" · 🎛️ {m.get('req_model') or 'auto'}/{m.get('req_effort') or 'med'}"
-                        label = f"{name} · {m['model']}" if m.get("model") else name
-                        st.caption(f"**{label}** · {fmt_ts(m['ts'])} · {KIND_LABEL.get(m['kind'], m['kind'])}"
-                                   f"{extra} · `{m['id']}`")
-                        st.markdown(file_view.linkify(m["body"]))  # render-time only; stored text unchanged
-                        for ap in attachment_paths(m["body"]):
-                            full = os.path.realpath(os.path.join(ROOT, ap))
-                            up_root = os.path.realpath(os.path.join(ROOT, "docs", "uploads"))
-                            if full.startswith(up_root + os.sep) and os.path.isfile(full):
-                                ac1, ac2 = st.columns([1, 1])
-                                ac1.download_button(f"⬇️ {os.path.basename(full)}", lambda p=full: open(p, "rb").read(),
-                                                    file_name=os.path.basename(full), key=f"dl_{m['id']}_{ap}")
-                                ac2.markdown(f"[📁 Αρχεία]({file_view.deep_link(full)})")
-                st.html("<div id='chat-end'></div>")
-            for m in msgs:
-                if m["author"] == "researcher" and m["status"] == "delivered" and (since(m["updated_at"]) or 0) > 180:
-                    st.info(f"Το {m['id']} παραδόθηκε αλλά ο συντονιστής δεν το έχει αναλάβει ακόμη "
-                            "(απασχολημένος, offline ή σε όριο χρήσης).", icon="⏳")
-                    break
-
         @st.fragment(run_every=refresh)
         def working_indicator(tid):
             # isolated from the input: only this small block refreshes
@@ -1015,6 +1017,35 @@ with tab_k8s:
 
 # ================================================================ paper & venues
 with tab_paper:
+    st.markdown("##### 💬 Chat με τον συγγραφέα — «Paper — συγγραφή»")
+    _d = db()
+    paper_tid = _d.ensure_thread(PAPER_THREAD_TITLE, "Νήμα για τη συγγραφή και το review του paper.")
+    _d.close()
+    show_thread(paper_tid, key="paper")
+    pw_col, pr_col = st.columns(2)
+    p_writers = pw_col.multiselect("Συγγραφή", list(PAPER_WRITERS), default=["writer-sonnet"],
+                                   format_func=PAPER_WRITERS.get, key="paper_writers",
+                                   help="Ποιοι συντάσσουν το κείμενο σε αυτό το μήνυμα.")
+    p_reviewers = pr_col.multiselect("Review", list(PAPER_REVIEWERS), default=["codex-reviewer"],
+                                     format_func=PAPER_REVIEWERS.get, key="paper_reviewers",
+                                     help="Ποιοι κάνουν review μετά τη σύνταξη.")
+    # Not inside a fragment, so typing is never refreshed away.
+    psub = st.chat_input("Γράψε στον συγγραφέα… (Enter = αποστολή)", accept_file="multiple", key="paper_composer")
+    if psub:
+        ptext_in = getattr(psub, "text", psub) if not isinstance(psub, str) else psub
+        pfiles_in = list(getattr(psub, "files", None) or [])
+        try:
+            dd = db()
+            thr = dd.thread(paper_tid)
+            dd.researcher_send(ptext_in, thread_id=paper_tid, reply_to=thr[-1]["id"] if thr else None,
+                               req_writers=p_writers, req_reviewers=p_reviewers,
+                               attachments=[(f.name, f.getvalue()) for f in pfiles_in] or None, root=ROOT)
+            dd.close()
+            st.toast("Στάλθηκε στον συγγραφέα", icon="📨")
+            st.rerun()
+        except (LabError, UploadError) as e:
+            st.error(str(e))
+    st.divider()
     dl = read_text(os.path.join(ROOT, "docs", "deadlines.json"))
     if dl:
         try:

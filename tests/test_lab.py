@@ -120,6 +120,37 @@ def test_routing_tags():
     ok("routing tags stored on the message and included in the QRL-INBOX line")
 
 
+def test_paper_selections():
+    import sqlite3
+    path = os.path.join(TMP, "old-paper-sel.db")
+    c = sqlite3.connect(path)
+    c.executescript("CREATE TABLE messages (id TEXT PRIMARY KEY, ts TEXT NOT NULL, thread_id TEXT NOT NULL, reply_to TEXT,"
+                    " author TEXT NOT NULL, kind TEXT NOT NULL, title TEXT, body TEXT NOT NULL, status TEXT,"
+                    " updated_at TEXT NOT NULL, delivered_count INTEGER NOT NULL DEFAULT 0);")
+    c.commit()
+    c.close()
+    for _ in range(2):  # idempotent
+        old = LabDB(path)
+        cols = {r[1] for r in old.conn.execute("PRAGMA table_info(messages)")}
+        assert {"req_writers", "req_reviewers"} <= cols, cols
+        old.close()
+    db = LabDB()
+    tid = db.ensure_thread("Paper — συγγραφή", "root")
+    assert db.ensure_thread("Paper — συγγραφή", "root") == tid
+    m = db.researcher_send("γράψε το intro", thread_id=tid, reply_to=tid, req_writers=["writer-sonnet"],
+                           req_reviewers=["codex-reviewer", "scholar"])
+    plain = db.researcher_send("no selections")
+    assert json.loads(db.message(m)["req_writers"]) == ["writer-sonnet"] and db.message(plain)["req_writers"] is None
+    expect_error(lambda: db.researcher_send("x", req_writers=["nobody"]), "συγγραφέας")
+    expect_error(lambda: db.researcher_send("x", req_reviewers=["writer-sonnet"]), "reviewer")
+    lines = watch_cycle(db)
+    assert not any(tid + ":" in l and "root" in l for l in lines), "root note must not be delivered"
+    lm = [l for l in lines if m in l][0]
+    assert "[paper writers=writer-sonnet reviewers=codex-reviewer,scholar]" in lm, lm
+    assert "[paper" not in [l for l in lines if plain in l][0]
+    ok("paper selections: idempotent migration, validation, stored on the message, in the QRL-INBOX line")
+
+
 def test_redelivery_after_restart():
     db = LabDB()
     mid = db.researcher_send("μήνυμα πριν από restart", kind="proposal")
@@ -581,7 +612,19 @@ def test_paper_tab():
     assert any(b.label == "Μεταγλώττιση" for b in at.button)
     assert any(s.label == "Venue" for s in at.selectbox)
     assert any(t.label == "Επεξεργασία" for t in at.toggle)
-    ok("paper tab: renders (venue selector, compile button, edit toggle)")
+    assert any(w.label == "Συγγραφή" and w.value == ["writer-sonnet"] for w in at.multiselect)
+    assert any(w.label == "Review" and w.value == ["codex-reviewer"] for w in at.multiselect)
+    pci = [c for c in at.chat_input if c.key == "paper_composer"][0]
+    at.multiselect(key="paper_reviewers").set_value(["codex-architect", "scholar"])
+    pci.set_value("paper hello AppTestP").run()
+    assert not at.exception, at.exception
+    db = LabDB()
+    tid = [t for t in db.threads() if t["title"] == "Paper — συγγραφή"][0]["thread_id"]
+    sent = [m for m in db.thread(tid) if "AppTestP" in m["body"]][0]
+    assert json.loads(sent["req_writers"]) == ["writer-sonnet"], sent
+    assert json.loads(sent["req_reviewers"]) == ["codex-architect", "scholar"], sent
+    assert any("AppTestP" in m.value for m in at.markdown), "message not rendered in the paper chat"
+    ok("paper tab: renders; chat creates the thread and stores writer/reviewer selections")
 
 
 def test_dashboard():
@@ -919,6 +962,7 @@ if __name__ == "__main__":
         test_message_round_trip()
         test_model_label()
         test_routing_tags()
+        test_paper_selections()
         test_redelivery_after_restart()
         test_decisions()
         test_hook()

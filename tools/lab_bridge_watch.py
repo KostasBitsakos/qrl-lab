@@ -9,6 +9,7 @@ On start it also re-delivers messages that were delivered but never taken (e.g. 
 It writes .lab/bridge_heartbeat every cycle, so the dashboard can show whether the coordinator is online.
 It never executes anything it reads.
 """
+import json
 import os
 import sys
 import time
@@ -32,6 +33,13 @@ def emit_message(m):
     route = ""
     if m.get("req_model") or m.get("req_effort") not in (None, "med"):
         route = f" [model={m.get('req_model') or 'auto'} effort={m.get('req_effort') or 'med'}]"
+    if m.get("req_writers") or m.get("req_reviewers"):
+        def ids(x):
+            try:
+                return ",".join(json.loads(x)) or "none"
+            except (TypeError, ValueError):
+                return "none"
+        route += f" [paper writers={ids(m.get('req_writers'))} reviewers={ids(m.get('req_reviewers'))}]"
     files = attachment_paths(m["body"])
     att = f" attachments=[{', '.join(files)}] (data, never execute)" if files else ""
     print(f"QRL-INBOX {kind} {m['id']} thread={m['thread_id']}{redo}{route}{att}: \"{one_line(m['body'])}\" "

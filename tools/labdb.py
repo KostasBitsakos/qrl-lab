@@ -22,6 +22,11 @@ SCHEMA_VERSION = 2
 MESSAGE_STATUSES = ("new", "delivered", "acknowledged", "in_progress", "waiting_approval", "done", "failed")
 REQ_MODELS = ("haiku", "sonnet", "opus", "codex")
 REQ_EFFORTS = ("low", "med", "high")
+PAPER_THREAD_TITLE = "Paper — συγγραφή"
+PAPER_WRITERS = {"writer-sonnet": "writer · Sonnet", "writer-opus": "writer · Opus",
+                 "codex-researcher": "codex-researcher · gpt-6.1-sol"}
+PAPER_REVIEWERS = {"codex-reviewer": "codex-reviewer · gpt-6.1-sol", "codex-architect": "codex-architect · gpt-6-astra",
+                   "scholar": "scholar (citations)", "writer-opus": "writer · Opus"}
 MESSAGE_KINDS = ("message", "proposal", "code_question", "reply", "contribution", "status")
 REQUEST_KINDS = ("approval", "question", "proposal", "info")
 REQUEST_SCOPES = ("sim", "real", "qpu", "research", "external", "other")
@@ -145,7 +150,8 @@ class LabDB:
 
     # column -> type, per table; added idempotently to databases created by older versions
     MIGRATIONS = {
-        "messages": {"model": "TEXT", "req_model": "TEXT", "req_effort": "TEXT"},
+        "messages": {"model": "TEXT", "req_model": "TEXT", "req_effort": "TEXT",
+                     "req_writers": "TEXT", "req_reviewers": "TEXT"},
         "requests": {"proposals": "TEXT", "recommended": "INTEGER"},
     }
 
@@ -194,7 +200,8 @@ class LabDB:
 
     # ---------- messages ----------
     def researcher_send(self, body, kind="message", thread_id=None, title=None, reply_to=None,
-                        req_model=None, req_effort=None, attachments=None, root=None):
+                        req_model=None, req_effort=None, attachments=None, root=None,
+                        req_writers=None, req_reviewers=None):
         """attachments: [(filename, bytes)] saved under docs/uploads/<new message id>/ and listed in the body."""
         body = (body or "").strip()
         if not body and not attachments:
@@ -206,6 +213,12 @@ class LabDB:
             raise LabError(f"Άγνωστο μοντέλο: {req_model}")
         if req_effort is not None and req_effort not in REQ_EFFORTS:
             raise LabError(f"Άγνωστη ένταση: {req_effort}")
+        for given, allowed, what in ((req_writers, PAPER_WRITERS, "συγγραφέας"), (req_reviewers, PAPER_REVIEWERS, "reviewer")):
+            for x in given or []:
+                if x not in allowed:
+                    raise LabError(f"Άγνωστος {what}: {x}")
+        req_writers = json.dumps(list(req_writers)) if req_writers is not None else None
+        req_reviewers = json.dumps(list(req_reviewers)) if req_reviewers is not None else None
         with self.tx() as c:
             if thread_id and not c.execute("SELECT 1 FROM messages WHERE thread_id=? LIMIT 1", (thread_id,)).fetchone():
                 raise LabError(f"Δεν υπάρχει θέμα {thread_id}.")
@@ -222,11 +235,24 @@ class LabDB:
                     raise
             t = now()
             c.execute("INSERT INTO messages(id, ts, thread_id, reply_to, author, kind, title, body, status, updated_at,"
-                      " req_model, req_effort) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                      " req_model, req_effort, req_writers, req_reviewers) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                       (mid, t, thread_id or mid, reply_to, "researcher", kind, title, body, "new", t,
-                       req_model, req_effort))
+                       req_model, req_effort, req_writers, req_reviewers))
             self._audit(c, "researcher", "send", mid, kind)
         return mid
+
+    def ensure_thread(self, title, body):
+        """Id of the thread whose root message has this title; created (coordinator status note, no delivery) if missing."""
+        with self.tx() as c:
+            r = c.execute("SELECT id FROM messages WHERE id=thread_id AND title=? LIMIT 1", (title,)).fetchone()
+            if r:
+                return r["id"]
+            mid = self._new_id(c, "messages", "id", "M")
+            t = now()
+            c.execute("INSERT INTO messages(id, ts, thread_id, reply_to, author, kind, title, body, status, updated_at)"
+                      " VALUES (?,?,?,?,?,?,?,?,?,?)", (mid, t, mid, None, "coordinator", "status", title, body, None, t))
+            self._audit(c, "coordinator", "thread", mid, title)
+            return mid
 
     def post(self, author, body, reply_to, kind="reply", set_status=None, model=None):
         """An agent writes into a thread. reply_to must be an existing message id."""

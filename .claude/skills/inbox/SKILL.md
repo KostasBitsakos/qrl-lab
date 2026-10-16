@@ -13,6 +13,12 @@ description: Handle a researcher message from the QRL-Lab dashboard (a QRL-INBOX
    thread (from `labq.py take`), then post its answer (Greek, short) with `--model` set to the model that wrote it
    (e.g. "Haiku 4.5", "Sonnet 5.5", "Opus 5.5", "gpt-6-sol"). `auto` (or no tag) = you decide as usual.
    Effort is a hint for depth: low = short answer, high = careful, verified answer.
+   **Paper thread** («Paper — συγγραφή»): the line may carry `[paper writers=<ids> reviewers=<ids>]` (stored as
+   `req_writers`/`req_reviewers`). Writer ids: `writer-sonnet`, `writer-opus`, `codex-researcher`; reviewer ids:
+   `codex-reviewer`, `codex-architect`, `scholar` (citations), `writer-opus`. Delegate the drafting in `paper/` to the
+   selected writers and then the review to the selected reviewers (log each Codex role with `tools/agent_log.py`).
+   Post each contribution with its author and model (`--author`, `--model`, `--kind contribution`), then your own
+   summary of the changes made in `paper/`, with a link to the compiled PDF (`paper/build/...pdf`, via `tools/paper_build.py`).
 2. **Classify** and act:
    - *Question about the project or results* → answer from PLAN.md, run data or files, with pointers.
    - *Question about the existing code* (`CODE QUESTION`) → delegate the search to `Explore` (Haiku) with a precise
