@@ -25,6 +25,7 @@ ROOT = os.environ.get("QRL_LAB_DIR") or os.path.abspath(os.path.join(os.path.dir
 os.environ["QRL_LAB_DIR"] = ROOT
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 from labdb import DECISIONS, LabDB, LabError  # noqa: E402
+from uploads import UploadError, body_with_attachments, save_uploads  # noqa: E402
 
 LAB = os.path.join(ROOT, ".lab")
 DB_PATH = os.path.join(LAB, "lab.db")
@@ -282,16 +283,20 @@ with tab_chat:
                                         key="composer_kind")
             text = st.text_area("Μήνυμα", height=130, placeholder="Γράψε εδώ… (Markdown επιτρέπεται)",
                                 key="composer_text")
+            files = st.file_uploader("Επισύναψη αρχείων (έως 50 MB το καθένα)", accept_multiple_files=True,
+                                     key="composer_files")
             sent = st.form_submit_button("Αποστολή" if sel == "__new__" else "Απάντηση στο θέμα", type="primary")
         if sent:
             try:
+                saved = save_uploads([(f.name, f.getvalue()) for f in files or []], ROOT) \
+                    if files else []
                 dd = db()
-                mid = dd.researcher_send(text, kind=kind or "message", thread_id=None if sel == "__new__" else sel)
+                mid = dd.researcher_send(body_with_attachments(text, saved), kind=kind or "message", thread_id=None if sel == "__new__" else sel)
                 dd.close()
                 st.session_state["pending_thread"] = mid if sel == "__new__" else sel
                 st.toast(f"Στάλθηκε ({mid})", icon="📨")
                 st.rerun()
-            except LabError as e:
+            except (LabError, UploadError) as e:
                 st.error(str(e))
 
 # ================================================================ decisions

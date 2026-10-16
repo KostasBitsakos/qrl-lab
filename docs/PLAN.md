@@ -296,7 +296,8 @@ parts, so typing is never lost. Greek UI.
 1. **💬 Συνομιλία** — threads with the coordinator; each message shows its author (Εσύ / Συντονιστής / Codex /
    subagent) and the status of your messages (νέο → παραδόθηκε → το ανέλαβε → σε εξέλιξη / περιμένει έγκριση →
    ολοκληρώθηκε / απέτυχε). Types: μήνυμα, πρόταση ιδέας, ερώτηση για τον κώδικα. Warns when a delivered message
-   is not taken within 3 minutes.
+   is not taken within 3 minutes. Files can be attached to any message (max 50 MB each); they are saved
+   under `docs/uploads/<date>/` (git-ignored, never overwritten) and listed in the message body as `Συνημμένα:`.
 2. **✅ Αποφάσεις** — open requests (blocking first) with body, attached files, the frozen run spec and its hash;
    Approve / Reject / Request changes (comment required for changes), Answer for questions; history.
 3. **🤖 Πράκτορες** — who is working now (active subagents), timeline of actions per agent (fixed colour per agent,

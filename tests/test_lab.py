@@ -207,6 +207,38 @@ def test_hook():
     ok("hook records permission waits and Codex activity, never tool outputs")
 
 
+def test_uploads():
+    import datetime
+    import uploads
+    root = tempfile.mkdtemp(prefix="up-", dir=TMP)
+    day = datetime.date(2026, 10, 16)
+    ups = os.path.realpath(os.path.join(root, "docs", "uploads"))
+    saved = uploads.save_uploads([("../../x.txt", b"a"), ("/etc/passwd", b"b"), ("..", b"c"),
+                                  ("a\\..\\y.pdf", b"d"), ("x.txt", b"e"), ("x.txt", b"f"), ("ε.pdf", b"g")], root, day)
+    paths = [p for p, _ in saved]
+    for p in paths:
+        assert os.path.realpath(os.path.join(root, p)).startswith(ups + os.sep), p
+    assert paths[0] == "docs/uploads/2026-10-16/x.txt" and paths[4] == "docs/uploads/2026-10-16/x-1.txt"
+    assert paths[5] == "docs/uploads/2026-10-16/x-2.txt" and paths[1].endswith("/passwd")
+    assert open(os.path.join(root, paths[0]), "rb").read() == b"a"  # not overwritten
+    assert not os.path.exists(os.path.join(root, "x.txt"))
+    assert uploads.sanitize_filename("a\x00b\n.txt") == "ab.txt"
+    big = None
+    try:
+        uploads.MAX_BYTES, old = 3, uploads.MAX_BYTES
+        uploads.save_uploads([("big", b"1234")], root, day)
+    except uploads.UploadError as e:
+        big = e
+    finally:
+        uploads.MAX_BYTES = old
+    assert big is not None
+    blk = uploads.attachments_block([("docs/uploads/2026-10-16/foo.pdf", 123 * 1024)])
+    assert blk == "Συνημμένα:\n- docs/uploads/2026-10-16/foo.pdf (123 KB)", blk
+    assert uploads.body_with_attachments("", [("p", 2048)]) == "Συνημμένα:\n- p (2 KB)"
+    assert uploads.body_with_attachments("hi", [("p", 2048)]).startswith("hi\n\nΣυνημμένα:")
+    ok("uploads: traversal, collisions, size cap, body block")
+
+
 def test_dashboard():
     from streamlit.testing.v1 import AppTest
     db = LabDB()
@@ -258,6 +290,7 @@ if __name__ == "__main__":
         test_decisions()
         test_hook()
         test_launcher()
+        test_uploads()
         try:
             import streamlit  # noqa: F401
             test_dashboard()

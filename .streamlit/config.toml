@@ -4,6 +4,7 @@ address = "127.0.0.1"
 port = 8501
 headless = true
 runOnSave = false
+maxUploadSize = 50  # MB per file; keep equal to uploads.MAX_BYTES
 
 [browser]
 gatherUsageStats = false
