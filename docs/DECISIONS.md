@@ -2,6 +2,15 @@
 
 Newest first. Each entry: date, who decided, source, decision.
 
+## 2026-10-16 — D2 Sim v2 design (decided by: researcher; source: R-20261016-013, council C-20261016-01)
+
+Option 1 of `.lab/council/C-20261016-01/card.md`: build Sim v2 now with provisional, labelled parameters.
+- Design: transient fluid/cohort queue, 1–30 pods, startup delay, rebalance loss, calibrated capacity curve C(c).
+- Reward: −α·pod-seconds − β·SLO failures − γ·scaling changes.
+- Gates frozen before any agent run.
+- A calibration pilot up to 30 pods on the real cluster follows, under a separate approval.
+- SLO and weights are set by the researcher before agents are evaluated.
+
 ## 2026-10-16 — D9 IBM Quantum (decided by: researcher; source: R-20261016-001)
 
 The researcher has an IBM Quantum account. No IBM jobs for now. Real-hardware tests come only once the quantum

@@ -523,7 +523,7 @@ confirms the baseline → `git worktree add` for `qrl-dev`.
 | ID | Question | Status |
 |---|---|---|
 | D1 | Coordinator on the VM in tmux, accessed via Remote Control (not on the laptop) | proposed |
-| D2 | Simulation v2 design and reward weights (§8.1) | pending |
+| D2 | Simulation v2 design and reward weights (§8.1) | design accepted 2026-10-16 (C-20261016-01, option 1); weights/SLO pending |
 | D3 | Workloads W0–W3 (§8.2) | pending |
 | D4 | Baselines (§8.3) | proposed; researcher agreed on DInos+T as main |
 | D5 | Quantum candidates to screen (§8.4) | pending |
