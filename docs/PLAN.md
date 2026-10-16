@@ -314,6 +314,7 @@ parts, so typing is never lost. Greek UI.
 7. **📄 Paper & συνέδρια** — deadlines with countdown (`docs/deadlines.json`, verified sources only), `docs/VENUES.md`,
    `paper/claims.md`, section status.
 8. **🧾 Ιστορικό** — audit log of every send, take, decision, launch and stop.
+9. **📁 Αρχεία** — read-only file browser (`tools/file_view.py`) over `~/qrl-lab`, `~/simulations`, `~/redis`, `~/k8s`, `~/prometheus-grafana`: realpath-confined, credential deny list, previews (text/csv/image/pdf/binary sha256); deep link `?path=<abs>&line=N`; paths in chat messages render as links. Not inside a fragment.
 Planned for v2 (when data exists): quantum resource panel (qubits, depth, gates, shots, circuit calls per decision),
 compare view with bootstrap CIs, budget/usage notes.
 

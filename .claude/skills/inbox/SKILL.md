@@ -32,3 +32,4 @@ Pass `--model` on every `labq.py post` (free text; the dashboard shows it next t
 
 Never leave a taken message without a reply and a final status. Never paste secrets or long logs into a reply:
 point to the file instead.
+When you ask the researcher to look at files, write their absolute or `~/` paths (optionally `:line`) so the dashboard renders them as links to the 📁 Αρχεία tab.

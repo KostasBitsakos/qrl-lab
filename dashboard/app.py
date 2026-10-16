@@ -25,6 +25,7 @@ ROOT = os.environ.get("QRL_LAB_DIR") or os.path.abspath(os.path.join(os.path.dir
 os.environ["QRL_LAB_DIR"] = ROOT
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 from labdb import DECISIONS, LabDB, LabError  # noqa: E402
+import file_view  # noqa: E402
 import k8s_view  # noqa: E402
 from uploads import UploadError, body_with_attachments, save_uploads  # noqa: E402
 
@@ -227,9 +228,14 @@ with st.sidebar:
 d0 = db()
 n_open = len(d0.requests(state="open"))
 d0.close()
-tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_paper, tab_audit = st.tabs([
+FILES_TAB = "📁 Αρχεία"
+# Deep link ?path=...: on the first run of a session with that parameter the Αρχεία tab opens first.
+_open_files = "path" in st.query_params and not st.session_state.get("fb_tab_done")
+st.session_state["fb_tab_done"] = True
+tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_files, tab_paper, tab_audit = st.tabs([
     "💬 Συνομιλία", f"✅ Αποφάσεις ({n_open})", "🤖 Πράκτορες", "📈 Πειράματα", "⚖️ Council",
-    "🖥️ Πόροι", "☸️ Kubernetes", "📄 Paper & συνέδρια", "🧾 Ιστορικό"])
+    "🖥️ Πόροι", "☸️ Kubernetes", FILES_TAB, "📄 Paper & συνέδρια", "🧾 Ιστορικό"],
+    default=FILES_TAB if _open_files else None)
 
 # ================================================================ conversation
 with tab_chat:
@@ -300,7 +306,7 @@ with tab_chat:
                         label = f"{name} · {m['model']}" if m.get("model") else name
                         st.caption(f"**{label}** · {fmt_ts(m['ts'])} · {KIND_LABEL.get(m['kind'], m['kind'])}"
                                    f"{extra} · `{m['id']}`")
-                        st.markdown(m["body"])
+                        st.markdown(file_view.linkify(m["body"]))  # render-time only; stored text unchanged
                 st.html("<div id='chat-end'></div>")
             for m in msgs:
                 if m["author"] == "researcher" and m["status"] == "delivered" and (since(m["updated_at"]) or 0) > 180:
@@ -624,6 +630,103 @@ with tab_res:
             st.caption("GPU: δεν υπάρχει NVIDIA GPU στο VM.")
     resources()
     st.caption("Kubernetes: δες την καρτέλα ☸️ Kubernetes.")
+
+# ================================================================ files (read-only; NOT in a fragment)
+with tab_files:
+    import base64
+    ss = st.session_state
+    qp_path = st.query_params.get("path")
+    if qp_path and ss.get("fb_qp_seen") != (qp_path, st.query_params.get("line")):
+        ss["fb_qp_seen"] = (qp_path, st.query_params.get("line"))
+        ss["fb_path_in"] = qp_path
+        try:
+            ss["fb_line"] = int(st.query_params.get("line", 0)) or None
+        except ValueError:
+            ss["fb_line"] = None
+    ss.setdefault("fb_path_in", file_view.ROOTS[0])
+    fc1, fc2 = st.columns([5, 1])
+    fc1.text_input("Διαδρομή (απόλυτη ή ~/…)", key="fb_path_in")
+    hidden = fc2.toggle("Κρυφά αρχεία", value=False, key="fb_hidden")
+    try:
+        real = file_view.resolve(ss["fb_path_in"])
+    except file_view.FileViewError as e:
+        real = None
+        if str(e) == "denied":
+            st.error(file_view.DENIED_MSG, icon="🚫")
+        elif str(e) == "missing":
+            st.warning("Δεν υπάρχει αυτή η διαδρομή.")
+        else:
+            st.error("Εκτός επιτρεπτών φακέλων: " + ", ".join(file_view.ROOTS))
+
+    def _goto(p):
+        ss["fb_path_in"] = p
+        ss["fb_line"] = None
+
+    if real:
+        crumbs = file_view.breadcrumbs(real)
+        cols = st.columns(min(len(crumbs), 8) or 1)
+        for i, (lbl, p) in enumerate(crumbs[-8:]):
+            cols[i].button(lbl or "/", key=f"fb_crumb_{i}_{p}", on_click=_goto, args=(p,), width="stretch")
+        if os.path.isdir(real):
+            rows = file_view.list_dir(real, show_hidden=hidden)
+            st.caption(f"`{real}` · {len(rows)} στοιχεία · πρώτα τα νεότερα· κλικ σε γραμμή για άνοιγμα")
+            if rows:
+                df = pd.DataFrame({"": [r["icon"] for r in rows], "Όνομα": [r["name"] + ("/" if r["is_dir"] else "") for r in rows],
+                                   "Μέγεθος (B)": [r["size"] for r in rows], "Τροποποίηση": [r["mtime"] for r in rows]})
+                dkey = f"fb_df_{real}_{hidden}"
+                ss["fb_rows"] = (dkey, [r["path"] for r in rows])
+
+                def _pick():
+                    k, paths = ss["fb_rows"]
+                    sel = ss[k].selection.rows
+                    if sel:
+                        _goto(paths[sel[0]])
+
+                st.dataframe(df, hide_index=True, width="stretch", on_select=_pick, selection_mode="single-row", key=dkey)
+        else:
+            size = os.path.getsize(real)
+            kind = file_view.kind_of(real)
+            st.markdown(f"**{os.path.basename(real)}** · {size:,} B · {kind}")
+            st.button("⬆️ Φάκελος", key="fb_up", on_click=_goto, args=(os.path.dirname(real),))
+            ext = os.path.splitext(real)[1].lower()
+            if kind == "text":
+                tail = st.toggle("Τέλος αρχείου (τελευταίες 500 γραμμές)", value=False, key="fb_tail")
+                lines, total, trunc = file_view.read_text(real, tail=tail)
+                start = ss.get("fb_line")
+                if start and not tail:
+                    st.caption(f"Γραμμή {start} (ανοίχτηκε από σύνδεσμο)")
+                    lo = max(1, start - 5)
+                    shown = lines[lo - 1:lo - 1 + 60]
+                    st.code("\n".join(f"{lo + i:>5}  {l}" for i, l in enumerate(shown)), language=None)
+                    st.caption("Πλήρες αρχείο παρακάτω")
+                if trunc:
+                    st.caption("Εμφανίζονται οι τελευταίες 500 γραμμές." if tail else "Εμφανίζονται οι πρώτες 2.000 γραμμές.")
+                st.code("\n".join(lines), language=file_view.LANG.get(ext), line_numbers=True)
+            elif kind == "csv":
+                header, crow, trunc = file_view.read_csv(real)
+                width = max([len(header)] + [len(r) for r in crow]) if crow or header else 0
+                cols_ = (header + [f"col{i}" for i in range(len(header), width)])
+                cols_ = [c or f"col{i}" for i, c in enumerate(cols_)]
+                st.dataframe(pd.DataFrame([r + [""] * (width - len(r)) for r in crow], columns=cols_), width="stretch")
+                if trunc:
+                    st.caption("Εμφανίζονται οι πρώτες 500 γραμμές δεδομένων.")
+            elif kind == "image":
+                if size <= file_view.DOWNLOAD_MAX:
+                    st.image(real)
+            elif kind == "pdf":
+                if size < file_view.PDF_EMBED_MAX:
+                    b64 = base64.b64encode(open(real, "rb").read()).decode()
+                    st.html(f'<iframe src="data:application/pdf;base64,{b64}" width="100%" height="700"></iframe>')
+                else:
+                    st.info("PDF πάνω από 20 MB: μόνο λήψη.")
+            else:
+                st.info("Δυαδικό αρχείο: μόνο μέγεθος και sha256.")
+                st.code(f"size   {size:,} B\nsha256 {file_view.sha256(real)}", language=None)
+            if size <= file_view.DOWNLOAD_MAX:
+                with open(real, "rb") as fh:
+                    st.download_button("⬇️ Λήψη", fh.read(), file_name=os.path.basename(real), key="fb_dl")
+            else:
+                st.caption("Αρχείο πάνω από 200 MB: χωρίς λήψη.")
 
 # ================================================================ kubernetes (read-only)
 BADGE = {"ok": "🟢", "degraded": "🟠", "failing": "🔴"}

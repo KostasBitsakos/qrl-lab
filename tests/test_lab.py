@@ -325,6 +325,72 @@ def test_k8s_view():
     ok("k8s_view: parsing, allowlist, cluster-down")
 
 
+def test_file_view():
+    import file_view as fv
+    base = os.path.realpath(tempfile.mkdtemp(prefix="qrl-fv-"))
+    root, outside = os.path.join(base, "root"), os.path.join(base, "outside")
+    os.makedirs(os.path.join(root, "sub")); os.makedirs(os.path.join(root, ".ssh")); os.makedirs(outside)
+    roots = [root]
+    def w(p, s="x\n"):
+        with open(p, "w") as f:
+            f.write(s)
+    w(os.path.join(outside, "secret.txt")); w(os.path.join(root, "a.py"), "print(1)\n")
+    w(os.path.join(root, ".env")); w(os.path.join(root, ".ssh", "id_rsa")); w(os.path.join(root, "sub", "my_token.txt"))
+    w(os.path.join(root, "kubeconfig")); w(os.path.join(root, "k.pem")); w(os.path.join(root, ".hidden"))
+    os.symlink(outside, os.path.join(root, "escape")); os.symlink(os.path.join(outside, "secret.txt"), os.path.join(root, "esc.txt"))
+    def err(p):
+        try:
+            fv.resolve(p, roots)
+        except fv.FileViewError as e:
+            return str(e)
+        return None
+    assert err(root + "/../../etc/passwd") == "outside" and err("/etc/passwd") == "outside" and err("relative/x") == "outside"
+    assert err(root + "/escape") == "outside" and err(root + "/escape/secret.txt") == "outside" and err(root + "/esc.txt") == "outside"
+    for p in (".env", ".ssh/id_rsa", "sub/my_token.txt", "kubeconfig", "k.pem"):
+        assert err(os.path.join(root, p)) == "denied", p
+    assert fv.is_denied("/home/u/.codex/auth.json") and fv.is_denied("/home/u/.kube/config") and fv.is_denied("/x/.config/gh/hosts.yml")
+    assert not fv.is_denied("/x/a.py")
+    assert err(os.path.join(root, "a.py")) is None and err(os.path.join(root, "nope")) == "missing"
+    # listing: newest first, hidden toggle, denied / escaping entries omitted
+    os.utime(os.path.join(root, "a.py"), (1_000_000_000, 1_000_000_000))
+    os.utime(os.path.join(root, "sub"), (1_700_000_000, 1_700_000_000))
+    names = [r["name"] for r in fv.list_dir(root, False, roots)]
+    assert names == ["sub", "a.py"], names
+    assert fv.list_dir(root, False, roots)[0]["mtime"].startswith("2023-11-1")
+    assert [r["name"] for r in fv.list_dir(root, False, roots, newest_first=False)] == ["a.py", "sub"]
+    hid = [r["name"] for r in fv.list_dir(root, True, roots)]
+    assert ".hidden" in hid and ".env" not in hid and ".ssh" not in hid and "escape" not in hid and "esc.txt" not in hid, hid
+    assert [c[0] for c in fv.breadcrumbs(os.path.join(root, "sub"), roots)] == ["root", "sub"]
+    # path -> link transform
+    L = lambda s: fv.linkify(s, roots)
+    out = L(f"see {root}/a.py:5.")
+    assert f"[{root}/a.py:5](?path={root}/a.py&line=5)." in out, out
+    out = L(f"open {root}/sub/, then")
+    assert f"[{root}/sub/](?path={root}/sub&" not in out and f"?path={root}/sub)" in out and out.endswith(", then"), out
+    assert L(f"({root}/a.py)") == f"([{root}/a.py](?path={root}/a.py))", L(f"({root}/a.py)")
+    assert L("see /etc/passwd and /home/x") == "see /etc/passwd and /home/x"  # outside roots: untouched
+    assert L(f"{root}/.env") == f"{root}/.env"  # denied: no link
+    assert L(f"```\n{root}/a.py\n```") == f"```\n{root}/a.py\n```"
+    assert fv.split_ref("~/redis/x.py:12:3.") == ("~/redis/x.py", 12) and fv.split_ref("/a/b,") == ("/a/b", None)
+    home_root = os.path.realpath(fv.ROOTS[1])
+    assert "?path=" + home_root + "/x" in fv.linkify("~/simulations/x"), fv.linkify("~/simulations/x")
+    # previews
+    rows = "".join(f"{i},{i * i}\n" for i in range(700))
+    w(os.path.join(root, "t.csv"), "n,sq\n" + rows)
+    h, r, tr = fv.read_csv(os.path.join(root, "t.csv"))
+    assert h == ["n", "sq"] and len(r) == 500 and tr and r[3] == ["3", "9"]
+    w(os.path.join(root, "big.log"), "".join(f"l{i}\n" for i in range(5000)))
+    ln, total, tr = fv.read_text(os.path.join(root, "big.log"))
+    assert len(ln) == 2000 and tr and ln[0] == "l0"
+    ln, _, _ = fv.read_text(os.path.join(root, "big.log"), tail=True)
+    assert len(ln) == 500 and ln[-1] == "l4999"
+    with open(os.path.join(root, "m.pth"), "wb") as f:
+        f.write(b"\x00\x01binary")
+    assert fv.kind_of(os.path.join(root, "m.pth")) == "binary" and len(fv.sha256(os.path.join(root, "m.pth"))) == 64
+    shutil.rmtree(base)
+    ok("file_view: traversal, symlink, deny list, ordering, links, previews")
+
+
 def test_dashboard():
     from streamlit.testing.v1 import AppTest
     db = LabDB()
@@ -395,6 +461,15 @@ def test_dashboard():
     assert not at.exception, at.exception
     assert len(at.tabs) >= 9 and any("Kubernetes" in tb.label for tb in at.tabs), [tb.label for tb in at.tabs]
     ok("dashboard: Kubernetes tab renders without exception (cluster down or up)")
+    assert any("Αρχεία" in tb.label for tb in at.tabs), [tb.label for tb in at.tabs]
+    import file_view
+    file_view.ROOTS.append(os.path.realpath(TMP))  # the temp kit is not an allowed root otherwise
+    at.query_params["path"] = os.path.join(TMP, "tools", "labq.py")
+    at.query_params["line"] = "3"
+    at.run()
+    assert not at.exception, at.exception
+    assert any("labq.py" in (md.value or "") for md in at.markdown), "file preview missing"
+    ok("dashboard: Αρχεία tab renders a deep link")
 
 
 if __name__ == "__main__":
@@ -408,6 +483,7 @@ if __name__ == "__main__":
         test_launcher()
         test_uploads()
         test_k8s_view()
+        test_file_view()
         try:
             import streamlit  # noqa: F401
             test_dashboard()
