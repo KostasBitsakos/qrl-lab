@@ -343,8 +343,11 @@ def test_health_watch():
     assert d("Do you want to proceed?\n❯ 1. Yes\n  2. No", True)["state"] == "permission"
     assert d("Claude needs your permission to use Bash", True)["state"] == "permission"
     assert d("│ ❯ 1. Yes, and don't ask again", True)["state"] == "permission"
-    for t in ("API Error: 529 overloaded_error", "request failed: rate limit exceeded", "Overloaded"):
-        assert d(t, True)["state"] == "api_error", t
+    assert d("API Error: 529 overloaded_error", True)["state"] == "api_error"
+    # tool output that merely mentions these words must not raise a banner (seen live 2026-10-16)
+    for t in ("6b6b034 health_watch: exact banner (usage limit, permission prompt, API error)",
+              "request failed: rate limit exceeded", "Overloaded", "see the API Error docs"):
+        assert d(t, True)["state"] == "ok", t
     assert d("anything", False)["state"] == "down"
     assert d("user@vm:~$ ", True, "bash")["state"] == "down"
     assert d("limit reached resets 1am\n" + "\n".join(f"line {i}" for i in range(40)), True)["state"] == "ok", "old text"

@@ -15,7 +15,7 @@ import subprocess
 import sys
 import time
 
-LAB = os.environ.get("QRL_LAB_DIR") or os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+LAB = os.environ.get("QRL_LAB_DIR") or os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".lab"))
 SESSION = "lab"
 WINDOW = "coordinator"  # tools/start-coordinator.sh: the window that is not `dashboard` / `health`
 INTERVAL = float(os.environ.get("QRL_HEALTH_INTERVAL", "20"))
@@ -27,13 +27,13 @@ SHELLS = ("bash", "sh", "zsh", "fish", "dash")  # the window falls back to `exec
 PATTERNS = [
     ("limit", re.compile(r"(?i)(?:usage limit|limit reached|limit will reset|out of (?:extra )?usage)"
                          r"[^\n]*?\bresets?\s*(?:at\s*)?(?P<when>[^\n│|]{1,40}?)\s*(?:[│|]|$)")),
-    ("limit", re.compile(r"(?i)(?:usage limit|limit reached)")),
-    ("permission", re.compile(r"(?i)\bDo you want to\b")),
-    ("permission", re.compile(r"(?i)needs your permission")),
+    # Only Claude Code's own UI wording, anchored, so tool output that merely mentions these words
+    # (git logs, file contents) does not trigger a false banner.
+    ("limit", re.compile(r"(?i)^[\s│⎿>]*(?:claude )?(?:your )?(?:usage limit (?:has been )?reached|[\w-]+ limit reached|out of (?:extra )?usage)")),
+    ("permission", re.compile(r"(?i)^[\s│❯>]*Do you want to\b")),
+    ("permission", re.compile(r"(?i)^[\s│❯>]*Claude needs your permission")),
     ("permission", re.compile(r"^[\s│❯>]*1\.\s*Yes\b")),
-    ("api_error", re.compile(r"(?i)API Error")),
-    ("api_error", re.compile(r"(?i)\boverloaded\b")),
-    ("api_error", re.compile(r"(?i)rate[ _-]?limit")),
+    ("api_error", re.compile(r"^[\s│⎿>]*API Error\b")),
 ]
 
 
