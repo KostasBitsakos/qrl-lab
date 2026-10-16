@@ -71,6 +71,40 @@ def test_message_round_trip():
     ok("dashboard message -> bridge line -> take -> codex + coordinator replies -> done")
 
 
+def test_model_label():
+    import sqlite3
+    db = LabDB()
+    mid = db.researcher_send("model label test")
+    a = db.post("codex", "with model", mid, kind="contribution", model="gpt-6-sol")
+    b = db.post("coordinator", "without model", mid)
+    assert db.message(a)["model"] == "gpt-6-sol" and db.message(b)["model"] is None
+    # CLI path
+    body = os.path.join(TMP, "model_body.md")
+    open(body, "w").write("via cli")
+    r = subprocess.run([sys.executable, os.path.join(TMP, "tools", "labq.py"), "post", "--reply-to", mid,
+                        "--body-file", body, "--model", "Opus 5.5"], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert db.message(r.stdout.strip())["model"] == "Opus 5.5", r.stdout
+    # migration: old DB without the column, run twice
+    old = os.path.join(TMP, "old.db")
+    c = sqlite3.connect(old)
+    c.executescript("CREATE TABLE messages (id TEXT PRIMARY KEY, ts TEXT NOT NULL, thread_id TEXT NOT NULL,"
+                    " reply_to TEXT, author TEXT NOT NULL, kind TEXT NOT NULL, title TEXT, body TEXT NOT NULL,"
+                    " status TEXT, updated_at TEXT NOT NULL, delivered_count INTEGER NOT NULL DEFAULT 0);"
+                    " INSERT INTO messages(id,ts,thread_id,author,kind,body,updated_at)"
+                    " VALUES ('M-old','t','M-old','researcher','message','old','t');")
+    c.close()
+    for _ in range(2):
+        d = LabDB(old)
+        d.close()
+    d = LabDB(old)
+    assert d.message("M-old")["model"] is None
+    nid = d.post("codex", "x", "M-old", model="m1")
+    assert d.message(nid)["model"] == "m1"
+    d.close()
+    ok("model stored via API and CLI; migration of a DB without the column is idempotent")
+
+
 def test_redelivery_after_restart():
     db = LabDB()
     mid = db.researcher_send("μήνυμα πριν από restart", kind="proposal")
@@ -296,13 +330,22 @@ def test_dashboard():
     at.run()
     click(c, "✏️ Ζητώ αλλαγές"); at.run()
     assert db.request(c)["state"] == "open" and any("Γράψε" in e.value for e in at.error)
-    ok("dashboard: send message, render reply, approve, reject, refuse changes without text")
+    # the author/model label is rendered
+    cur = db.threads(1)[0]["thread_id"]
+    db.post("codex", "labelled", cur, kind="contribution", model="gpt-6-sol")
+    db.post("coordinator", "plain", cur)
+    at.run()
+    caps = [x.value for x in at.caption]
+    assert any("Codex (OpenAI) · gpt-6-sol**" in v for v in caps), caps
+    assert any(v.startswith("**Συντονιστής (Claude Opus)** ·") for v in caps), caps  # no model: author only
+    ok("dashboard: model label rendered")
 
 
 if __name__ == "__main__":
     print(f"QRL-Lab tests in {TMP}")
     try:
         test_message_round_trip()
+        test_model_label()
         test_redelivery_after_restart()
         test_decisions()
         test_hook()

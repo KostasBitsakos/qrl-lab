@@ -4,7 +4,7 @@
 Conversation (researcher <-> agents):
   labq.py take M-...                         pick up a researcher message: prints the thread, marks it acknowledged
   labq.py show M-...                         print a thread without changing anything
-  labq.py post --reply-to M-... --body-file f.md [--author coordinator|codex|agent:<name>]
+  labq.py post --reply-to M-... --body-file f.md [--author coordinator|codex|agent:<name>] [--model 'Opus 5.5']
                [--kind reply|contribution|status] [--status in_progress|waiting_approval|done|failed]
   labq.py status M-... done                  set the status of a researcher message
 
@@ -41,6 +41,8 @@ def _body(a):
 def _print_thread(thread, full_id=None, clip=600):
     for m in thread:
         who = AUTHOR_LABEL.get(m["author"], m["author"])
+        if dict(m).get("model"):
+            who += f" · {m['model']}"
         st = f" [{m['status']}]" if m["status"] else ""
         body = m["body"]
         if m["id"] != full_id and len(body) > clip:
@@ -65,7 +67,7 @@ def cmd_show(a, db):
 
 
 def cmd_post(a, db):
-    print(db.post(a.author, _body(a), a.reply_to, kind=a.kind, set_status=a.status))
+    print(db.post(a.author, _body(a), a.reply_to, kind=a.kind, set_status=a.status, model=a.model))
 
 
 def cmd_status(a, db):
@@ -133,6 +135,7 @@ def main():
     g = s.add_mutually_exclusive_group(required=True)
     g.add_argument("--body-file"); g.add_argument("--body")
     s.add_argument("--author", default="coordinator")
+    s.add_argument("--model", default=None, help="free text, e.g. 'Opus 5.5' or 'gpt-6-sol'")
     s.add_argument("--kind", default="reply", choices=["reply", "contribution", "status"])
     s.add_argument("--status", choices=["in_progress", "waiting_approval", "done", "failed"])
     s.set_defaults(func=cmd_post)

@@ -26,6 +26,8 @@ description: Handle a researcher message from the QRL-Lab dashboard (a QRL-INBOX
    - **Τι χρειάζομαι από σένα** (with the request id, if any)
    Then: `python3 tools/labq.py post --reply-to <M-id> --body-file .lab/outbox/<M-id>.md --status done`
    (or `--status waiting_approval` / `--status failed` with the reason in the text).
+Pass `--model` on every `labq.py post` (free text; the dashboard shows it next to the author). Examples: the
+   coordinator `--model "Opus 5.5"`, Codex `--model gpt-6-sol`.
 6. `PushNotification` only if the researcher must act (blocking request) or long work finished.
 
 Never leave a taken message without a reply and a final status. Never paste secrets or long logs into a reply:

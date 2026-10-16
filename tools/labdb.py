@@ -138,7 +138,18 @@ class LabDB:
         self.conn.execute("PRAGMA busy_timeout=10000")
         self.conn.execute("PRAGMA foreign_keys=ON")
         self.conn.executescript(SCHEMA)
+        self._migrate()
         self.conn.execute("INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
+
+    def _migrate(self):
+        """Idempotent, additive migrations for databases created by older versions."""
+        cols = {r[1] for r in self.conn.execute("PRAGMA table_info(messages)")}
+        if "model" not in cols:
+            try:
+                self.conn.execute("ALTER TABLE messages ADD COLUMN model TEXT")
+            except sqlite3.OperationalError:
+                if "model" not in {r[1] for r in self.conn.execute("PRAGMA table_info(messages)")}:
+                    raise  # lost a race with another process that added it: fine
 
     def close(self):
         self.conn.close()
@@ -189,7 +200,7 @@ class LabDB:
             self._audit(c, "researcher", "send", mid, kind)
         return mid
 
-    def post(self, author, body, reply_to, kind="reply", set_status=None):
+    def post(self, author, body, reply_to, kind="reply", set_status=None, model=None):
         """An agent writes into a thread. reply_to must be an existing message id."""
         body = (body or "").strip()
         if not body:
@@ -206,9 +217,10 @@ class LabDB:
                 raise LabError(f"Unknown message {reply_to}.")
             mid = self._new_id(c, "messages", "id", "M")
             t = now()
-            c.execute("INSERT INTO messages(id, ts, thread_id, reply_to, author, kind, title, body, status, updated_at)"
-                      " VALUES (?,?,?,?,?,?,?,?,?,?)",
-                      (mid, t, parent["thread_id"], reply_to, author, kind, None, body, None, t))
+            c.execute("INSERT INTO messages(id, ts, thread_id, reply_to, author, kind, title, body, status, updated_at, model)"
+                      " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                      (mid, t, parent["thread_id"], reply_to, author, kind, None, body, None, t,
+                       (model or "").strip() or None))
             if set_status:
                 target = reply_to if parent["author"] == "researcher" else parent["thread_id"]
                 c.execute("UPDATE messages SET status=?, updated_at=? WHERE id=? AND author='researcher'",

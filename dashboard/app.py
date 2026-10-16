@@ -296,7 +296,8 @@ with tab_chat:
                         if m["author"] == "researcher" and m["status"]:
                             si, sl = MSG_STATUS.get(m["status"], ("", m["status"]))
                             extra = f" · {si} {sl}"
-                        st.caption(f"**{name}** · {fmt_ts(m['ts'])} · {KIND_LABEL.get(m['kind'], m['kind'])}"
+                        label = f"{name} · {m['model']}" if m.get("model") else name
+                        st.caption(f"**{label}** · {fmt_ts(m['ts'])} · {KIND_LABEL.get(m['kind'], m['kind'])}"
                                    f"{extra} · `{m['id']}`")
                         st.markdown(m["body"])
                 st.html("<div id='chat-end'></div>")
