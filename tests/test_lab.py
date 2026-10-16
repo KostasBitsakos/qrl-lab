@@ -16,8 +16,8 @@ import time
 
 KIT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 TMP = tempfile.mkdtemp(prefix="qrl-test-")
-for sub in ("tools", "dashboard", "docs", ".streamlit"):
-    shutil.copytree(os.path.join(KIT, sub), os.path.join(TMP, sub))
+for sub in ("tools", "dashboard", "docs", ".streamlit", "paper"):
+    shutil.copytree(os.path.join(KIT, sub), os.path.join(TMP, sub), ignore=shutil.ignore_patterns("build"))
 os.environ["QRL_LAB_DIR"] = TMP
 os.chdir(TMP)
 sys.path.insert(0, os.path.join(TMP, "tools"))
@@ -482,6 +482,59 @@ def test_file_view():
     ok("file_view: traversal, symlink, deny list, ordering, links, previews")
 
 
+def test_paper_build():
+    import paper_build as pb
+    # todo counter: markers in comments do not count
+    assert pb.count_todos("a \\todo{x} b % \\todo{c}\n\\todo[inline]{y} 50\\% \\todo{z}") == 3
+    assert pb.tbd_count(TMP) is not None and pb.tbd_count(TMP) >= 1
+    assert all(r["todo"] >= 0 for r in pb.todo_counts(TMP)) and pb.todo_counts(TMP)
+    # path guard (git repo of its own so nothing touches the real one)
+    g = tempfile.mkdtemp(prefix="qrl-paper-")
+    os.makedirs(os.path.join(g, "paper", "sections"))
+    os.makedirs(os.path.join(g, "paper", "build"))
+    with open(os.path.join(g, "paper", "sections", "a.tex"), "w") as f:
+        f.write("old\n")
+    with open(os.path.join(g, "secret.tex"), "w") as f:
+        f.write("x")
+    os.symlink(os.path.join(g, "secret.tex"), os.path.join(g, "paper", "link.tex"))
+    for bad in ("../secret.tex", "/etc/passwd", "link.tex", "build/x.tex", "sections/a.py", "", "sections/../../secret.tex"):
+        try:
+            pb.safe_path(g, bad)
+            raise AssertionError("accepted " + bad)
+        except pb.PaperError:
+            pass
+    assert pb.safe_path(g, "sections/a.tex").endswith("sections/a.tex")
+    env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
+    os.environ.update({k: env[k] for k in env if k.startswith("GIT_")})
+    subprocess.run(["git", "-C", g, "init", "-q"], check=True)
+    subprocess.run(["git", "-C", g, "add", "paper"], check=True)
+    subprocess.run(["git", "-C", g, "commit", "-qm", "init"], check=True)
+    h = pb.save_file(g, "sections/a.tex", "new\n")
+    assert h and open(os.path.join(g, "paper", "sections", "a.tex")).read() == "new\n"
+    msg = subprocess.run(["git", "-C", g, "log", "-1", "--format=%s"], capture_output=True, text=True).stdout.strip()
+    assert msg == "paper: edit sections/a.tex from dashboard", msg
+    shutil.rmtree(g)
+    # real latexmk, IEEE variant
+    if shutil.which("latexmk"):
+        r = pb.compile(TMP, "ieee", timeout=120)
+        assert r["ok"] and os.path.getsize(r["pdf"]) > 1000, r["log_tail"]
+        assert pb.build_time(TMP, "ieee")
+    else:
+        print("  --  latexmk not installed, compile test skipped")
+    ok("paper_build: todo counter, path guard, save+commit, latexmk IEEE compile")
+
+
+def test_paper_tab():
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_file(os.path.join(TMP, "dashboard", "app.py"), default_timeout=60)
+    at.run()
+    assert not at.exception, at.exception
+    assert any(b.label == "Μεταγλώττιση" for b in at.button)
+    assert any(s.label == "Venue" for s in at.selectbox)
+    assert any(t.label == "Επεξεργασία" for t in at.toggle)
+    ok("paper tab: renders (venue selector, compile button, edit toggle)")
+
+
 def test_dashboard():
     from streamlit.testing.v1 import AppTest
     db = LabDB()
@@ -829,9 +882,11 @@ if __name__ == "__main__":
         test_file_view()
         test_web_terminal()
         test_paper_plots()
+        test_paper_build()
         try:
             import streamlit  # noqa: F401
             test_dashboard()
+            test_paper_tab()
         except ImportError:
             print("  --  dashboard test skipped (streamlit not installed in this interpreter)")
         print(f"ALL PASSED ({len(PASSED)})")

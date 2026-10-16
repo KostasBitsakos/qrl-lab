@@ -30,6 +30,7 @@ import k8s_view  # noqa: E402
 import web_terminal  # noqa: E402
 import summarize_runs  # noqa: E402
 import paper_plots  # noqa: E402
+import paper_build  # noqa: E402
 from uploads import UploadError, attachment_paths  # noqa: E402
 
 LAB = os.path.join(ROOT, ".lab")
@@ -997,13 +998,71 @@ with tab_paper:
     claims = read_text(os.path.join(ROOT, "paper", "claims.md"))
     st.markdown("##### Ισχυρισμοί → τεκμήρια")
     st.markdown(claims or "_Δεν υπάρχει ακόμη `paper/claims.md`._")
-    secs = sorted(glob.glob(os.path.join(ROOT, "paper", "sections", "*.tex")))
-    if secs:
-        st.markdown("##### Ενότητες paper")
-        st.dataframe(pd.DataFrame([{"ενότητα": os.path.basename(p),
-                                    "λέξεις (περίπου)": len((read_text(p) or "").split()),
-                                    "\\todo": (read_text(p) or "").count("\\todo")} for p in secs]),
-                     hide_index=True, width="stretch")
+    # ---- manuscript: build, PDF, source (NOT in a fragment, so typing is never refreshed away)
+    st.markdown("##### 📝 Paper")
+    pss = st.session_state
+    pc1, pc2 = st.columns([1, 2])
+    pvenue = pc1.selectbox("Venue", paper_build.VENUES, format_func=str.upper, key="paper_venue")
+    if pc2.button("Μεταγλώττιση", key="paper_compile", type="primary"):
+        with st.spinner("latexmk…"):
+            pss["paper_result"] = {"venue": pvenue, **paper_build.compile(ROOT, pvenue, timeout=120)}
+    pres = pss.get("paper_result")
+    if pres:
+        if pres["ok"]:
+            st.success(f"{pres['venue'].upper()}: επιτυχία ({pres['seconds']} s)")
+        else:
+            st.error(f"{pres['venue'].upper()}: αποτυχία (rc={pres['returncode']})")
+            if pres["hint"]:
+                st.warning(pres["hint"])
+            st.code(pres["log_tail"], language=None)
+    pdfp = paper_build.pdf_path(ROOT, pvenue)
+    if os.path.exists(pdfp):
+        st.caption(f"Τελευταία μεταγλώττιση {pvenue.upper()}: {paper_build.build_time(ROOT, pvenue)}")
+        with open(pdfp, "rb") as _f:
+            pdf_bytes = _f.read()
+        st.download_button("⬇️ PDF", pdf_bytes, file_name=os.path.basename(pdfp), mime="application/pdf",
+                           key="paper_dl")
+        if len(pdf_bytes) < file_view.PDF_EMBED_MAX:
+            try:
+                st.pdf(pdf_bytes, height=600)
+            except Exception:  # noqa: BLE001 - fall back to a base64 iframe
+                import base64
+                st.markdown(f'<iframe src="data:application/pdf;base64,{base64.b64encode(pdf_bytes).decode()}" '
+                            'width="100%" height="600"></iframe>', unsafe_allow_html=True)
+    else:
+        st.info(f"Δεν υπάρχει PDF για {pvenue.upper()}· πάτα «Μεταγλώττιση».")
+
+    st.markdown("##### Πηγή LaTeX")
+    pfiles = paper_build.list_files(ROOT)
+    if pfiles:
+        psel = st.selectbox("Αρχείο", pfiles, key="paper_file")
+        try:
+            ptext = paper_build.read_file(ROOT, psel)
+        except paper_build.PaperError as e:
+            ptext = None
+            st.error(str(e))
+        if ptext is not None:
+            if st.toggle("Επεξεργασία", key="paper_edit"):
+                newtext = st.text_area("Περιεχόμενο", ptext, height=420, key=f"paper_ta_{psel}")
+                if st.button("Αποθήκευση", key="paper_save"):
+                    try:
+                        h = paper_build.save_file(ROOT, psel, newtext)
+                        st.success(f"Αποθηκεύτηκε και έγινε commit ({h})" if h else "Αποθηκεύτηκε (καμία αλλαγή για commit)")
+                    except (paper_build.PaperError, subprocess.CalledProcessError) as e:
+                        st.error(str(e))
+            else:
+                st.code(ptext, language={".tex": "latex", ".bib": "bibtex", ".md": "markdown"}.get(
+                    os.path.splitext(psel)[1].lower()), line_numbers=True)
+
+    st.markdown("##### Κατάσταση")
+    trows = paper_build.todo_counts(ROOT)
+    if trows:
+        st.dataframe(pd.DataFrame([{"ενότητα": r["section"], "λέξεις (περίπου)": r["words"], "\\todo": r["todo"]}
+                                   for r in trows]), hide_index=True, width="stretch")
+    tbd = paper_build.tbd_count(ROOT)
+    st.metric("[TBD] στο generated/results.tex", "—" if tbd is None else tbd)
+    crows = paper_build.claims_rows(ROOT)
+    st.markdown(f"Γραμμές claims.md: **{len(crows)}**")
 
 # ================================================================ audit
 with tab_audit:

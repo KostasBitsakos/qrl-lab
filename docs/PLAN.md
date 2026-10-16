@@ -329,6 +329,13 @@ parts, so typing is never lost. Greek UI.
    **☸️ Kubernetes** — read-only (`tools/k8s_view.py`, verbs `get`/`version`/`config current-context` only, 5 s timeout, 10 s cache): KPI tiles, health badges, failing items with reasons, pods/deployments/services/nodes/HPAs; clear Greek message when the API server is down.
 7. **📄 Paper & συνέδρια** — deadlines with countdown (`docs/deadlines.json`, verified sources only), `docs/VENUES.md`,
    `paper/claims.md`, section status.
+   The same tab holds the manuscript tools (`tools/paper_build.py`, outside auto-refresh fragments): venue selector
+   (IEEE/ACM/LNCS) + «Μεταγλώττιση» (latexmk, 120 s timeout, `-interaction=nonstopmode -halt-on-error`, output
+   `paper/build/<venue>/`, last 40 log lines on failure), PDF viewer + download + build time, LaTeX source view over
+   `paper/**/*.tex|.bib|.md` (read-only; «Επεξεργασία» + «Αποθήκευση» write only under `paper/`, realpath and
+   deny-list checked, commit "paper: edit <file> from dashboard"), and status (`\todo` per section, `[TBD]` macros in
+   `generated/results.tex`, claims.md rows). `llncs.cls` is not in Ubuntu TeX Live: the LNCS build needs Springer's
+   author kit (`llncs.cls`, `splncs04.bst`) placed in `paper/`.
 8. **🧾 Ιστορικό** — audit log of every send, take, decision, launch and stop.
 9. **📁 Αρχεία** — read-only file browser (`tools/file_view.py`) over `~/qrl-lab`, `~/simulations`, `~/redis`, `~/k8s`, `~/prometheus-grafana`: realpath-confined, credential deny list, previews (text/csv/image/pdf/binary sha256); deep link `?path=<abs>&line=N`; paths in chat messages render as links. Not inside a fragment.
 Planned for v2 (when data exists): quantum resource panel (qubits, depth, gates, shots, circuit calls per decision),
