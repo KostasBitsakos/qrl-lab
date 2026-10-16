@@ -28,6 +28,8 @@ from labdb import DECISIONS, LabDB, LabError, map_choice  # noqa: E402
 import file_view  # noqa: E402
 import k8s_view  # noqa: E402
 import web_terminal  # noqa: E402
+import summarize_runs  # noqa: E402
+import paper_plots  # noqa: E402
 from uploads import UploadError, attachment_paths  # noqa: E402
 
 LAB = os.path.join(ROOT, ".lab")
@@ -691,6 +693,42 @@ with tab_runs:
         fig.update_yaxes(gridcolor="rgba(137,135,129,0.25)")
         st.plotly_chart(fig, theme="streamlit", width="stretch", config={"displayModeBar": False})
     runs_view()
+
+    st.markdown("##### Εικόνες αποτελεσμάτων run")
+    _d = db()
+    _all_runs = _d.runs()
+    _d.close()
+    if _all_runs:
+        _rid = st.selectbox("Run", [r["run_id"] for r in _all_runs], key="img_run")
+        _rd = next(r["run_dir"] for r in _all_runs if r["run_id"] == _rid)
+        _imgs = paper_plots.find_result_images(_rd)
+        if not _imgs:
+            st.caption("Το run δεν έχει εικόνες στο `results/`.")
+        for _grp in dict.fromkeys(g for g, _, _ in _imgs):
+            with st.expander(f"results/{_grp}" if _grp != "(results)" else "results/", expanded=_grp == "(results)"):
+                for _g, _cap, _p in _imgs:
+                    if _g == _grp:
+                        st.image(_p, caption=f"{_rid}: {_cap}")
+
+    st.markdown("##### Σύγκριση σε στυλ paper")
+    _reqs = summarize_runs.request_ids(os.path.join(ROOT, ".lab"))
+    if _reqs:
+        _req = st.selectbox("Αίτημα (request id)", _reqs, index=len(_reqs) - 1, key="cmp_req")
+        _rows = summarize_runs.collect(_req, os.path.join(ROOT, ".lab"))
+        _agg = summarize_runs.aggregate_by_seed(_rows)
+        if _agg:
+            for _metric, _title in (("reward", "Total accumulated reward"), ("vms", "Mean VMs")):
+                st.markdown(f"**{_title}**")
+                _fig = paper_plots.comparison_figure(_agg, _metric)
+                st.pyplot(_fig)
+                _fig.clf()
+            st.caption("Οι τιμές είναι μέσοι όροι επί των επεισοδίων και των seeds από τα runs: "
+                       + ", ".join(r[0] for r in _rows) + ". Οι μπάρες σφάλματος είναι η τυπική απόκλιση μεταξύ "
+                       "seeds (0 όταν υπάρχει ένα seed). Το `model` είναι το προεκπαιδευμένο μοντέλο (k βήματα).")
+        else:
+            st.caption("Τα runs του αιτήματος δεν έχουν ακόμη επεισόδια με `model` και `reward`.")
+    else:
+        st.caption("Δεν υπάρχουν runs αιτήματος για σύγκριση.")
 
     st.markdown("##### Διακοπή run")
     d = db()

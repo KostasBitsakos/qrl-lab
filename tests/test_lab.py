@@ -771,6 +771,46 @@ def test_web_terminal():
     ok("web terminal: token check, bind address, idle timeout, tmux command, token mode 600, HTTP auth")
 
 
+def test_paper_plots():
+    import summarize_runs as sr
+    import paper_plots as pp
+    lab = os.path.join(TMP, "fixlab")
+    def mk(name, entry, eps, imgs=()):
+        d = os.path.join(lab, "runs", name)
+        os.makedirs(os.path.join(d, "results", "model_1"), exist_ok=True)
+        json.dump({"entry_spec": {"name": entry}}, open(os.path.join(d, "spec_entry.json"), "w"))
+        json.dump({"status": "done"}, open(os.path.join(d, "launcher.json"), "w"))
+        with open(os.path.join(d, "metrics.jsonl"), "w") as f:
+            f.write(json.dumps({"step": 0, "loss": 1.0}) + "\n")  # ignored: no model/reward
+            for model, rew, vm in eps:
+                f.write(json.dumps({"step": 1, "model": model, "reward": rew, "mean_vms": vm}) + "\n")
+        for im in imgs:
+            open(os.path.join(d, "results", im), "wb").write(b"x")
+        return d
+    mk("20260101-000000-R-20260101-001-e0-a1", "fixed-seed0", [(1, 100.0, 2.0), (1, 300.0, 4.0), (2, 10.0, 1.0)],
+       ["accumulated_rewards.jpg", "model_1/evaluation_metrics.jpg", "model_1/notes.txt"])
+    mk("20260101-000000-R-20260101-001-e1-a1", "fixed-seed1", [(1, 400.0, 3.0), (2, 30.0, 1.0)])
+    mk("20260101-000000-R-20260101-001-e2-a1", "legacy-seed0", [(1, 5.0, 9.0)])
+    mk("20260101-000000-R-20260101-002-e0-a1", "other-seed0", [(1, 1.0, 1.0)])
+    assert sr.request_ids(lab) == ["R-20260101-001", "R-20260101-002"]
+    rows = sr.collect("R-20260101-001", lab)
+    assert len(rows) == 3
+    agg = sr.aggregate_by_seed(rows)
+    assert set(agg) == {"fixed", "legacy"} and set(agg["fixed"]) == {1, 2}
+    f1 = agg["fixed"][1]  # seed0 mean 200, seed1 mean 400 -> mean 300, sd 141.42
+    assert f1["n_seeds"] == 2 and f1["reward_mean"] == 300.0 and abs(f1["reward_sd"] - 141.4213562) < 1e-6
+    assert f1["vms_mean"] == 3.0 and f1["vms_sd"] == 0.0, f1  # both seeds average 3.0 VMs
+    assert agg["legacy"][1]["reward_sd"] == 0.0
+    imgs = pp.find_result_images(rows[0][0] and os.path.join(lab, "runs", rows[0][0]))
+    assert [(g, c) for g, c, _ in imgs] == [("(results)", "accumulated_rewards.jpg"),
+                                            ("model_1", os.path.join("model_1", "evaluation_metrics.jpg"))], imgs
+    for metric in ("reward", "vms"):
+        fig = pp.comparison_figure(agg, metric)
+        labels = [t.get_text() for ax in fig.axes for t in ax.get_xticklabels()]
+        assert "fixed trained for 1k steps" in labels and "legacy trained for 1k steps" in labels, labels
+    ok("paper plots: aggregation over seeds, request ids, result images, comparison figure")
+
+
 if __name__ == "__main__":
     print(f"QRL-Lab tests in {TMP}")
     try:
@@ -788,6 +828,7 @@ if __name__ == "__main__":
         test_k8s_view()
         test_file_view()
         test_web_terminal()
+        test_paper_plots()
         try:
             import streamlit  # noqa: F401
             test_dashboard()
