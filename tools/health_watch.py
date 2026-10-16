@@ -26,7 +26,7 @@ SHELLS = ("bash", "sh", "zsh", "fish", "dash")  # the window falls back to `exec
 # Highest priority first. Each entry: (state, compiled regex). A named group `when` is captured verbatim.
 PATTERNS = [
     ("limit", re.compile(r"(?i)(?:usage limit|limit reached|limit will reset|out of (?:extra )?usage)"
-                         r"[^\n]*?\bresets?\s*(?:at\s*)?(?P<when>[^\n│|]{1,40}?)\s*(?:[│|]|$)")),
+                         r"[^\n]*?\bresets?\s*(?:at\s*)?(?P<when>[^\n│|·]{1,40}?)\s*(?:[│|·]|$)")),
     # Only Claude Code's own UI wording, anchored, so tool output that merely mentions these words
     # (git logs, file contents) does not trigger a false banner.
     ("limit", re.compile(r"(?i)^[\s│⎿>]*(?:claude )?(?:your )?(?:usage limit (?:has been )?reached|[\w-]+ limit reached|out of (?:extra )?usage)")),

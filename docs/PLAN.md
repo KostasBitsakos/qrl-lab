@@ -458,7 +458,7 @@ Gate (proposal):
 **Primary candidate (deadline fits R8):** IEEE CCGrid 2027 (27th IEEE International Symposium on Cluster,
 Cloud and Internet Computing), Dallas-Fort Worth, May 24–27 2027.
 Abstract **Nov 24 2026**, paper **Dec 1 2026** (AoE); up to 10 pages incl. references, IEEE template;
-Track 1 covers quantum and emerging systems, Track 2 covers resource management incl. autoscaling;
+7 tracks (CFP checked 2026-10-16; likely fit Track 3 Systems for AI/ML or Track 5 Performance, see docs/VENUES.md);
 the 1st IEEE International Conference on Quantum Systems (QSys 2027) is co-located.
 `[VERIFIED 2026-10-15 from the EasyChair CFP]` CORE rank and QSys 2027 deadlines `[TO VERIFY by scholar]`.
 

@@ -14,5 +14,21 @@
     "due_label": "01/12/2026 23:59 AoE",
     "source": "https://easychair.org/cfp/ccgrid27",
     "verified": "2026-10-15"
+  },
+  {
+    "venue": "ACM/SPEC ICPE 2027",
+    "what": "abstract",
+    "due": "2026-11-10T11:59:00+00:00",
+    "due_label": "09/11/2026 23:59 AoE",
+    "source": "https://icpe2027.spec.org/important-dates/",
+    "verified": "2026-10-16"
+  },
+  {
+    "venue": "ACM/SPEC ICPE 2027",
+    "what": "paper submission (10 pp ACM)",
+    "due": "2026-11-17T11:59:00+00:00",
+    "due_label": "16/11/2026 23:59 AoE",
+    "source": "https://icpe2027.spec.org/important-dates/",
+    "verified": "2026-10-16"
   }
 ]
