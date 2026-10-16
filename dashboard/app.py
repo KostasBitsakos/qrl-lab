@@ -353,7 +353,7 @@ FILES_TAB = "📁 Αρχεία"
 _open_files = "path" in st.query_params and not st.session_state.get("fb_tab_done")
 st.session_state["fb_tab_done"] = True
 TAB_NAMES = ["💬 Συνομιλία", f"✅ Αποφάσεις ({n_open})", "🤖 Πράκτορες", "📈 Πειράματα", "⚖️ Council",
-             "🖥️ Πόροι", "☸️ Kubernetes", "📡 Prometheus", FILES_TAB, "📝 Paper", "🎓 Συνέδρια", "🧾 Ιστορικό", "⌨️ Terminal"]
+             "🖥️ Πόροι", "☸️ Kubernetes", "📡 Prometheus", "📊 Grafana", FILES_TAB, "📝 Paper", "🎓 Συνέδρια", "🧾 Ιστορικό", "⌨️ Terminal"]
 _term_url = web_terminal.iframe_url() if web_terminal.running() else ""
 _side = bool(_term_url) and st.sidebar.toggle("Terminal στα δεξιά", key="term_side")
 if _side:  # tabs in the left column, the terminal in a right-hand column
@@ -361,10 +361,10 @@ if _side:  # tabs in the left column, the terminal in a right-hand column
     with _right:
         st.iframe(_term_url, height=700)
     with _left:
-        (tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_prom, tab_files, tab_paper, tab_venues,
+        (tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_prom, tab_grafana, tab_files, tab_paper, tab_venues,
          tab_audit, tab_term) = st.tabs(TAB_NAMES, default=FILES_TAB if _open_files else None)
 else:
-    (tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_prom, tab_files, tab_paper, tab_venues,
+    (tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_prom, tab_grafana, tab_files, tab_paper, tab_venues,
      tab_audit, tab_term) = st.tabs(TAB_NAMES, default=FILES_TAB if _open_files else None)
 
 # ================================================================ conversation
@@ -1090,6 +1090,20 @@ with tab_prom:
                     st.code(expr, language="promql")
         st.caption(f"Ανανεώθηκε {dt.datetime.now().strftime('%H:%M:%S')}")
     prom_panel(p_sel, p_custom, p_range)
+
+# ================================================================ grafana (iframe + quick links; no credentials here)
+GRAFANA_URL = os.environ.get("QRL_GRAFANA_URL", "http://localhost:32000")
+with tab_grafana:
+    st.info("VS Code → Ports → Forward 32000, μετά κάνε login στο Grafana μία φορά μέσα σε αυτό το frame.", icon="🔌")
+    st.markdown(f"[Άνοιγμα σε νέα καρτέλα]({GRAFANA_URL})")
+    st.markdown("##### Γρήγοροι σύνδεσμοι (Explore, με το προεπιλεγμένο datasource)")
+    gl = st.columns(2)
+    for i, (title, url) in enumerate(prom_view.grafana_links(GRAFANA_URL)):
+        gl[i % 2].markdown(f"- [{title}]({url})")
+    st.caption("Αν δεν υπάρχουν dashboards, ένα Redis/K8s dashboard μπορεί να εισαχθεί αργότερα (χρειάζεται το login "
+               "του ερευνητή· δεν γίνεται αυτόματα). Αν το frame μένει κενό, το Grafana μπορεί να μην επιτρέπει "
+               "embedding (`allow_embedding`) ή να λείπει το port forward.")
+    st.iframe(GRAFANA_URL, height=800)
 
 # ================================================================ paper & venues
 with tab_paper:

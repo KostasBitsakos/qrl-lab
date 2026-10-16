@@ -696,6 +696,8 @@ def test_prom_view():
             raise AssertionError("no error")
         except pv.PromError:
             pass
+    gl = pv.grafana_links("http://localhost:32000/")
+    assert len(gl) == len(ds) and all(u.startswith("http://localhost:32000/explore?left=%7B") for _, u in gl), gl[:1]
     ok("prom_view: allowlist, query building, parsing, mocked GET")
 
 
@@ -707,6 +709,18 @@ def test_prom_tab():
     assert any(r.label == "Εύρος" for r in at.radio)
     assert any(m.label == "Redis pods" for m in at.multiselect)
     ok("dashboard: Prometheus tab renders (server unreachable in tests)")
+
+
+def test_grafana_tab():
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_file(os.path.join(TMP, "dashboard", "app.py"), default_timeout=60).run()
+    assert not at.exception, at.exception
+    assert "📊 Grafana" in [t.label for t in at.tabs]
+    gt = [t for t in at.tabs if t.label == "📊 Grafana"][0]
+    txt = " ".join(m.value for m in gt.markdown)
+    assert "[Άνοιγμα σε νέα καρτέλα](http://localhost:32000)" in txt and "/explore?left=" in txt
+    assert "Forward 32000" in " ".join(i.value for i in gt.info)
+    ok("dashboard: Grafana tab renders iframe note, new-tab link and quick links")
 
 
 def test_dashboard():
@@ -1066,6 +1080,7 @@ if __name__ == "__main__":
             test_agents_tab_roles()
             test_paper_tab()
             test_prom_tab()
+            test_grafana_tab()
         except ImportError:
             print("  --  dashboard test skipped (streamlit not installed in this interpreter)")
         print(f"ALL PASSED ({len(PASSED)})")

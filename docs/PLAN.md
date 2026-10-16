@@ -333,6 +333,9 @@ parts, so typing is never lost. Greek UI.
    9 default charts, per-category multiselects (entries without data are marked ⚠), an «Advanced» search over all
    metric names (counters shown as `rate(…[5m])`), range 15 m/1 h/6 h/24 h, Plotly, isolated fragment refreshing every 15 s
    with the selectors outside it.
+   **📊 Grafana** — `st.iframe` (800 px) to `http://localhost:32000` (env `QRL_GRAFANA_URL`; VS Code → Ports → Forward 32000,
+   login once in the frame; no credentials stored or guessed), «Άνοιγμα σε νέα καρτέλα» link, Explore quick links for the
+   9 default Prometheus panels (default datasource). Importing a Redis/K8s dashboard needs the researcher's login: not done.
 7. **🎓 Συνέδρια** (split from the former «Paper & συνέδρια» tab) — deadlines with countdown (`docs/deadlines.json`,
    verified sources only), `docs/VENUES.md`, `paper/claims.md`.
    **📝 Paper** — the «Paper — συγγραφή» chat with writer/reviewer selection, plus the manuscript tools (`tools/paper_build.py`, outside auto-refresh fragments): venue selector

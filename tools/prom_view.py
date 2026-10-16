@@ -184,6 +184,17 @@ def availability(base=None):
     return {k: has_data(v["expr"], base) for k, v in CATALOGUE.items()}
 
 
+def grafana_links(grafana_url, keys=None):
+    """Explore links (default datasource) for the default catalogue panels: [(title, url)]. No credentials involved."""
+    out = []
+    for k, v in CATALOGUE.items():
+        if (k in keys) if keys is not None else v["default"]:
+            left = json.dumps({"range": {"from": "now-1h", "to": "now"},
+                               "queries": [{"refId": "A", "expr": v["expr"]}]}, separators=(",", ":"))
+            out.append((v["title"], grafana_url.rstrip("/") + "/explore?left=" + urllib.parse.quote(left)))
+    return out
+
+
 if __name__ == "__main__":  # quick check against the live server (GET only)
     for k, ok in availability().items():
         print(("DATA   " if ok else "EMPTY  ") + k + ("  [default]" if CATALOGUE[k]["default"] else ""))
