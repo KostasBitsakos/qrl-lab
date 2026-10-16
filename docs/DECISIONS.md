@@ -23,6 +23,7 @@ The calibration uses a **stateless Deployment**, as in the original 2025 setup, 
 | codex-researcher (literature/venues second opinion, read-only, verified sources) | `gpt-6.1-sol` / medium |
 | codex-architect (council: simulator, models, paper claims) | `gpt-6-astra` / high, with the reason logged |
 
+- **2026-10-16 (researcher, M-20261016-078):** use the ChatGPT/Codex agents more, not only Claude agents. The researcher has ChatGPT Plus. Default to Codex roles for every review, second opinion, literature or venue cross-check, and draft that does not need file edits. Claude agents handle file edits and runs.
 - The researcher also runs ChatGPT app tools by hand (Deep Research, agent mode) and uploads the results to the dashboard (📎). The coordinator then integrates them.
 
 ## 2026-10-16 — D2 Sim v2 design (decided by: researcher; source: R-20261016-013, council C-20261016-01)
