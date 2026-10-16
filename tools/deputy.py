@@ -22,6 +22,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from labdb import LabDB, LabError  # noqa: E402
+import agent_log  # noqa: E402
 
 KIT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 TITLE_PREFIX = "Να αναλάβει ο Codex"
@@ -150,6 +151,7 @@ def handle_message(db, lab, mid, run=subprocess.run, now=None):
         agents = f.read()
     prompt = build_prompt(agents, thread)
     out = tempfile.mktemp(prefix="deputy-", suffix=".txt")
+    log_id = agent_log.start("codex-deputy", CODEX_MODEL, CODEX_EFFORT, f"deputy reply to {mid}", m["thread_id"])
     answer, needs, err = "", False, ""
     try:
         r = run(build_command(out), input=prompt, capture_output=True, text=True, timeout=TIMEOUT, cwd=KIT)
@@ -165,6 +167,7 @@ def handle_message(db, lab, mid, run=subprocess.run, now=None):
     finally:
         if os.path.exists(out):
             os.remove(out)
+    agent_log.end(log_id, "failed" if (err or not answer) else "done")
     if err or not answer:
         needs, answer = True, f"Ο αναπληρωτής Codex δεν κατάφερε να απαντήσει ({err or 'κενή απάντηση'})."
     if needs:

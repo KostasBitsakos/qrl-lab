@@ -272,6 +272,55 @@ def test_hook():
     ok("hook records permission waits and Codex activity, never tool outputs")
 
 
+def test_agent_log():
+    import agent_log
+    path = os.path.join(TMP, ".lab", "events.jsonl")
+    n0 = len(open(path).read().splitlines()) if os.path.exists(path) else 0
+    aid = agent_log.start("codex-reviewer", "gpt-6.1-sol", "medium", "review sim v2", "M-1")
+    agent_log.end(aid, "failed")
+    recs = [json.loads(x) for x in open(path).read().splitlines()[n0:]]
+    assert [r["hook_event_name"] for r in recs] == ["SubagentStart", "SubagentStop"], recs
+    assert recs[0]["agent_type"] == "codex-reviewer" and recs[0]["model"] == "gpt-6.1-sol" and recs[0]["agent_id"] == aid
+    assert recs[1]["status"] == "failed" and recs[0]["thread"] == "M-1"
+    out = subprocess.run([sys.executable, "tools/agent_log.py", "start", "--agent", "codex-quick", "--task", "x"],
+                         capture_output=True, text=True, check=True).stdout.strip()
+    subprocess.run([sys.executable, "tools/agent_log.py", "end", out], check=True)
+    assert out.startswith("log-") and json.loads(open(path).read().splitlines()[-1])["agent_id"] == out
+    ok("agent_log start/end round trip (API and CLI)")
+
+
+def test_agents_tab_roles():
+    from streamlit.testing.v1 import AppTest
+    now = time.time()
+    path = os.path.join(TMP, ".lab", "events.jsonl")
+    old = open(path).read() if os.path.exists(path) else ""
+    ev = [
+        {"hook_event_name": "SubagentStart", "agent_id": "a1", "agent_type": "codex-reviewer", "model": "gpt-6.1-sol",
+         "effort": "medium", "summary": "REVIEWTASK", "ts": now - 100},
+        {"hook_event_name": "SubagentStop", "agent_id": "a1", "status": "done", "ts": now - 40},
+        {"hook_event_name": "SubagentStart", "agent_id": "a2", "agent_type": "codex-architect", "model": "gpt-6-astra",
+         "effort": "high", "summary": "ARCHTASK", "ts": now - 30},
+        {"hook_event_name": "SubagentStart", "agent_id": "a3", "agent_type": "engineer", "summary": "ENGTASK", "ts": now - 20},
+    ]
+    with open(path, "w") as f:
+        f.write("".join(json.dumps(e) + "\n" for e in ev))
+    try:
+        at = AppTest.from_file(os.path.join(TMP, "dashboard", "app.py"), default_timeout=60).run()
+        assert not at.exception, at.exception
+        text = " ".join(m.value for m in at.markdown) + " ".join(c.value for c in at.caption)
+        assert "codex-architect · gpt-6-astra · high" in text, text[:2000]
+        assert "codex-reviewer · gpt-6.1-sol · medium: 1 εργασίες" in text
+        frames = [d.value for d in at.dataframe]
+        spans = [d for d in frames if "ρόλος" in d.columns][0]
+        assert set(spans["ρόλος"]) >= {"codex-reviewer", "codex-architect", "engineer (Claude Sonnet)"}, spans
+        r = spans[spans["ρόλος"] == "codex-reviewer"].iloc[0]
+        assert r["μοντέλο"] == "gpt-6.1-sol" and r["κατάσταση"] == "done" and r["διάρκεια"] == "1 λεπτά"
+        assert spans[spans["ρόλος"] == "codex-architect"].iloc[0]["κατάσταση"] == "running"
+    finally:
+        open(path, "w").write(old)
+    ok("Agents tab shows each Codex role with model, task, duration, status and per-role count")
+
+
 def test_uploads():
     import uploads
     root = tempfile.mkdtemp(prefix="up-", dir=TMP)
@@ -874,6 +923,7 @@ if __name__ == "__main__":
         test_decisions()
         test_hook()
         test_launcher()
+        test_agent_log()
         test_uploads()
         test_health_watch()
         test_deputy()
@@ -886,6 +936,7 @@ if __name__ == "__main__":
         try:
             import streamlit  # noqa: F401
             test_dashboard()
+            test_agents_tab_roles()
             test_paper_tab()
         except ImportError:
             print("  --  dashboard test skipped (streamlit not installed in this interpreter)")

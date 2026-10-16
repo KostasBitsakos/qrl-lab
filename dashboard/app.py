@@ -43,6 +43,11 @@ HEALTH = os.path.join(LAB, "health.json")
 AGENTS = {
     "coordinator": ("Συντονιστής (Claude Opus)", "#2a78d6", "🧭"),
     "codex": ("Codex (OpenAI)", "#eb6834", "🟠"),
+    "codex-quick": ("codex-quick · gpt-6-luna · low", "#f2a07b", "🟠"),
+    "codex-reviewer": ("codex-reviewer · gpt-6.1-sol · medium", "#d9480f", "🟠"),
+    "codex-researcher": ("codex-researcher · gpt-6.1-sol · medium", "#a8561f", "🟠"),
+    "codex-architect": ("codex-architect · gpt-6-astra · high", "#7a2e0e", "🟠"),
+    "codex-deputy": ("codex-deputy · gpt-6-sol · medium", "#b58900", "🟠"),
     "Explore": ("Explore (Claude Haiku)", "#1baf7a", "🔎"),
     "runner": ("runner (Claude Haiku)", "#eda100", "🏃"),
     "engineer": ("engineer (Claude Sonnet)", "#e87ba4", "🛠️"),
@@ -129,6 +134,8 @@ def agent_key(agent_type):
     if not agent_type:
         return "coordinator"
     a = str(agent_type)
+    if a in AGENTS:
+        return a
     if "codex" in a.lower():
         return "codex"
     return a if a in AGENTS else a
@@ -158,8 +165,27 @@ def read_events(max_lines=6000):
             continue
         rows.append({"ts": dt.datetime.fromtimestamp(e.get("ts", 0)), "agent": agent_key(e.get("agent_type")),
                      "agent_id": e.get("agent_id"), "event": e.get("hook_event_name", ""),
-                     "tool": e.get("tool_name", ""), "summary": e.get("summary", "")})
+                     "tool": e.get("tool_name", ""), "summary": e.get("summary", ""),
+                     "model": e.get("model", ""), "effort": e.get("effort", ""), "status": e.get("status", "")})
     return pd.DataFrame(rows)
+
+
+def agent_spans(ev):
+    """One row per subagent run (SubagentStart paired with its SubagentStop by agent_id): role, model, task, duration, status."""
+    rows, open_ = [], {}
+    if ev.empty:
+        return pd.DataFrame(columns=["start", "agent", "model", "effort", "task", "seconds", "status"])
+    for _, e in ev[ev["event"].isin(["SubagentStart", "SubagentStop"]) & ev["agent_id"].notna()].iterrows():
+        if e["event"] == "SubagentStart":
+            row = {"start": e["ts"], "agent": e["agent"], "model": e["model"], "effort": e["effort"],
+                   "task": e["summary"], "seconds": None, "status": "running"}
+            open_[e["agent_id"]] = row
+            rows.append(row)
+        elif e["agent_id"] in open_:
+            row = open_.pop(e["agent_id"])
+            row["seconds"] = (e["ts"] - row["start"]).total_seconds()
+            row["status"] = e["status"] or "done"
+    return pd.DataFrame(rows, columns=["start", "agent", "model", "effort", "task", "seconds", "status"])
 
 
 def active_agent_keys(ev):
@@ -614,6 +640,18 @@ with tab_agents:
         st.plotly_chart(fig, theme="streamlit", width="stretch", config={"displayModeBar": False})
         counts = win.groupby("agent").size().reindex(lanes).fillna(0).astype(int)
         st.caption(" · ".join(f"{AGENTS.get(k, (k,))[0]}: {n} ενέργειες" for k, n in counts.items()))
+        spans = agent_spans(ev)
+        spans = spans[spans["start"] > now_ - dt.timedelta(hours=hours)] if not spans.empty else spans
+        if not spans.empty:
+            st.markdown("##### Ρόλοι ανά εργασία")
+            per = spans.groupby("agent").size()
+            st.caption(" · ".join(f"{AGENTS.get(k, (k,))[0]}: {n} εργασίες" for k, n in per.items()))
+            st.dataframe(pd.DataFrame({
+                "ώρα": spans["start"].dt.strftime("%H:%M:%S"),
+                "ρόλος": [AGENTS.get(a, (a,))[0].split(" · ")[0] for a in spans["agent"]],
+                "μοντέλο": [m or (AGENTS.get(a, ("",))[0].split(" · ") + ["", ""])[1] for a, m in zip(spans["agent"], spans["model"])],
+                "εργασία": spans["task"], "διάρκεια": [ago(x) if x == x and x is not None else "…" for x in spans["seconds"]],
+                "κατάσταση": spans["status"]}).iloc[::-1], hide_index=True, width="stretch")
         with st.expander("Πίνακας τελευταίων ενεργειών"):
             tail = ev.tail(40).iloc[::-1]
             st.dataframe(pd.DataFrame({"ώρα": tail["ts"].dt.strftime("%H:%M:%S"),

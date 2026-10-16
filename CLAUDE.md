@@ -38,6 +38,7 @@ at the start of every session, the rest when relevant. The rules in AGENTS.md (i
   Prompt prefix: `--fresh` (new thread) or `--resume` (continue the latest Codex thread), then `--model` and
   `--effort`: pick the role in `docs/DECISIONS.md` (quick `gpt-6-luna`/low, review `gpt-6.1-sol`/medium, major `gpt-6-astra`/high with a logged reason), then
   `READ-ONLY: research and review only, do not edit files.` unless it is approved implementation work.
+- Before and after every Codex call run `python3 tools/agent_log.py start --agent <role> --model <m> --effort <e> --task "..."` and `agent_log.py end <id> [--status failed]`, with its role (codex-quick, codex-reviewer, codex-researcher, codex-architect).
 - Run Codex calls one at a time (`--resume` follows the latest thread in this repo).
 - Post Codex's answer into the thread with `--author codex --kind contribution`, then your own synthesis as
   coordinator: where you agree, where you disagree, what you recommend. Decisions that change the research go
