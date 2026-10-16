@@ -471,9 +471,9 @@ Nobody claims the system works until the relevant tests pass on the VM:
 |---|---|---|
 | T0 | `.venv/bin/python tests/test_lab.py` → `ALL PASSED (6)` on the VM (plumbing without Claude) | pass 2026-10-16 (now 7 tests) |
 | A1 | `codex login status` on the VM says logged in; `/codex:setup` passes | pass 2026-10-16 (researcher) |
-| A2 | Coordinator sends a read-only task on `sandbox/demo.py` to Codex (`codex-rescue`), gets the answer, and a `--resume` follow-up works | open |
+| A2 | Coordinator sends a read-only task on `sandbox/demo.py` to Codex (`codex-rescue`), gets the answer, and a `--resume` follow-up works | pass 2026-10-16 (thread M-20261016-001) |
 | A3 | One coordinator session in tmux, reachable from claude.ai/code and the phone; no duplicate sessions | open |
-| A4 | "hello dashboard" sent from the dashboard gets a visible reply in its thread, including a Codex contribution when asked | failed 2026-10-16 (Codex not consulted); redo in progress |
+| A4 | "hello dashboard" sent from the dashboard gets a visible reply in its thread, including a Codex contribution when asked | pass 2026-10-16 on redo (thread M-20261016-001); first attempt failed |
 | A5 | A test approval request appears in the dashboard; reject → `launch_run.py` refuses; approve → a toy run starts and shows in Πειράματα | open |
 | A6 | Coordinator offline → dashboard says offline and keeps the message `new`; after restart it is delivered | open |
 | A7 | Every run directory has spec, code commit, seed, metrics; originals untouched (`git status` clean in original repos) | open |
