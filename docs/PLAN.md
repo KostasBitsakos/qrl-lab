@@ -344,6 +344,14 @@ sidebar counters and toasts while the tab is open. The stored request state in t
 **Security.** Bound to localhost; reached only through the SSH tunnel. Exposing it beyond the VM needs a
 security review and the researcher's approval.
 
+**Terminal tab (⌨️, `tools/web_terminal.py`).** A full bash login shell in `~/qrl-lab`, i.e. full control of the VM for
+whoever can reach the port, which means whoever holds the SSH tunnel / VS Code port forward. Mitigations: on demand only
+(started by «Άνοιγμα terminal» in tmux window `terminal`, stopped by «Κλείσιμο»); listens on 127.0.0.1:8502 only; every
+request and the websocket need a random token generated at each start (`.lab/terminal_token`, mode 600, removed at exit);
+websocket origin restricted to localhost; exits after 30 min without input. Shell commands typed there bypass the
+launcher, hooks and approvals, so the golden rules still apply to the person typing. xterm.js is loaded from
+cdn.jsdelivr.net (pinned 5.3.0), the browser needs internet for it.
+
 ---
 
 ## 8. Research plan

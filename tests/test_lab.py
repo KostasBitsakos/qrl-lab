@@ -735,6 +735,42 @@ def test_voice():
     ok("voice: transcribe with mocked model, fallback, model env, wav kept as attachment")
 
 
+def test_web_terminal():
+    import web_terminal as wt
+    assert wt.HOST == "127.0.0.1" and wt.PORT == 8502
+    assert wt.token_ok("abc", "abc") and not wt.token_ok("", "abc") and not wt.token_ok(None, "abc")
+    assert not wt.token_ok("abd", "abc") and not wt.token_ok("abc", "")
+    # idle logic
+    assert not wt.is_idle(1000, 1000 + 1799) and wt.is_idle(1000, 1000 + 1800) and wt.IDLE_LIMIT == 1800
+    # command construction
+    cmd = wt.start_command("/k", "lab", "terminal")
+    assert cmd[:7] == ["tmux", "new-window", "-d", "-t", "lab", "-n", "terminal"], cmd
+    assert "/k/.venv/bin/python tools/web_terminal.py" in cmd[-1] and cmd[cmd.index("-c") + 1] == "/k"
+    assert wt.stop_command() == ["tmux", "kill-window", "-t", "lab:terminal"]
+    # token file mode
+    tp = os.path.join(TMP, "tok")
+    tok = wt.write_token(tp)
+    assert oct(os.stat(tp).st_mode & 0o777) == "0o600" and open(tp).read() == tok and len(tok) >= 32
+    # requests without / with a wrong token are rejected; the right token is served (no shell is spawned)
+    import tornado.testing
+    import unittest
+
+    class T(tornado.testing.AsyncHTTPTestCase):
+        def get_app(self):
+            return wt.make_app("secret", {"last": 0})[0]
+
+        def test_auth(self):
+            assert self.fetch("/").code == 403
+            assert self.fetch("/?token=wrong").code == 403
+            assert self.fetch("/websocket").code == 403
+            r = self.fetch("/?token=secret")
+            assert r.code == 200 and b"xterm@5.3.0" in r.body
+
+    res = unittest.TextTestRunner(stream=io.StringIO()).run(unittest.defaultTestLoader.loadTestsFromTestCase(T))
+    assert res.wasSuccessful(), res.failures + res.errors
+    ok("web terminal: token check, bind address, idle timeout, tmux command, token mode 600, HTTP auth")
+
+
 if __name__ == "__main__":
     print(f"QRL-Lab tests in {TMP}")
     try:
@@ -751,6 +787,7 @@ if __name__ == "__main__":
         test_voice()
         test_k8s_view()
         test_file_view()
+        test_web_terminal()
         try:
             import streamlit  # noqa: F401
             test_dashboard()

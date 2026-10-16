@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 from labdb import DECISIONS, LabDB, LabError, map_choice  # noqa: E402
 import file_view  # noqa: E402
 import k8s_view  # noqa: E402
+import web_terminal  # noqa: E402
 from uploads import UploadError, attachment_paths  # noqa: E402
 
 LAB = os.path.join(ROOT, ".lab")
@@ -279,10 +280,20 @@ FILES_TAB = "📁 Αρχεία"
 # Deep link ?path=...: on the first run of a session with that parameter the Αρχεία tab opens first.
 _open_files = "path" in st.query_params and not st.session_state.get("fb_tab_done")
 st.session_state["fb_tab_done"] = True
-tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_files, tab_paper, tab_audit = st.tabs([
-    "💬 Συνομιλία", f"✅ Αποφάσεις ({n_open})", "🤖 Πράκτορες", "📈 Πειράματα", "⚖️ Council",
-    "🖥️ Πόροι", "☸️ Kubernetes", FILES_TAB, "📄 Paper & συνέδρια", "🧾 Ιστορικό"],
-    default=FILES_TAB if _open_files else None)
+TAB_NAMES = ["💬 Συνομιλία", f"✅ Αποφάσεις ({n_open})", "🤖 Πράκτορες", "📈 Πειράματα", "⚖️ Council",
+             "🖥️ Πόροι", "☸️ Kubernetes", FILES_TAB, "📄 Paper & συνέδρια", "🧾 Ιστορικό", "⌨️ Terminal"]
+_term_url = web_terminal.iframe_url() if web_terminal.running() else ""
+_side = bool(_term_url) and st.sidebar.toggle("Terminal στα δεξιά", key="term_side")
+if _side:  # tabs in the left column, the terminal in a right-hand column
+    _left, _right = st.columns([3, 2])
+    with _right:
+        st.iframe(_term_url, height=700)
+    with _left:
+        (tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_files, tab_paper, tab_audit,
+         tab_term) = st.tabs(TAB_NAMES, default=FILES_TAB if _open_files else None)
+else:
+    (tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_files, tab_paper, tab_audit,
+     tab_term) = st.tabs(TAB_NAMES, default=FILES_TAB if _open_files else None)
 
 # ================================================================ conversation
 with tab_chat:
@@ -967,3 +978,24 @@ with tab_audit:
                      hide_index=True, width="stretch")
     else:
         st.caption("Κενό ιστορικό.")
+
+# ================================================================ terminal (on demand, localhost only)
+with tab_term:
+    st.warning("Πλήρες shell της VM για όποιον έχει το SSH tunnel. Ανοίγει μόνο όταν το ζητήσεις, μόνο στο "
+               "127.0.0.1:8502, με τυχαίο token, και κλείνει μόνο του μετά από 30 λεπτά αδράνειας.", icon="⚠️")
+    if web_terminal.running():
+        if st.button("Κλείσιμο", key="term_close"):
+            web_terminal.stop()
+            st.rerun()
+        url = web_terminal.iframe_url()
+        if url and not _side:
+            st.iframe(url, height=600)
+        elif _side:
+            st.caption("Το terminal εμφανίζεται στη δεξιά στήλη.")
+        st.caption("Αν δεν φορτώνει: στο VS Code → Ports → Forward 8502")
+    elif st.button("Άνοιγμα terminal", key="term_open"):
+        ok_, msg = web_terminal.start()
+        if ok_:
+            st.rerun()
+        else:
+            st.error(f"Δεν άνοιξε: {msg}")
