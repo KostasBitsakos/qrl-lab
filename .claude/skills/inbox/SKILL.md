@@ -40,3 +40,5 @@ Pass `--model` on every `labq.py post` (free text; the dashboard shows it next t
 Never leave a taken message without a reply and a final status. Never paste secrets or long logs into a reply:
 point to the file instead.
 When you ask the researcher to look at files, write their absolute or `~/` paths (optionally `:line`) so the dashboard renders them as links to the 📁 Αρχεία tab.
+
+At session start also read `.lab/deputy_queue.jsonl` and the posts by `codex` with model «gpt-6-sol · αναπληρωτής» (the read-only deputy that answered while you were unavailable); handle every queued item that needs execution.

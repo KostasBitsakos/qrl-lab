@@ -22,6 +22,8 @@ at the start of every session, the rest when relevant. The rules in AGENTS.md (i
 ## Dashboard protocol
 - **At the start of every session** (and after a usage-limit pause): run `python3 tools/labq.py pending`, then read
   and handle every open researcher message and decision, oldest first, before anything else (researcher, 2026-10-16).
+- At session start also read `.lab/deputy_queue.jsonl` and the Codex deputy's posts (model «gpt-6-sol · αναπληρωτής»);
+  queued items need your execution.
 - Questions for the researcher go in the chat or the Decisions tab, with `~/` paths so they render as links.
   Never only in docs files.
 - A notification starting `QRL-INBOX` is a researcher message → follow skill `inbox`. Every message gets a visible

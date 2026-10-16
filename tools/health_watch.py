@@ -113,6 +113,11 @@ def main():
     while True:
         try:
             cur = step(detect(*sample()))
+            try:
+                import deputy  # Codex deputy: file the request / start the window (never fatal)
+                deputy.tick(LAB)
+            except Exception as e:
+                print(f"deputy tick warning: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
             if once:
                 print(json.dumps(cur, ensure_ascii=False))
         except Exception as e:  # never die: the next cycle may work

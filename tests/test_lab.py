@@ -611,6 +611,91 @@ def test_dashboard():
     ok("dashboard: Αρχεία tab renders a deep link")
 
 
+def test_deputy():
+    import deputy
+    shutil.copy(os.path.join(KIT, "AGENTS.md"), os.path.join(TMP, "AGENTS.md"))
+    lab = os.path.join(TMP, ".lab")
+    db = LabDB()
+    for r in db.requests(): db.withdraw(r["id"]) if r["state"] == "open" else None
+    base = len(deputy.deputy_requests(db))
+    lim = {"state": "limit", "detail": "2:45am", "since": 1000.0}
+    # trigger: ok / short down / permission file nothing; limit files one; dedup while open and 6 h after answer
+    for h in ({"state": "ok"}, {"state": "permission", "since": 0}, {"state": "down", "since": 1000.0}):
+        assert deputy.maybe_file_request(db, h, now=1300.0) is None
+    rid = deputy.maybe_file_request(db, lim, now=1300.0)
+    r = db.request(rid)
+    assert r["author"] == "system" and r["kind"] == "proposal" and "2:45am" in r["title"] and r["title"].startswith("Να αναλάβει ο Codex")
+    assert deputy.maybe_file_request(db, lim, now=1400.0) is None, "open request"
+    db.decide(rid, "reject")
+    assert deputy.maybe_file_request(db, lim, now=time.time() + 3600) is None, "answered < 6 h ago"
+    assert deputy.maybe_file_request(db, lim, now=time.time() + 7 * 3600) is not None, "after 6 h a new one"
+    assert len(deputy.deputy_requests(db)) == base + 2
+    assert deputy.maybe_file_request(db, {"state": "down", "since": 0.0}, now=time.time() + 8 * 3600) is None, "dedup also for down"
+    ok("deputy: trigger and de-duplication")
+
+    calls = []
+
+    def fake(cmd, **kw):
+        calls.append((cmd, kw))
+        out = cmd[cmd.index("-o") + 1]
+        with open(out, "w", encoding="utf-8") as f:
+            f.write(FAKE["text"])
+        return subprocess.CompletedProcess(cmd, FAKE.get("rc", 0), "", "")
+    FAKE = {"text": "Απάντηση.\nNEEDS_EXECUTION: no"}
+
+    # not approved: nothing runs, nothing is taken
+    mid = db.researcher_send("τι κάνουμε;")
+    health = {"state": "limit", "detail": "x"}
+    assert deputy.cycle(db, lab, health, run=fake) == "stop" and not calls
+    assert db.message(mid)["status"] == "new"
+    ok("deputy: not approved means nothing runs")
+
+    # approve the newest open deputy request
+    open_r = [r for r in deputy.deputy_requests(db) if r["state"] == "open"][0]
+    db.decide(open_r["id"], "approve")
+    assert deputy.approved_request(db, lab)["id"] == open_r["id"]
+    # message selection: new/delivered only, taken or done ones are skipped
+    m2 = db.researcher_send("δεύτερο"); m3 = db.researcher_send("τρίτο"); db.take(m3)
+    sel = [m["id"] for m in deputy.pick_messages(db)]
+    assert mid in sel and m2 in sel and m3 not in sel, sel
+    db.set_status(m2, "done")
+    sel = [m["id"] for m in deputy.pick_messages(db)]
+    assert mid in sel and m2 not in sel and m3 not in sel
+    # command construction + answer posting
+    assert deputy.cycle(db, lab, health, run=fake) >= 1
+    cmd, kw = [c for c in calls if "τι κάνουμε;" in c[1]["input"]][0]
+    assert cmd[:4] == ["codex", "exec", "--sandbox", "read-only"] and 'approval_policy="never"' in cmd
+    assert "gpt-6-sol" in cmd and 'model_reasoning_effort="medium"' in cmd and cmd[-1] == "-" and "-C" in cmd
+    assert kw["timeout"] == 600 and "Never invent numbers" in kw["input"]
+    assert "τι κάνουμε;" in kw["input"] and ".env" not in cmd
+    th = db.thread(mid)
+    assert th[-1]["author"] == "codex" and th[-1]["model"] == "gpt-6-sol · αναπληρωτής" and "NEEDS" not in th[-1]["body"]
+    assert db.message(mid)["status"] == "done"
+    assert not os.path.exists(os.path.join(lab, "deputy_queue.jsonl"))
+    ok("deputy: message selection, command construction, answer")
+
+    # needs execution: waiting_approval + queue line; a failing codex is queued too
+    FAKE["text"] = "Χρειάζεται αλλαγή κώδικα.\nNEEDS_EXECUTION: yes"
+    m4 = db.researcher_send("άλλαξε τον κώδικα")
+    deputy.cycle(db, lab, health, run=fake)
+    assert db.message(m4)["status"] == "waiting_approval" and "σε ουρά για τον Claude" in db.thread(m4)[-1]["body"]
+    FAKE["rc"] = 1
+    m5 = db.researcher_send("ξανά")
+    deputy.cycle(db, lab, health, run=fake)
+    q = [json.loads(l) for l in open(os.path.join(lab, "deputy_queue.jsonl"))]
+    assert [e["message"] for e in q] == [m4, m5] and q[1]["reason"] == "codex exit 1", q
+    assert db.message(m5)["status"] == "waiting_approval"
+    ok("deputy: queue writing")
+
+    # stop as soon as health is ok: note in the threads, approval consumed, no second run
+    n = len(calls)
+    assert deputy.cycle(db, lab, {"state": "ok"}, run=fake) == "stop"
+    assert "σταματά" in db.thread(m4)[-1]["body"] and len(calls) == n
+    assert deputy.approved_request(db, lab) is None
+    assert deputy.cycle(db, lab, health, run=fake) == "stop"
+    ok("deputy: stops on ok")
+
+
 if __name__ == "__main__":
     print(f"QRL-Lab tests in {TMP}")
     try:
@@ -623,6 +708,7 @@ if __name__ == "__main__":
         test_launcher()
         test_uploads()
         test_health_watch()
+        test_deputy()
         test_k8s_view()
         test_file_view()
         try:
