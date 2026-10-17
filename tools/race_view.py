@@ -250,7 +250,11 @@ def lanes(events, now=None, roles=None, window=6 * 3600, max_lanes=16, health=No
     last = float(coord[-1][0]["ts"]) if coord else now
     busy = n_rec > 0
     cstate = (health or {}).get("claude", {}).get("state")
-    out.insert(0, {"role": "coordinator", "model": "", "label": coord[-1][1][0] if coord else "", "start": last,
+    # live two-word description from the coordinator's latest action summary (e.g. "Launch W0", "Fix toggle")
+    ctask = next((str(e.get("summary") or "") for e, _ in reversed(coord)
+                  if e.get("hook_event_name") == "PreToolUse" and e.get("tool_name") not in ("Agent", "Task")
+                  and e.get("summary")), "")
+    out.insert(0, {"role": "coordinator", "model": "", "label": "", "task": ctask, "start": last,
                    "end": None if busy else last, "status": "running" if busy else "idle", "coord": True,
                    "activity": min(1.0, 0.25 + 0.75 * min(1.0, n_rec / 20.0)) if busy else 0.0,
                    "reasons": ["Claude: " + HEALTH_GREEK[cstate]] if busy and cstate in HEALTH_GREEK else [], "final": False})
