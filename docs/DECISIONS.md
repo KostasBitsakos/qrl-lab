@@ -129,3 +129,12 @@ ACM DL, conference or steering-committee pages). Rates that cannot be found are 
 ## 2026-10-17 — SLO for the DInos reward from calibration (R-20261017-018)
 SLO = 2 × measured single-pod p95 latency at 50 % offered load (calibration stage B), frozen before any training. Agent
 training under reward=dinos waits for that measurement; 11.98 ms (params.py, model-derived) is not used for results.
+
+## 2026-10-17 — Tuning sandbox for DInos results (M-20261017-137)
+The researcher gives the team full freedom, without per-step approvals, to try anything in the code on a new branch
+`dinos-tuning` (from qrl-dev) until the classical comparison (HPA, DERP, DInos, DInos+T) gives good results close to
+the picture published for DInos; if it does not work, we return to qrl-dev. Guardrails kept by the coordinator:
+tune agents (hyper-parameters, training, architecture, features, bug fixes), not the simulator/reward/SLO (those change
+only from calibration evidence); tuning on train/dev seeds only; final test seeds 20000+ run once with frozen configs.
+Runs go through a one-time "sandbox" approval in launch_run (branch, scope sim, seed ranges, CPU-hour budget).
+Absolute numbers of the old simulator (F1) are not a target; the target is the same qualitative ranking and curves.
