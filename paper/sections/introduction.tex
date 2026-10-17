@@ -18,9 +18,9 @@ that generalizes across stateless cloud applications. As published, its agent ob
 latency and the number of pods over a window of recent steps, processes the window with a Long Short-Term Memory
 (LSTM) network~\cite{hochreiter1997lstm}, and chooses every 15 seconds whether to add a pod, remove one or do
 nothing. The paper pre-trains the agent in a simulator and reports fine-tuning it for new environments, including
-a Kubernetes cluster running Redis. In the implementation we audited, the Q-network has \resParamsDInos{}
-trainable parameters, almost all of them in the recurrent encoder.\todo{Anonymized pointer to the audited
-code (commit in claims.md I5) for the artifact appendix.} Fine-tuning updates the entire network.
+a Kubernetes cluster running Redis. The Q-network has \resParamsDInos{}
+trainable parameters, almost all of them in the recurrent encoder, and fine-tuning updates the entire network.\todo{Anonymized pointer to the DInos
+code (commit in claims.md I5) for the artifact appendix.}
 
 Variational quantum circuits (VQCs) have been used as function approximators in reinforcement learning, both as
 policies~\cite{jerbi2021parametrized} and as Q-functions~\cite{skolik2022quantum}, and hybrid networks that put a
@@ -32,22 +32,19 @@ therefore treat parameter efficiency as a hypothesis and test it against a class
 of trainable parameters. We also keep timing claims apart from it. Our circuits run on a classical simulator, and
 simulator wall-clock time says nothing about speed on quantum hardware.
 
-The comparison also depends on the simulator. Suppose the only reward term that depends on the action
-is the cost of the pods, while latency and CPU ignore the pod count. Then keeping one pod at all times is
-optimal, and a tiny model of any kind learns it as well as a large one. We therefore built a new simulator for
-this study. Arrivals enter a queue served by the ready pods, so latency and CPU respond to the scaling action.
-New pods start after a delay, and capacity drops for a while after each change while the cluster rebalances.
-Before any agent is compared, the simulator has to pass fixed sanity gates: always using the minimum or the
-maximum number of pods, or the best static pod count, must lose to a tuned threshold policy, and an oracle that
-knows future arrivals gives an upper bound on the reward. Its parameters are provisional until a calibration
-pilot on a real cluster.\todo{D8: the researcher decides whether the paper says that the DInos simulator had
-this property (PLAN F1). Until then the condition is stated without attribution.}
+The comparison also depends on the environment, so we build a simulator for this study. Arrivals enter a queue
+served by the ready pods, so the number of pods affects capacity, latency and CPU. New pods start after a delay,
+and capacity drops for a while after each change while the cluster rebalances. The reward is based on the
+service-level objective (SLO) and the cost of the pods. Before any agent is compared, the simulator has to pass
+fixed sanity gates: always using the minimum or the maximum number of pods, or the best static pod count, must lose
+to a tuned threshold policy, and an oracle that knows future arrivals gives an upper bound on the reward. The
+simulator's parameters are provisional until a calibration pilot on a real cluster.
 
 In this paper, we introduce Sofia, a hybrid quantum--classical Deep RL agent for Kubernetes autoscaling. Sofia keeps the three DInos actions and replaces part of the Q-network with a VQC of \resQubits{}
 qubits.\todo{Which part (D5): full Q-function, head after a small encoder, or the fine-tuned adaptation layer.
-Rewrite this sentence and the second contribution once decided.} Its input differs from both the published
-DInos state and the legacy implementation, which also fed the pod capacity to the network. We propose a common
-interface instead: every learning agent in this paper observes the same window of six signals that can be measured on a real
+Rewrite this sentence and the second contribution once decided.} Its input differs from the published
+DInos state. We use a common
+interface: every learning agent in this paper observes the same window of six signals that can be measured on a real
 cluster: completed operations per second, CPU utilization, p95 latency, failed requests per second, and the
 numbers of ready and pending pods. Memory is left out because, in our simulator, it would only mirror the
 request backlog.

@@ -1,0 +1,81 @@
+This is BibTeX, Version 0.99d (TeX Live 2019/Debian)
+Capacity: max_strings=200000, hash_size=200000, hash_prime=170003
+The top-level auxiliary file: main-acm.aux
+The style file: ACM-Reference-Format.bst
+Reallocated singl_function (elt_size=4) to 100 items from 50.
+Reallocated singl_function (elt_size=4) to 100 items from 50.
+Reallocated wiz_functions (elt_size=4) to 6000 items from 3000.
+Database file #1: refs.bib
+Reallocated singl_function (elt_size=4) to 100 items from 50.
+Reallocated glb_str_ptr (elt_size=4) to 20 items from 10.
+Reallocated global_strs (elt_size=200001) to 20 items from 10.
+Reallocated glb_str_end (elt_size=4) to 20 items from 10.
+Reallocated singl_function (elt_size=4) to 100 items from 50.
+Warning--empty publisher in atikoglu2012workload
+Warning--empty address in atikoglu2012workload
+Warning--empty publisher in bitsakos2018derp
+Warning--empty address in bitsakos2018derp
+Warning--empty address in bitsakos2025quantuml
+Warning--empty address in bitsakos2025dinos
+Warning--empty publisher in bodik2010spikes
+Warning--empty address in bodik2010spikes
+Warning--empty address in harcholbalter2013performance
+Warning--empty publisher in harter2016slacker
+Warning--empty address in harter2016slacker
+Warning--empty publisher in jerbi2021parametrized
+Warning--empty address in jerbi2021parametrized
+Warning--page numbers missing in both pages and numpages fields in jerbi2021parametrized
+Warning--empty publisher in kulkarni2017rocksteady
+Warning--empty address in kulkarni2017rocksteady
+Warning--empty publisher in leverich2014reconciling
+Warning--empty address in leverich2014reconciling
+Warning--empty publisher in li2014tales
+Warning--empty address in li2014tales
+Warning--empty publisher in shahrad2020serverless
+Warning--empty address in shahrad2020serverless
+Warning--page numbers missing in both pages and numpages fields in shahrad2020serverless
+Warning--empty publisher in vanhasselt2016ddqn
+Warning--empty address in vanhasselt2016ddqn
+Warning--page numbers missing in both pages and numpages fields in vanhasselt2016ddqn
+You've used 27 entries,
+            5897 wiz_defined-function locations,
+            1531 strings with 24049 characters,
+and the built_in function-call counts, 32126 in all, are:
+= -- 3776
+> -- 1260
+< -- 0
++ -- 421
+- -- 427
+* -- 2402
+:= -- 3295
+add.period$ -- 160
+call.type$ -- 27
+change.case$ -- 206
+chr.to.int$ -- 25
+cite$ -- 53
+duplicate$ -- 2800
+empty$ -- 1973
+format.name$ -- 510
+if$ -- 7476
+int.to.chr$ -- 4
+int.to.str$ -- 1
+missing$ -- 94
+newline$ -- 397
+num.names$ -- 214
+pop$ -- 1034
+preamble$ -- 1
+purify$ -- 438
+quote$ -- 0
+skip$ -- 1001
+stack$ -- 0
+substring$ -- 2329
+swap$ -- 273
+text.length$ -- 0
+text.prefix$ -- 0
+top$ -- 0
+type$ -- 671
+warning$ -- 26
+while$ -- 198
+width$ -- 0
+write$ -- 634
+(There were 26 warnings)

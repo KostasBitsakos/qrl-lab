@@ -1,0 +1,550 @@
+%%% -*-BibTeX-*-
+%%% Do NOT edit. File created by BibTeX with style
+%%% ACM-Reference-Format-Journals [18-Jan-2012].
+
+\begin{thebibliography}{27}
+
+%%% ====================================================================
+%%% NOTE TO THE USER: you can override these defaults by providing
+%%% customized versions of any of these macros before the \bibliography
+%%% command.  Each of them MUST provide its own final punctuation,
+%%% except for \shownote{}, \showDOI{}, and \showURL{}.  The latter two
+%%% do not use final punctuation, in order to avoid confusing it with
+%%% the Web address.
+%%%
+%%% To suppress output of a particular field, define its macro to expand
+%%% to an empty string, or better, \unskip, like this:
+%%%
+%%% \newcommand{\showDOI}[1]{\unskip}   % LaTeX syntax
+%%%
+%%% \def \showDOI #1{\unskip}           % plain TeX syntax
+%%%
+%%% ====================================================================
+
+\ifx \showCODEN    \undefined \def \showCODEN     #1{\unskip}     \fi
+\ifx \showDOI      \undefined \def \showDOI       #1{#1}\fi
+\ifx \showISBNx    \undefined \def \showISBNx     #1{\unskip}     \fi
+\ifx \showISBNxiii \undefined \def \showISBNxiii  #1{\unskip}     \fi
+\ifx \showISSN     \undefined \def \showISSN      #1{\unskip}     \fi
+\ifx \showLCCN     \undefined \def \showLCCN      #1{\unskip}     \fi
+\ifx \shownote     \undefined \def \shownote      #1{#1}          \fi
+\ifx \showarticletitle \undefined \def \showarticletitle #1{#1}   \fi
+\ifx \showURL      \undefined \def \showURL       {\relax}        \fi
+% The following commands are used for tagged output and should be
+% invisible to TeX
+\providecommand\bibfield[2]{#2}
+\providecommand\bibinfo[2]{#2}
+\providecommand\natexlab[1]{#1}
+\providecommand\showeprint[2][]{arXiv:#2}
+
+\bibitem[\protect\citeauthoryear{Atikoglu, Xu, Frachtenberg, Jiang, and
+  Paleczny}{Atikoglu et~al\mbox{.}}{2012}]%
+        {atikoglu2012workload}
+\bibfield{author}{\bibinfo{person}{Berk Atikoglu}, \bibinfo{person}{Yuehai Xu},
+  \bibinfo{person}{Eitan Frachtenberg}, \bibinfo{person}{Song Jiang}, {and}
+  \bibinfo{person}{Mike Paleczny}.} \bibinfo{year}{2012}\natexlab{}.
+\newblock \showarticletitle{Workload Analysis of a Large-Scale Key-Value
+  Store}. In \bibinfo{booktitle}{\emph{Proceedings of the 12th ACM
+  SIGMETRICS/PERFORMANCE Joint International Conference on Measurement and
+  Modeling of Computer Systems}}. \bibinfo{pages}{53--64}.
+\newblock
+\urldef\tempurl%
+\url{https://doi.org/10.1145/2254756.2254766}
+\showDOI{\tempurl}
+\newblock
+\shownote{verified 2026-10-17 via
+  \url{https://api.crossref.org/works/10.1145/2254756.2254766;} abstract via
+  Semantic Scholar API; full text not read.}
+
+
+\bibitem[\protect\citeauthoryear{Bitsakos, Konstantinou, and Koziris}{Bitsakos
+  et~al\mbox{.}}{2018}]%
+        {bitsakos2018derp}
+\bibfield{author}{\bibinfo{person}{Constantinos Bitsakos},
+  \bibinfo{person}{Ioannis Konstantinou}, {and} \bibinfo{person}{Nectarios
+  Koziris}.} \bibinfo{year}{2018}\natexlab{}.
+\newblock \showarticletitle{{DERP}: A Deep Reinforcement Learning Cloud System
+  for Elastic Resource Provisioning}. In \bibinfo{booktitle}{\emph{2018 IEEE
+  International Conference on Cloud Computing Technology and Science
+  (CloudCom)}}. \bibinfo{pages}{21--29}.
+\newblock
+\urldef\tempurl%
+\url{https://doi.org/10.1109/CloudCom2018.2018.00020}
+\showDOI{\tempurl}
+\newblock
+\shownote{Verified: Crossref 10.1109/CloudCom2018.2018.00020.}
+
+
+\bibitem[\protect\citeauthoryear{Bitsakos, Nikas, and Koziris}{Bitsakos
+  et~al\mbox{.}}{2025a}]%
+        {bitsakos2025quantuml}
+\bibfield{author}{\bibinfo{person}{Constantinos Bitsakos},
+  \bibinfo{person}{Konstantinos Nikas}, {and} \bibinfo{person}{Nectarios
+  Koziris}.} \bibinfo{year}{2025}\natexlab{a}.
+\newblock \showarticletitle{{QuantuML}: Machine Learning Algorithms and K-Means
+  on Quantum Cloud Offering}. In \bibinfo{booktitle}{\emph{Algorithmic Aspects
+  of Cloud Computing}} \emph{(\bibinfo{series}{Lecture Notes in Computer
+  Science})}. \bibinfo{publisher}{Springer}, \bibinfo{pages}{117--129}.
+\newblock
+\urldef\tempurl%
+\url{https://doi.org/10.1007/978-3-031-94677-6_9}
+\showDOI{\tempurl}
+\newblock
+\shownote{Verified: Crossref 10.1007/978-3-031-94677-6\_9.}
+
+
+\bibitem[\protect\citeauthoryear{Bitsakos, Tsoumakos, Konstantinou, and
+  Koziris}{Bitsakos et~al\mbox{.}}{2025b}]%
+        {bitsakos2025dinos}
+\bibfield{author}{\bibinfo{person}{Constantinos Bitsakos},
+  \bibinfo{person}{Dimitrios Tsoumakos}, \bibinfo{person}{Ioannis
+  Konstantinou}, {and} \bibinfo{person}{Nectarios Koziris}.}
+  \bibinfo{year}{2025}\natexlab{b}.
+\newblock \showarticletitle{{DInos}: A Deep Reinforcement Learning Approach to
+  Generalizable Autoscaling in Stateless Cloud Applications}. In
+  \bibinfo{booktitle}{\emph{Database and Expert Systems Applications (DEXA
+  2025)}} \emph{(\bibinfo{series}{Lecture Notes in Computer Science})}.
+  \bibinfo{publisher}{Springer}, \bibinfo{pages}{260--275}.
+\newblock
+\urldef\tempurl%
+\url{https://doi.org/10.1007/978-3-032-02049-9_20}
+\showDOI{\tempurl}
+\newblock
+\shownote{Verified: Crossref 10.1007/978-3-032-02049-9\_20.}
+
+
+\bibitem[\protect\citeauthoryear{Bodik, Fox, Franklin, Jordan, and
+  Patterson}{Bodik et~al\mbox{.}}{2010}]%
+        {bodik2010spikes}
+\bibfield{author}{\bibinfo{person}{Peter Bodik}, \bibinfo{person}{Armando Fox},
+  \bibinfo{person}{Michael~J. Franklin}, \bibinfo{person}{Michael~I. Jordan},
+  {and} \bibinfo{person}{David~A. Patterson}.} \bibinfo{year}{2010}\natexlab{}.
+\newblock \showarticletitle{Characterizing, Modeling, and Generating Workload
+  Spikes for Stateful Services}. In \bibinfo{booktitle}{\emph{Proceedings of
+  the 1st ACM Symposium on Cloud Computing (SoCC)}}. \bibinfo{pages}{241--252}.
+\newblock
+\urldef\tempurl%
+\url{https://doi.org/10.1145/1807128.1807166}
+\showDOI{\tempurl}
+\newblock
+\shownote{verified 2026-10-17 via
+  \url{https://api.crossref.org/works/10.1145/1807128.1807166;} abstract at
+  \url{https://www.microsoft.com/en-us/research/?p=160580;} full text not
+  read.}
+
+
+\bibitem[\protect\citeauthoryear{Chen, Yoo, and Fang}{Chen
+  et~al\mbox{.}}{2020}]%
+        {chen2020qlstm}
+\bibfield{author}{\bibinfo{person}{Samuel Yen-Chi Chen},
+  \bibinfo{person}{Shinjae Yoo}, {and} \bibinfo{person}{Yao-Lung~L. Fang}.}
+  \bibinfo{year}{2020}\natexlab{}.
+\newblock \bibinfo{title}{Quantum Long Short-Term Memory}.
+\newblock
+\newblock
+\showeprint[arxiv]{2009.01783}
+\urldef\tempurl%
+\url{https://arxiv.org/abs/2009.01783}
+\showURL{%
+\tempurl}
+\newblock
+\shownote{verified 2026-10-16 via \url{https://arxiv.org/abs/2009.01783}
+  (preprint; no journal-ref listed).}
+
+
+\bibitem[\protect\citeauthoryear{Dean and Barroso}{Dean and Barroso}{2013}]%
+        {dean2013tail}
+\bibfield{author}{\bibinfo{person}{Jeffrey Dean} {and}
+  \bibinfo{person}{Luiz~Andr{\'e} Barroso}.} \bibinfo{year}{2013}\natexlab{}.
+\newblock \showarticletitle{The Tail at Scale}.
+\newblock \bibinfo{journal}{\emph{Commun. ACM}} \bibinfo{volume}{56},
+  \bibinfo{number}{2} (\bibinfo{year}{2013}), \bibinfo{pages}{74--80}.
+\newblock
+\urldef\tempurl%
+\url{https://doi.org/10.1145/2408776.2408794}
+\showDOI{\tempurl}
+\newblock
+\shownote{verified 2026-10-16 via
+  \url{https://api.crossref.org/works/10.1145/2408776.2408794}.}
+
+
+\bibitem[\protect\citeauthoryear{Fischer and Meier-Hellstern}{Fischer and
+  Meier-Hellstern}{1993}]%
+        {fischer1993mmpp}
+\bibfield{author}{\bibinfo{person}{Wolfgang Fischer} {and}
+  \bibinfo{person}{Kathleen Meier-Hellstern}.} \bibinfo{year}{1993}\natexlab{}.
+\newblock \showarticletitle{The {Markov}-modulated {Poisson} process ({MMPP})
+  cookbook}.
+\newblock \bibinfo{journal}{\emph{Performance Evaluation}}
+  \bibinfo{volume}{18}, \bibinfo{number}{2} (\bibinfo{year}{1993}),
+  \bibinfo{pages}{149--171}.
+\newblock
+\urldef\tempurl%
+\url{https://doi.org/10.1016/0166-5316(93)90035-S}
+\showDOI{\tempurl}
+\newblock
+\shownote{verified 2026-10-17 via
+  \url{https://api.crossref.org/works/10.1016/0166-5316(93)90035-S;} metadata
+  only, content not read.}
+
+
+\bibitem[\protect\citeauthoryear{Harchol-Balter}{Harchol-Balter}{2013}]%
+        {harcholbalter2013performance}
+\bibfield{author}{\bibinfo{person}{Mor Harchol-Balter}.}
+  \bibinfo{year}{2013}\natexlab{}.
+\newblock \bibinfo{booktitle}{\emph{Performance Modeling and Design of Computer
+  Systems: Queueing Theory in Action}}.
+\newblock \bibinfo{publisher}{Cambridge University Press}.
+\newblock
+\urldef\tempurl%
+\url{https://doi.org/10.1017/CBO9781139226424}
+\showDOI{\tempurl}
+\newblock
+\shownote{verified 2026-10-16 via
+  \url{https://api.crossref.org/works/10.1017/CBO9781139226424}.}
+
+
+\bibitem[\protect\citeauthoryear{Harter, Salmon, Liu, Arpaci-Dusseau, and
+  Arpaci-Dusseau}{Harter et~al\mbox{.}}{2016}]%
+        {harter2016slacker}
+\bibfield{author}{\bibinfo{person}{Tyler Harter}, \bibinfo{person}{Brandon
+  Salmon}, \bibinfo{person}{Rose Liu}, \bibinfo{person}{Andrea~C.
+  Arpaci-Dusseau}, {and} \bibinfo{person}{Remzi~H. Arpaci-Dusseau}.}
+  \bibinfo{year}{2016}\natexlab{}.
+\newblock \showarticletitle{Slacker: Fast Distribution with Lazy Docker
+  Containers}. In \bibinfo{booktitle}{\emph{14th USENIX Conference on File and
+  Storage Technologies (FAST 16)}}. \bibinfo{pages}{181--195}.
+\newblock
+\urldef\tempurl%
+\url{https://www.usenix.org/node/194431}
+\showURL{%
+\tempurl}
+\newblock
+\shownote{verified 2026-10-17 via \url{https://www.usenix.org/node/194431}
+  (abstract read); no DOI.}
+
+
+\bibitem[\protect\citeauthoryear{Hochreiter and Schmidhuber}{Hochreiter and
+  Schmidhuber}{1997}]%
+        {hochreiter1997lstm}
+\bibfield{author}{\bibinfo{person}{Sepp Hochreiter} {and}
+  \bibinfo{person}{J{\"u}rgen Schmidhuber}.} \bibinfo{year}{1997}\natexlab{}.
+\newblock \showarticletitle{Long Short-Term Memory}.
+\newblock \bibinfo{journal}{\emph{Neural Computation}} \bibinfo{volume}{9},
+  \bibinfo{number}{8} (\bibinfo{year}{1997}), \bibinfo{pages}{1735--1780}.
+\newblock
+\urldef\tempurl%
+\url{https://doi.org/10.1162/neco.1997.9.8.1735}
+\showDOI{\tempurl}
+\newblock
+\shownote{verified 2026-10-16 via
+  \url{https://api.crossref.org/works/10.1162/neco.1997.9.8.1735}.}
+
+
+\bibitem[\protect\citeauthoryear{Jerbi, Gyurik, Marshall, Briegel, and
+  Dunjko}{Jerbi et~al\mbox{.}}{2021}]%
+        {jerbi2021parametrized}
+\bibfield{author}{\bibinfo{person}{Sofiene Jerbi}, \bibinfo{person}{Casper
+  Gyurik}, \bibinfo{person}{Simon~C. Marshall}, \bibinfo{person}{Hans~J.
+  Briegel}, {and} \bibinfo{person}{Vedran Dunjko}.}
+  \bibinfo{year}{2021}\natexlab{}.
+\newblock \showarticletitle{Parametrized Quantum Policies for Reinforcement
+  Learning}. In \bibinfo{booktitle}{\emph{Advances in Neural Information
+  Processing Systems (NeurIPS 2021)}}.
+\newblock
+\showeprint[arxiv]{2103.05577}
+\urldef\tempurl%
+\url{https://arxiv.org/abs/2103.05577}
+\showURL{%
+\tempurl}
+\newblock
+\shownote{verified 2026-10-16 via \url{https://arxiv.org/abs/2103.05577} (arXiv
+  comment: NeurIPS 2021 camera-ready; proceedings pages not checked).}
+
+
+\bibitem[\protect\citeauthoryear{{Kubernetes SIG Scalability}}{{Kubernetes SIG
+  Scalability}}{2026}]%
+        {k8sslos}
+\bibfield{author}{\bibinfo{person}{{Kubernetes SIG Scalability}}.}
+  \bibinfo{year}{2026}\natexlab{}.
+\newblock \bibinfo{title}{Kubernetes scalability {SLIs/SLOs}}.
+\newblock
+\newblock
+\urldef\tempurl%
+\url{https://github.com/kubernetes/community/blob/master/sig-scalability/slos/slos.md}
+\showURL{%
+\tempurl}
+\newblock
+\shownote{official project document; accessed 2026-10-17.}
+
+
+\bibitem[\protect\citeauthoryear{Kulkarni, Kesavan, Zhang, Ricci, and
+  Stutsman}{Kulkarni et~al\mbox{.}}{2017}]%
+        {kulkarni2017rocksteady}
+\bibfield{author}{\bibinfo{person}{Chinmay Kulkarni}, \bibinfo{person}{Aniraj
+  Kesavan}, \bibinfo{person}{Tian Zhang}, \bibinfo{person}{Robert Ricci}, {and}
+  \bibinfo{person}{Ryan Stutsman}.} \bibinfo{year}{2017}\natexlab{}.
+\newblock \showarticletitle{Rocksteady: Fast Migration for Low-latency
+  In-memory Storage}. In \bibinfo{booktitle}{\emph{Proceedings of the 26th
+  Symposium on Operating Systems Principles (SOSP)}}.
+  \bibinfo{pages}{390--405}.
+\newblock
+\urldef\tempurl%
+\url{https://doi.org/10.1145/3132747.3132784}
+\showDOI{\tempurl}
+\newblock
+\shownote{verified 2026-10-17 via
+  \url{https://api.crossref.org/works/10.1145/3132747.3132784;} abstract at
+  \url{https://www.flux.utah.edu/paper/kulkarni-sosp17}.}
+
+
+\bibitem[\protect\citeauthoryear{Leverich and Kozyrakis}{Leverich and
+  Kozyrakis}{2014}]%
+        {leverich2014reconciling}
+\bibfield{author}{\bibinfo{person}{Jacob Leverich} {and}
+  \bibinfo{person}{Christos Kozyrakis}.} \bibinfo{year}{2014}\natexlab{}.
+\newblock \showarticletitle{Reconciling High Server Utilization and
+  Sub-millisecond Quality-of-Service}. In \bibinfo{booktitle}{\emph{Proceedings
+  of the Ninth European Conference on Computer Systems (EuroSys)}}.
+  \bibinfo{pages}{1--14}.
+\newblock
+\urldef\tempurl%
+\url{https://doi.org/10.1145/2592798.2592821}
+\showDOI{\tempurl}
+\newblock
+\shownote{verified 2026-10-17 via Crossref query.bibliographic (title match,
+  DOI returned) and abstract at
+  \url{https://mast.stanford.edu/pubs/reconciling_high_server_utilization_and_sub_millisecond_quality_of_service/;}
+  full text not read.}
+
+
+\bibitem[\protect\citeauthoryear{Li, Sharma, Ports, and Gribble}{Li
+  et~al\mbox{.}}{2014}]%
+        {li2014tales}
+\bibfield{author}{\bibinfo{person}{Jialin Li}, \bibinfo{person}{Naveen~Kr.
+  Sharma}, \bibinfo{person}{Dan R.~K. Ports}, {and} \bibinfo{person}{Steven~D.
+  Gribble}.} \bibinfo{year}{2014}\natexlab{}.
+\newblock \showarticletitle{Tales of the Tail: Hardware, {OS}, and
+  Application-level Sources of Tail Latency}. In
+  \bibinfo{booktitle}{\emph{Proceedings of the ACM Symposium on Cloud Computing
+  (SoCC)}}. \bibinfo{pages}{1--14}.
+\newblock
+\urldef\tempurl%
+\url{https://doi.org/10.1145/2670979.2670988}
+\showDOI{\tempurl}
+\newblock
+\shownote{verified 2026-10-17 via
+  \url{https://api.crossref.org/works/10.1145/2670979.2670988;} abstract via
+  \url{https://research.google/pubs/tales-of-the-tail-hardware-os-and-application-level-sources-of-tail-latency;}
+  PDF not machine-readable here.}
+
+
+\bibitem[\protect\citeauthoryear{Little}{Little}{1961}]%
+        {little1961proof}
+\bibfield{author}{\bibinfo{person}{John D.~C. Little}.}
+  \bibinfo{year}{1961}\natexlab{}.
+\newblock \showarticletitle{A Proof for the Queuing Formula: {$L = \lambda
+  W$}}.
+\newblock \bibinfo{journal}{\emph{Operations Research}} \bibinfo{volume}{9},
+  \bibinfo{number}{3} (\bibinfo{year}{1961}), \bibinfo{pages}{383--387}.
+\newblock
+\urldef\tempurl%
+\url{https://doi.org/10.1287/opre.9.3.383}
+\showDOI{\tempurl}
+\newblock
+\shownote{verified 2026-10-16 via
+  \url{https://api.crossref.org/works/10.1287/opre.9.3.383}.}
+
+
+\bibitem[\protect\citeauthoryear{Lorido-Botran, Miguel-Alonso, and
+  Lozano}{Lorido-Botran et~al\mbox{.}}{2014}]%
+        {lorido2014review}
+\bibfield{author}{\bibinfo{person}{Tania Lorido-Botran}, \bibinfo{person}{Jose
+  Miguel-Alonso}, {and} \bibinfo{person}{Jose~A. Lozano}.}
+  \bibinfo{year}{2014}\natexlab{}.
+\newblock \showarticletitle{A Review of Auto-scaling Techniques for Elastic
+  Applications in Cloud Environments}.
+\newblock \bibinfo{journal}{\emph{Journal of Grid Computing}}
+  \bibinfo{volume}{12} (\bibinfo{year}{2014}), \bibinfo{pages}{559--592}.
+\newblock
+\urldef\tempurl%
+\url{https://doi.org/10.1007/s10723-014-9314-7}
+\showDOI{\tempurl}
+\newblock
+\shownote{verified 2026-10-16 via
+  \url{https://api.crossref.org/works/10.1007/s10723-014-9314-7}.}
+
+
+\bibitem[\protect\citeauthoryear{Mari, Bromley, Izaac, Schuld, and
+  Killoran}{Mari et~al\mbox{.}}{2020}]%
+        {mari2020transfer}
+\bibfield{author}{\bibinfo{person}{Andrea Mari}, \bibinfo{person}{Thomas~R.
+  Bromley}, \bibinfo{person}{Josh Izaac}, \bibinfo{person}{Maria Schuld}, {and}
+  \bibinfo{person}{Nathan Killoran}.} \bibinfo{year}{2020}\natexlab{}.
+\newblock \showarticletitle{Transfer learning in hybrid classical-quantum
+  neural networks}.
+\newblock \bibinfo{journal}{\emph{Quantum}}  \bibinfo{volume}{4}
+  (\bibinfo{year}{2020}), \bibinfo{pages}{340}.
+\newblock
+\urldef\tempurl%
+\url{https://doi.org/10.22331/q-2020-10-09-340}
+\showDOI{\tempurl}
+\showeprint[arxiv]{1912.08278}
+\newblock
+\shownote{verified 2026-10-16 via \url{https://arxiv.org/abs/1912.08278}.}
+
+
+\bibitem[\protect\citeauthoryear{{Redis Ltd.}}{{Redis Ltd.}}{2026a}]%
+        {redisdocs_clusterspec}
+\bibfield{author}{\bibinfo{person}{{Redis Ltd.}}}
+  \bibinfo{year}{2026}\natexlab{a}.
+\newblock \bibinfo{title}{Redis cluster specification}.
+\newblock
+\newblock
+\urldef\tempurl%
+\url{https://redis.io/docs/latest/operate/oss_and_stack/reference/cluster-spec/}
+\showURL{%
+\tempurl}
+\newblock
+\shownote{official documentation, not peer reviewed; accessed 2026-10-17.}
+
+
+\bibitem[\protect\citeauthoryear{{Redis Ltd.}}{{Redis Ltd.}}{2026b}]%
+        {redisdocs_scaling}
+\bibfield{author}{\bibinfo{person}{{Redis Ltd.}}}
+  \bibinfo{year}{2026}\natexlab{b}.
+\newblock \bibinfo{title}{Scale with Redis Cluster}.
+\newblock
+\newblock
+\urldef\tempurl%
+\url{https://redis.io/docs/latest/operate/oss_and_stack/management/scaling/}
+\showURL{%
+\tempurl}
+\newblock
+\shownote{official documentation, not peer reviewed; accessed 2026-10-17.}
+
+
+\bibitem[\protect\citeauthoryear{Shahrad, Fonseca, Goiri, Chaudhry, Batum,
+  Cooke, Laureano, Tresness, Russinovich, and Bianchini}{Shahrad
+  et~al\mbox{.}}{2020}]%
+        {shahrad2020serverless}
+\bibfield{author}{\bibinfo{person}{Mohammad Shahrad}, \bibinfo{person}{Rodrigo
+  Fonseca}, \bibinfo{person}{{\'I}{\~n}igo Goiri}, \bibinfo{person}{Gohar
+  Chaudhry}, \bibinfo{person}{Paul Batum}, \bibinfo{person}{Jason Cooke},
+  \bibinfo{person}{Eduardo Laureano}, \bibinfo{person}{Colby Tresness},
+  \bibinfo{person}{Mark Russinovich}, {and} \bibinfo{person}{Ricardo
+  Bianchini}.} \bibinfo{year}{2020}\natexlab{}.
+\newblock \showarticletitle{Serverless in the Wild: Characterizing and
+  Optimizing the Serverless Workload at a Large Cloud Provider}. In
+  \bibinfo{booktitle}{\emph{2020 USENIX Annual Technical Conference (USENIX ATC
+  20)}}.
+\newblock
+\showeprint[arxiv]{2003.03423}
+\urldef\tempurl%
+\url{https://www.usenix.org/conference/atc20/presentation/shahrad}
+\showURL{%
+\tempurl}
+\newblock
+\shownote{verified 2026-10-17 via \url{https://arxiv.org/abs/2003.03423}
+  (authors, dataset note) and ar5iv HTML
+  \url{https://ar5iv.labs.arxiv.org/html/2003.03423} (sections 3.2, 3.3, 3.6);
+  no DOI.}
+
+
+\bibitem[\protect\citeauthoryear{Skolik, Jerbi, and Dunjko}{Skolik
+  et~al\mbox{.}}{2022}]%
+        {skolik2022quantum}
+\bibfield{author}{\bibinfo{person}{Andrea Skolik}, \bibinfo{person}{Sofiene
+  Jerbi}, {and} \bibinfo{person}{Vedran Dunjko}.}
+  \bibinfo{year}{2022}\natexlab{}.
+\newblock \showarticletitle{Quantum agents in the Gym: a variational quantum
+  algorithm for deep Q-learning}.
+\newblock \bibinfo{journal}{\emph{Quantum}}  \bibinfo{volume}{6}
+  (\bibinfo{year}{2022}), \bibinfo{pages}{720}.
+\newblock
+\urldef\tempurl%
+\url{https://doi.org/10.22331/q-2022-05-24-720}
+\showDOI{\tempurl}
+\showeprint[arxiv]{2103.15084}
+\newblock
+\shownote{verified 2026-10-16 via \url{https://arxiv.org/abs/2103.15084}.}
+
+
+\bibitem[\protect\citeauthoryear{Taylor and Stone}{Taylor and Stone}{2009}]%
+        {taylor2009transfer}
+\bibfield{author}{\bibinfo{person}{Matthew~E. Taylor} {and}
+  \bibinfo{person}{Peter Stone}.} \bibinfo{year}{2009}\natexlab{}.
+\newblock \showarticletitle{Transfer Learning for Reinforcement Learning
+  Domains: A Survey}.
+\newblock \bibinfo{journal}{\emph{Journal of Machine Learning Research}}
+  \bibinfo{volume}{10} (\bibinfo{year}{2009}), \bibinfo{pages}{1633--1685}.
+\newblock
+\urldef\tempurl%
+\url{https://jmlr.org/papers/v10/taylor09a.html}
+\showURL{%
+\tempurl}
+\newblock
+\shownote{verified 2026-10-16 via
+  \url{https://jmlr.org/papers/v10/taylor09a.html}.}
+
+
+\bibitem[\protect\citeauthoryear{{The Kubernetes Authors}}{{The Kubernetes
+  Authors}}{2026}]%
+        {k8sdocs_hpa}
+\bibfield{author}{\bibinfo{person}{{The Kubernetes Authors}}.}
+  \bibinfo{year}{2026}\natexlab{}.
+\newblock \bibinfo{title}{Horizontal Pod Autoscaling}.
+\newblock
+\newblock
+\urldef\tempurl%
+\url{https://kubernetes.io/docs/concepts/workloads/autoscaling/horizontal-pod-autoscale/}
+\showURL{%
+\tempurl}
+\newblock
+\shownote{official documentation; accessed 2026-10-17.}
+
+
+\bibitem[\protect\citeauthoryear{van Hasselt, Guez, and Silver}{van Hasselt
+  et~al\mbox{.}}{2016}]%
+        {vanhasselt2016ddqn}
+\bibfield{author}{\bibinfo{person}{Hado van Hasselt}, \bibinfo{person}{Arthur
+  Guez}, {and} \bibinfo{person}{David Silver}.}
+  \bibinfo{year}{2016}\natexlab{}.
+\newblock \showarticletitle{Deep Reinforcement Learning with Double
+  Q-learning}. In \bibinfo{booktitle}{\emph{Proceedings of the AAAI Conference
+  on Artificial Intelligence (AAAI 2016)}}.
+\newblock
+\showeprint[arxiv]{1509.06461}
+\urldef\tempurl%
+\url{https://arxiv.org/abs/1509.06461}
+\showURL{%
+\tempurl}
+\newblock
+\shownote{verified 2026-10-16 via \url{https://arxiv.org/abs/1509.06461} (arXiv
+  comment: AAAI 2016; pages not checked).}
+
+
+\bibitem[\protect\citeauthoryear{Zhou, Zhang, Ma, Gu, Qian, Wen, Sun, Li, and
+  Tang}{Zhou et~al\mbox{.}}{2023}]%
+        {zhou2023ahpa}
+\bibfield{author}{\bibinfo{person}{Zhiqiang Zhou}, \bibinfo{person}{Chaoli
+  Zhang}, \bibinfo{person}{Lingna Ma}, \bibinfo{person}{Jing Gu},
+  \bibinfo{person}{Huajie Qian}, \bibinfo{person}{Qingsong Wen},
+  \bibinfo{person}{Liang Sun}, \bibinfo{person}{Peng Li}, {and}
+  \bibinfo{person}{Zhimin Tang}.} \bibinfo{year}{2023}\natexlab{}.
+\newblock \bibinfo{title}{{AHPA}: Adaptive Horizontal Pod Autoscaling Systems
+  on {Alibaba} Cloud Container Service for {Kubernetes}}.
+\newblock
+\newblock
+\showeprint[arxiv]{2303.03640}
+\urldef\tempurl%
+\url{https://arxiv.org/abs/2303.03640}
+\showURL{%
+\tempurl}
+\newblock
+\shownote{verified 2026-10-17 via \url{https://arxiv.org/abs/2303.03640} and
+  ar5iv HTML (section Performance Model Training); preprint, peer-review status
+  not established.}
+
+
+\end{thebibliography}

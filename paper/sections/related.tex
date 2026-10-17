@@ -23,8 +23,7 @@ Kubernetes cluster serving Redis. Taylor and Stone~\cite{taylor2009transfer} sur
 transfer in reinforcement learning and frame the question DInos asks: whether starting from a trained policy
 beats training from scratch in the new task. Double Q-learning~\cite{vanhasselt2016ddqn} reduces the
 overestimation of action values in deep Q-networks. Sofia and the retrained DInos baseline use its target.\todo{D8: confirm wording on how the DInos baseline is retrained (Double DQN target, fixes) before
-Section~\ref{sec:agents} is written.} Sofia keeps the DInos actions. For the state, we do not reuse the published DInos features or those of the
-legacy implementation, which also included the pod capacity. Sofia and the retrained DInos baseline observe the
+Section~\ref{sec:agents} is written.} Sofia keeps the DInos actions. For the state, we do not reuse the published DInos features. Sofia and the retrained DInos baseline observe the
 same six signals that can be measured on a real cluster (Section~\ref{sec:simv2}), so the two agents differ
 only in the function approximator.
 
