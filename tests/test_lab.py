@@ -19,6 +19,7 @@ TMP = tempfile.mkdtemp(prefix="qrl-test-")
 for sub in ("tools", "dashboard", "docs", ".streamlit", "paper"):
     shutil.copytree(os.path.join(KIT, sub), os.path.join(TMP, sub), ignore=shutil.ignore_patterns("build"))
 os.environ["QRL_LAB_DIR"] = TMP
+os.environ["QRL_EAGER_TABS"] = "1"  # render every tab in AppTest; test_lazy_tabs_and_tab_persistence turns it off
 os.environ["QRL_PROM_URL"] = "http://127.0.0.1:9"  # tests never hit the live Prometheus; the tab shows its error path
 os.chdir(TMP)
 sys.path.insert(0, os.path.join(TMP, "tools"))
@@ -1054,6 +1055,68 @@ def test_prom_view():
     ok("prom_view: allowlist, query building, parsing, mocked GET")
 
 
+def test_lazy_tabs_and_tab_persistence():
+    """Tabs are bound to ?tab=..., hidden tabs do no work, the logo button returns home, no slider, brain renders."""
+    from streamlit.testing.v1 import AppTest
+    os.environ.pop("QRL_EAGER_TABS", None)
+    try:
+        at = AppTest.from_file(os.path.join(TMP, "dashboard", "app.py"), default_timeout=60).run()
+        assert not at.exception, at.exception
+        assert not any(r.label == "Εύρος" for r in at.radio), "Prometheus body must not run while its tab is hidden"
+        assert not any("Ανανέωση" in x.label for x in at.select_slider), "refresh slider must be gone"
+        assert "tab" in at.session_state and at.session_state["tab"] == "💬 Συνομιλία"
+        at.session_state["tab"] = "📡 Prometheus"
+        at.run()
+        assert not at.exception, at.exception
+        assert any(r.label == "Εύρος" for r in at.radio), "Prometheus body must run once its tab is selected"
+        assert any('<a href="./"' in m.value and "Πάρις" in m.value for m in at.sidebar.markdown), "logo anchor missing"
+        ok("tabs: bound to ?tab, lazy hidden tabs, logo is an anchor to the app root")
+    finally:
+        os.environ["QRL_EAGER_TABS"] = "1"
+
+
+def test_db_busy_timeout_waits_for_writer():
+    import sqlite3
+    import threading
+    from labdb import LabDB
+    path = os.path.join(TMP, "busy.db")
+    a = LabDB(path)
+    assert a.conn.execute("PRAGMA busy_timeout").fetchone()[0] >= 10000
+    assert a.conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+    lock = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
+    lock.execute("BEGIN IMMEDIATE")
+    threading.Timer(1.0, lambda: lock.execute("COMMIT")).start()
+    t0 = time.time()
+    b = LabDB(path)  # opens (schema/migrations) and writes while another connection holds the write lock
+    b.researcher_send("busy test")
+    assert time.time() - t0 >= 0.8, "writer must have waited for the lock, not failed"
+    a.close(); b.close()
+    ok("labdb: busy timeout + WAL, a concurrent writer waits instead of 'database is locked'")
+
+
+def test_venues_chat():
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_file(os.path.join(TMP, "dashboard", "app.py"), default_timeout=60).run()
+    assert not at.exception, at.exception
+    at.chat_input(key="venues_composer").set_value("Ποια προθεσμία κλείνει πρώτη;").run()
+    assert not at.exception, at.exception
+    from labdb import LabDB, VENUES_THREAD_TITLE
+    d = LabDB(os.path.join(TMP, ".lab", "lab.db"))
+    row = d.conn.execute("SELECT body FROM messages WHERE thread_id IN (SELECT thread_id FROM messages WHERE title=? "
+                         "OR body LIKE '%[VENUES]%') AND author='researcher'", (VENUES_THREAD_TITLE,)).fetchall()
+    d.close()
+    assert row and row[-1][0].startswith("[VENUES] Ποια προθεσμία"), row
+    ok("venues tab: own thread, messages tagged [VENUES]")
+
+
+def test_deadlines_event_fields():
+    d = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "docs", "deadlines.json")))
+    by = {x["venue"]: x for x in d}
+    assert by["IEEE CCGrid 2027"]["location"].startswith("Dallas") and "May 24" in by["IEEE CCGrid 2027"]["event_dates"]
+    assert by["ACM/SPEC ICPE 2027"]["event_dates"] == "δεν έχει ανακοινωθεί"
+    ok("deadlines.json: event_dates/location only for venues documented in VENUES.md")
+
+
 def test_prom_tab():
     from streamlit.testing.v1 import AppTest
     at = AppTest.from_file(os.path.join(TMP, "dashboard", "app.py"), default_timeout=60).run()
@@ -1698,6 +1761,7 @@ if __name__ == "__main__":
         test_deputy()
         test_voice()
         test_k8s_view()
+        test_db_busy_timeout_waits_for_writer()
         test_prom_view()
         test_file_view()
         test_tailnet_urls()
@@ -1716,6 +1780,9 @@ if __name__ == "__main__":
             test_agents_tab_roles()
             test_paper_tab()
             test_prom_tab()
+            test_venues_chat()
+            test_deadlines_event_fields()
+            test_lazy_tabs_and_tab_persistence()
             test_grafana_tab()
             test_decisions_live_and_tab()
             test_sudo_tab()

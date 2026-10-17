@@ -27,12 +27,12 @@ os.environ["QRL_LAB_DIR"] = ROOT
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 import modreload  # noqa: E402
 import importlib  # noqa: E402
-_LOCAL_MODS = ["labdb", "file_view", "replytext", "k8s_view", "prom_view", "web_terminal", "sudo_ui", "race_view",
+_LOCAL_MODS = ["labdb", "file_view", "replytext", "k8s_view", "prom_view", "web_terminal", "sudo_ui", "race_view", "brain_view",
                "perm_store", "ext_catalog", "summarize_runs", "paper_plots", "paper_build", "uploads", "installed_view", "access"]
 for _n in _LOCAL_MODS:  # first import so they are in sys.modules, then reload those whose file changed
     importlib.import_module(_n)
 modreload.reload_changed(_LOCAL_MODS)
-from labdb import DECISIONS, PAPER_REVIEWERS, PAPER_THREAD_TITLE, PAPER_WRITERS, LabDB, LabError, map_choice, paper_requests  # noqa: E402
+from labdb import DECISIONS, PAPER_REVIEWERS, PAPER_THREAD_TITLE, PAPER_WRITERS, VENUES_TAG, VENUES_THREAD_TITLE, LabDB, LabError, map_choice, paper_requests  # noqa: E402
 import file_view  # noqa: E402
 import replytext  # noqa: E402
 import k8s_view  # noqa: E402
@@ -40,6 +40,7 @@ import prom_view  # noqa: E402
 import web_terminal  # noqa: E402
 import sudo_ui  # noqa: E402
 import race_view  # noqa: E402
+import brain_view  # noqa: E402
 import perm_store  # noqa: E402
 import ext_catalog  # noqa: E402
 import installed_view  # noqa: E402
@@ -300,6 +301,26 @@ def codex_banner_text(h, now=None):
     return f"{msg} · εδώ και {ago(max(0, int(sec)))}"
 
 
+def deadlines_table_html(rows):
+    """Wrapping HTML table (fixed layout, no overflow at phone width). All values are escaped."""
+    import html as _h
+    cols = list(rows[0]) if rows else []
+    css = ("<style>.dl{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.85rem}"
+           ".dl th,.dl td{border-bottom:1px solid rgba(128,128,128,.3);padding:4px 6px;text-align:left;vertical-align:top;"
+           "overflow-wrap:anywhere;word-break:break-word}.dl th{opacity:.7}</style>")
+    head = "".join(f"<th>{_h.escape(c)}</th>" for c in cols)
+    body = ""
+    for r in rows:
+        cells = ""
+        for c in cols:
+            v = _h.escape(str(r[c]))
+            if c == "πηγή" and str(r[c]).startswith(("http://", "https://")):
+                v = f'<a href="{_h.escape(str(r[c]), quote=True)}" target="_blank" rel="noopener">{v}</a>'
+            cells += f"<td>{v}</td>"
+        body += f"<tr>{cells}</tr>"
+    return f'{css}<div style="overflow-x:auto"><table class="dl"><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>'
+
+
 def read_text(path):
     try:
         with open(path, encoding="utf-8") as f:
@@ -342,13 +363,30 @@ LOGO_SVG = (
     '<text x="130" y="152" text-anchor="middle" font-family="Georgia,\'Palatino Linotype\',serif" font-size="46" '
     'font-weight="bold" font-style="italic" letter-spacing="2" fill="url(#ttl)" stroke="#7a3d00" stroke-width=".8">Πάρις</text>'
     '</svg>')
-st.sidebar.markdown(f'<div style="width:100%;max-width:250px;margin:0 auto 6px">{LOGO_SVG}</div>', unsafe_allow_html=True)
+
+
+def _tab_live(t):
+    """Hidden tabs skip their body (tab.open is False); None = state untracked. QRL_EAGER_TABS=1 renders all (tests)."""
+    return bool(os.environ.get("QRL_EAGER_TABS")) or t.open is not False
+
+
+HOME_TAB = "💬 Συνομιλία"
+
+
+# Logo = plain anchor to "./" (resolves to the app root, so ?tab=/?path= are dropped and the chat tab opens). A full
+# page load is deliberate: it is the one mechanism that works for every client (phone, tailnet) and clears all params.
+st.sidebar.markdown(f'<a href="./" target="_self" title="Αρχική" style="display:block;width:100%;max-width:250px;'
+                    f'margin:0 auto 6px;cursor:pointer">{LOGO_SVG}</a>', unsafe_allow_html=True)
 st.sidebar.markdown("### 🧪 QRL-Lab")
 _recent_denied = access.recent(1, max_age=3600)
 if _recent_denied:
     st.sidebar.error(f"🛡️ Απορρίφθηκε πρόσβαση ({_recent_denied[0].get('reason')}) · login: "
                      f"{_recent_denied[0].get('login') or '(κανένα)'} · δες Sudo → Πρόσβαση", icon="🚨")
-refresh = st.sidebar.select_slider("Ανανέωση κάθε (δευτ.)", options=[3, 5, 10, 30], value=5)
+# No page-level refresh timer and no slider: only small @st.fragment(run_every=...) blocks update themselves, so the
+# page never reruns as a whole (no grey-out). Heavy loads live in tabs that render only while open (tab.open).
+refresh = 5
+st.html("<style>@media (min-width:769px){[data-testid=stSidebar][aria-expanded=true]{min-width:350px!important;"
+        "width:350px!important}}</style>")
 
 
 @st.fragment(run_every=refresh)
@@ -396,6 +434,29 @@ def sidebar_status():
 
 with st.sidebar:
     sidebar_status()
+
+
+def _brain_state():
+    """Brain state from real logs only (events.jsonl incl. agent_log entries, labdb messages)."""
+    try:
+        dd = db()
+        rows = dd.conn.execute("SELECT ts, author, title, body FROM messages WHERE author!='researcher' "
+                               "ORDER BY ts DESC LIMIT 20").fetchall()
+        dd.close()
+        msgs = [{"ts": r[0], "author": r[1], "title": r[2], "body": r[3]} for r in rows]
+    except Exception:  # noqa: BLE001 - display only
+        msgs = []
+    return brain_view.derive(race_view.load_events(EVENTS, max_lines=1500), msgs, time.time())
+
+
+@st.fragment(run_every=3)
+def sidebar_brain():
+    """Identical HTML when idle and no pulse is running, so the iframe is not reloaded (no flicker)."""
+    components.html(brain_view.render(_brain_state()), height=255)
+
+
+with st.sidebar:
+    sidebar_brain()
 
 # ---------------------------------------------------------------- health banner (every tab; no inputs inside)
 @st.fragment(run_every=refresh)
@@ -627,8 +688,11 @@ DEC_TAB = "✅ Αποφάσεις"
 # Deep link ?path=...: on the first run of a session with that parameter the Αρχεία tab opens first.
 _open_files = "path" in st.query_params and not st.session_state.get("fb_tab_done")
 st.session_state["fb_tab_done"] = True
-TAB_NAMES = ["💬 Συνομιλία", DEC_TAB, "🤖 Πράκτορες", "📈 Πειράματα", "⚖️ Council",
+TAB_NAMES = [HOME_TAB, DEC_TAB, "🤖 Πράκτορες", "📈 Πειράματα", "⚖️ Council",
              "🖥️ Πόροι", "☸️ Kubernetes", "📡 Prometheus", "📊 Grafana", FILES_TAB, "📝 Paper", "🎓 Συνέδρια", "🧾 Ιστορικό", "🔐 Sudo", "🧩 Επεκτάσεις", "⌨️ Terminal"]
+# Tab persistence (F5 / shared link): st.tabs(key="tab", bind="query-params") in Streamlit 1.66 keeps the active
+# label in ?tab=... and restores it on load; ?path=... (file deep link) only picks the default when ?tab is absent.
+_tab_default = FILES_TAB if (_open_files and "tab" not in st.query_params) else None
 _term_url = web_terminal.iframe_url(_req_host) if (web_terminal.running() and _unlocked) else ""
 _side = bool(_term_url) and st.sidebar.toggle("Terminal στα δεξιά", key="term_side")
 if _side:  # tabs in the left column, the terminal in a right-hand column
@@ -637,10 +701,10 @@ if _side:  # tabs in the left column, the terminal in a right-hand column
         st.iframe(_term_url, height=700)
     with _left:
         (tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_prom, tab_grafana, tab_files, tab_paper, tab_venues,
-         tab_audit, tab_sudo, tab_ext, tab_term) = st.tabs(TAB_NAMES, default=FILES_TAB if _open_files else None)
+         tab_audit, tab_sudo, tab_ext, tab_term) = st.tabs(TAB_NAMES, default=_tab_default, key="tab", bind="query-params")
 else:
     (tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_prom, tab_grafana, tab_files, tab_paper, tab_venues,
-     tab_audit, tab_sudo, tab_ext, tab_term) = st.tabs(TAB_NAMES, default=FILES_TAB if _open_files else None)
+     tab_audit, tab_sudo, tab_ext, tab_term) = st.tabs(TAB_NAMES, default=_tab_default, key="tab", bind="query-params")
 
 # ================================================================ conversation
 with tab_chat:
@@ -820,6 +884,12 @@ with tab_dec:
 
 # ================================================================ agents
 with tab_agents:
+    @st.fragment(run_every=3)
+    def agents_brain():
+        components.html(brain_view.render(_brain_state(), full_names=True), height=380)
+
+    with st.expander("🧠 Εγκέφαλος πρακτόρων (ζωντανά, από τα logs)", expanded=True):
+        agents_brain()
     hours = st.select_slider("Παράθυρο", options=[1, 3, 6, 12, 24, 72], value=6, format_func=lambda h: f"{h} ώρες",
                              key="agent_hours")
 
@@ -906,199 +976,202 @@ with tab_agents:
     agents_view(hours, race_on)
 
 # ================================================================ runs
-with tab_runs:
-    @st.fragment(run_every=refresh)
-    def runs_view():
-        dd = db()
-        runs = dd.runs()
-        dd.close()
-        if not runs:
-            st.info("Δεν υπάρχουν ακόμη runs. Κάθε πείραμα ξεκινά μόνο μέσω `tools/launch_run.py` και μόνο αφού "
-                    "εγκρίνεις το run spec του στην καρτέλα «Αποφάσεις».", icon="📈")
-            return
-        rows = []
-        for r in runs:
-            prog = None
-            pj = read_text(os.path.join(r["run_dir"], "progress.json"))
-            if pj:
-                try:
-                    p = json.loads(pj)
-                    prog = min(1.0, float(p["step"]) / float(p["total"])) if p.get("total") else None
-                except (ValueError, KeyError, TypeError, ZeroDivisionError):
-                    prog = None
-            started, ended = parse_ts(r["started"]), parse_ts(r["ended"])
-            dur = ((ended or dt.datetime.now(dt.timezone.utc)) - started).total_seconds() if started else None
-            icon, label = RUN_STATUS.get(r["status"], ("", r["status"]))
-            rows.append({"run": r["run_id"], "όνομα": r["name"], "κατάσταση": f"{icon} {label}",
-                         "πρόοδος": prog, "πεδίο": REQ_SCOPE.get(r["scope"], r["scope"]), "έγκριση": r["request_id"],
-                         "διάρκεια": ago(dur) if dur is not None else "—", "exit": "" if r["exit_code"] is None else r["exit_code"],
-                         "κώδικας": (r["code_sha"] or "")[:12]})
-        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch",
-                     column_config={"πρόοδος": st.column_config.ProgressColumn("πρόοδος", min_value=0, max_value=1,
-                                                                               format="percent")})
-        # metrics
-        ids = [r["run_id"] for r in runs]
-        chosen = st.multiselect("Σύγκριση runs (μέχρι 8)", ids, default=ids[:2], max_selections=8, key="runs_sel")
-        series = {}
-        keys = set()
-        for rid in chosen:
-            run = next(r for r in runs if r["run_id"] == rid)
-            path = os.path.join(run["run_dir"], "metrics.jsonl")
-            if os.path.exists(path):
-                recs = []
-                with open(path, encoding="utf-8") as f:
-                    for line in f:
-                        try:
-                            recs.append(json.loads(line))
-                        except json.JSONDecodeError:
-                            pass
-                if recs:
-                    df = pd.DataFrame(recs)
-                    series[rid] = df
-                    keys |= {c for c in df.columns if c not in ("step", "ts") and pd.api.types.is_numeric_dtype(df[c])}
-        if not series:
-            st.caption("Τα επιλεγμένα runs δεν έχουν ακόμη `metrics.jsonl`.")
-            return
-        mlist = sorted(keys)
-        metric = st.selectbox("Μετρική", mlist, index=mlist.index("reward") if "reward" in mlist else 0,
-                              key="runs_metric")
-        palette = [v[1] for v in AGENTS.values()]
-        fig = go.Figure()
-        for rid in chosen:  # colour by position in the run list (stable), never by rank of the value
-            if rid in series and metric in series[rid]:
-                df = series[rid]
-                x = df["step"] if "step" in df else df.index
-                fig.add_trace(go.Scatter(x=x, y=df[metric], mode="lines", name=rid,
-                                         line=dict(width=2, color=palette[ids.index(rid) % len(palette)])))
-        fig.update_layout(height=380, margin=dict(l=10, r=10, t=10, b=30), hovermode="x unified",
-                          legend=dict(orientation="h", y=-0.2), plot_bgcolor="rgba(0,0,0,0)",
-                          paper_bgcolor="rgba(0,0,0,0)", xaxis_title="step", yaxis_title=metric)
-        fig.update_xaxes(gridcolor="rgba(137,135,129,0.25)")
-        fig.update_yaxes(gridcolor="rgba(137,135,129,0.25)")
-        st.plotly_chart(fig, theme="streamlit", width="stretch", config={"displayModeBar": False})
-    runs_view()
+if _tab_live(tab_runs):  # lazy: hidden tabs do no work
+    with tab_runs:
+        @st.fragment(run_every=refresh)
+        def runs_view():
+            dd = db()
+            runs = dd.runs()
+            dd.close()
+            if not runs:
+                st.info("Δεν υπάρχουν ακόμη runs. Κάθε πείραμα ξεκινά μόνο μέσω `tools/launch_run.py` και μόνο αφού "
+                        "εγκρίνεις το run spec του στην καρτέλα «Αποφάσεις».", icon="📈")
+                return
+            rows = []
+            for r in runs:
+                prog = None
+                pj = read_text(os.path.join(r["run_dir"], "progress.json"))
+                if pj:
+                    try:
+                        p = json.loads(pj)
+                        prog = min(1.0, float(p["step"]) / float(p["total"])) if p.get("total") else None
+                    except (ValueError, KeyError, TypeError, ZeroDivisionError):
+                        prog = None
+                started, ended = parse_ts(r["started"]), parse_ts(r["ended"])
+                dur = ((ended or dt.datetime.now(dt.timezone.utc)) - started).total_seconds() if started else None
+                icon, label = RUN_STATUS.get(r["status"], ("", r["status"]))
+                rows.append({"run": r["run_id"], "όνομα": r["name"], "κατάσταση": f"{icon} {label}",
+                             "πρόοδος": prog, "πεδίο": REQ_SCOPE.get(r["scope"], r["scope"]), "έγκριση": r["request_id"],
+                             "διάρκεια": ago(dur) if dur is not None else "—", "exit": "" if r["exit_code"] is None else r["exit_code"],
+                             "κώδικας": (r["code_sha"] or "")[:12]})
+            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch",
+                         column_config={"πρόοδος": st.column_config.ProgressColumn("πρόοδος", min_value=0, max_value=1,
+                                                                                   format="percent")})
+            # metrics
+            ids = [r["run_id"] for r in runs]
+            chosen = st.multiselect("Σύγκριση runs (μέχρι 8)", ids, default=ids[:2], max_selections=8, key="runs_sel")
+            series = {}
+            keys = set()
+            for rid in chosen:
+                run = next(r for r in runs if r["run_id"] == rid)
+                path = os.path.join(run["run_dir"], "metrics.jsonl")
+                if os.path.exists(path):
+                    recs = []
+                    with open(path, encoding="utf-8") as f:
+                        for line in f:
+                            try:
+                                recs.append(json.loads(line))
+                            except json.JSONDecodeError:
+                                pass
+                    if recs:
+                        df = pd.DataFrame(recs)
+                        series[rid] = df
+                        keys |= {c for c in df.columns if c not in ("step", "ts") and pd.api.types.is_numeric_dtype(df[c])}
+            if not series:
+                st.caption("Τα επιλεγμένα runs δεν έχουν ακόμη `metrics.jsonl`.")
+                return
+            mlist = sorted(keys)
+            metric = st.selectbox("Μετρική", mlist, index=mlist.index("reward") if "reward" in mlist else 0,
+                                  key="runs_metric")
+            palette = [v[1] for v in AGENTS.values()]
+            fig = go.Figure()
+            for rid in chosen:  # colour by position in the run list (stable), never by rank of the value
+                if rid in series and metric in series[rid]:
+                    df = series[rid]
+                    x = df["step"] if "step" in df else df.index
+                    fig.add_trace(go.Scatter(x=x, y=df[metric], mode="lines", name=rid,
+                                             line=dict(width=2, color=palette[ids.index(rid) % len(palette)])))
+            fig.update_layout(height=380, margin=dict(l=10, r=10, t=10, b=30), hovermode="x unified",
+                              legend=dict(orientation="h", y=-0.2), plot_bgcolor="rgba(0,0,0,0)",
+                              paper_bgcolor="rgba(0,0,0,0)", xaxis_title="step", yaxis_title=metric)
+            fig.update_xaxes(gridcolor="rgba(137,135,129,0.25)")
+            fig.update_yaxes(gridcolor="rgba(137,135,129,0.25)")
+            st.plotly_chart(fig, theme="streamlit", width="stretch", config={"displayModeBar": False})
+        runs_view()
 
-    st.markdown("##### Εικόνες αποτελεσμάτων run")
-    _d = db()
-    _all_runs = _d.runs()
-    _d.close()
-    if _all_runs:
-        _rid = st.selectbox("Run", [r["run_id"] for r in _all_runs], key="img_run")
-        _rd = next(r["run_dir"] for r in _all_runs if r["run_id"] == _rid)
-        _imgs = paper_plots.find_result_images(_rd)
-        if not _imgs:
-            st.caption("Το run δεν έχει εικόνες στο `results/`.")
-        for _grp in dict.fromkeys(g for g, _, _ in _imgs):
-            with st.expander(f"results/{_grp}" if _grp != "(results)" else "results/", expanded=_grp == "(results)"):
-                for _g, _cap, _p in _imgs:
-                    if _g == _grp:
-                        st.image(_p, caption=f"{_rid}: {_cap}")
+        st.markdown("##### Εικόνες αποτελεσμάτων run")
+        _d = db()
+        _all_runs = _d.runs()
+        _d.close()
+        if _all_runs:
+            _rid = st.selectbox("Run", [r["run_id"] for r in _all_runs], key="img_run")
+            _rd = next(r["run_dir"] for r in _all_runs if r["run_id"] == _rid)
+            _imgs = paper_plots.find_result_images(_rd)
+            if not _imgs:
+                st.caption("Το run δεν έχει εικόνες στο `results/`.")
+            for _grp in dict.fromkeys(g for g, _, _ in _imgs):
+                with st.expander(f"results/{_grp}" if _grp != "(results)" else "results/", expanded=_grp == "(results)"):
+                    for _g, _cap, _p in _imgs:
+                        if _g == _grp:
+                            st.image(_p, caption=f"{_rid}: {_cap}")
 
-    st.markdown("##### Σύγκριση σε στυλ paper")
-    _reqs = summarize_runs.request_ids(os.path.join(ROOT, ".lab"))
-    if _reqs:
-        _req = st.selectbox("Αίτημα (request id)", _reqs, index=len(_reqs) - 1, key="cmp_req")
-        _rows = summarize_runs.collect(_req, os.path.join(ROOT, ".lab"))
-        _agg = summarize_runs.aggregate_by_seed(_rows)
-        if _agg:
-            for _metric, _title in (("reward", "Total accumulated reward"), ("vms", "Mean VMs")):
-                st.markdown(f"**{_title}**")
-                _fig = paper_plots.comparison_figure(_agg, _metric)
-                st.pyplot(_fig)
-                _fig.clf()
-            st.caption("Οι τιμές είναι μέσοι όροι επί των επεισοδίων και των seeds από τα runs: "
-                       + ", ".join(r[0] for r in _rows) + ". Οι μπάρες σφάλματος είναι η τυπική απόκλιση μεταξύ "
-                       "seeds (0 όταν υπάρχει ένα seed). Το `model` είναι το προεκπαιδευμένο μοντέλο (k βήματα).")
-        else:
-            st.caption("Τα runs του αιτήματος δεν έχουν ακόμη επεισόδια με `model` και `reward`.")
-    else:
-        st.caption("Δεν υπάρχουν runs αιτήματος για σύγκριση.")
-
-    st.markdown("##### Διακοπή run")
-    d = db()
-    running = [r["run_id"] for r in d.runs() if r["status"] in ("starting", "running")]
-    d.close()
-    if running:
-        with st.form("stop_run"):
-            target = st.selectbox("Run", running)
-            sure = st.checkbox("Ναι, θέλω να σταματήσει")
-            go_stop = st.form_submit_button("⏹️ Ζήτησε διακοπή")
-        if go_stop:
-            if not sure:
-                st.warning("Τσέκαρε την επιβεβαίωση.")
+        st.markdown("##### Σύγκριση σε στυλ paper")
+        _reqs = summarize_runs.request_ids(os.path.join(ROOT, ".lab"))
+        if _reqs:
+            _req = st.selectbox("Αίτημα (request id)", _reqs, index=len(_reqs) - 1, key="cmp_req")
+            _rows = summarize_runs.collect(_req, os.path.join(ROOT, ".lab"))
+            _agg = summarize_runs.aggregate_by_seed(_rows)
+            if _agg:
+                for _metric, _title in (("reward", "Total accumulated reward"), ("vms", "Mean VMs")):
+                    st.markdown(f"**{_title}**")
+                    _fig = paper_plots.comparison_figure(_agg, _metric)
+                    st.pyplot(_fig)
+                    _fig.clf()
+                st.caption("Οι τιμές είναι μέσοι όροι επί των επεισοδίων και των seeds από τα runs: "
+                           + ", ".join(r[0] for r in _rows) + ". Οι μπάρες σφάλματος είναι η τυπική απόκλιση μεταξύ "
+                           "seeds (0 όταν υπάρχει ένα seed). Το `model` είναι το προεκπαιδευμένο μοντέλο (k βήματα).")
             else:
-                try:
-                    dd = db()
-                    dd.request_stop(target)
-                    dd.close()
-                    st.toast(f"Ζητήθηκε διακοπή του {target}. Ο supervisor θα το σταματήσει σε ~5 δευτ.", icon="⏹️")
-                except LabError as e:
-                    st.error(str(e))
-    else:
-        st.caption("Κανένα run δεν τρέχει.")
+                st.caption("Τα runs του αιτήματος δεν έχουν ακόμη επεισόδια με `model` και `reward`.")
+        else:
+            st.caption("Δεν υπάρχουν runs αιτήματος για σύγκριση.")
+
+        st.markdown("##### Διακοπή run")
+        d = db()
+        running = [r["run_id"] for r in d.runs() if r["status"] in ("starting", "running")]
+        d.close()
+        if running:
+            with st.form("stop_run"):
+                target = st.selectbox("Run", running)
+                sure = st.checkbox("Ναι, θέλω να σταματήσει")
+                go_stop = st.form_submit_button("⏹️ Ζήτησε διακοπή")
+            if go_stop:
+                if not sure:
+                    st.warning("Τσέκαρε την επιβεβαίωση.")
+                else:
+                    try:
+                        dd = db()
+                        dd.request_stop(target)
+                        dd.close()
+                        st.toast(f"Ζητήθηκε διακοπή του {target}. Ο supervisor θα το σταματήσει σε ~5 δευτ.", icon="⏹️")
+                    except LabError as e:
+                        st.error(str(e))
+        else:
+            st.caption("Κανένα run δεν τρέχει.")
 
 # ================================================================ council
-with tab_council:
-    folders = sorted(glob.glob(os.path.join(LAB, "council", "C-*")), reverse=True)
-    if not folders:
-        st.info("Δεν υπάρχει ακόμη council. Όταν μια απόφαση αλλάζει την έρευνα, Claude και Codex γράφουν εδώ "
-                "ανεξάρτητες προτάσεις, κριτική και μια κάρτα απόφασης.", icon="⚖️")
-    else:
-        pick = st.selectbox("Council", folders, format_func=os.path.basename)
-        card = read_text(os.path.join(pick, "card.md"))
-        brief = read_text(os.path.join(pick, "brief.md"))
-        if brief:
-            with st.expander("Ερώτημα (brief)", expanded=not card):
-                st.markdown(brief)
-        if card:
-            with st.container(border=True):
-                st.markdown("**Κάρτα απόφασης**")
-                st.markdown(card)
-        cl, cx = st.columns(2)
-        with cl:
-            st.markdown(f"**{AGENTS['coordinator'][2]} Claude**")
-            for fn, lab in (("claude.md", "Πρόταση"), ("claude-r2.md", "Κριτική & αναθεώρηση")):
-                t = read_text(os.path.join(pick, fn))
-                if t:
-                    with st.expander(lab, expanded=True):
-                        st.markdown(t)
-        with cx:
-            st.markdown(f"**{AGENTS['codex'][2]} Codex**")
-            for fn, lab in (("codex.md", "Πρόταση"), ("codex-r2.md", "Κριτική & αναθεώρηση")):
-                t = read_text(os.path.join(pick, fn))
-                if t:
-                    with st.expander(lab, expanded=True):
-                        st.markdown(t)
+if _tab_live(tab_council):  # lazy: hidden tabs do no work
+    with tab_council:
+        folders = sorted(glob.glob(os.path.join(LAB, "council", "C-*")), reverse=True)
+        if not folders:
+            st.info("Δεν υπάρχει ακόμη council. Όταν μια απόφαση αλλάζει την έρευνα, Claude και Codex γράφουν εδώ "
+                    "ανεξάρτητες προτάσεις, κριτική και μια κάρτα απόφασης.", icon="⚖️")
+        else:
+            pick = st.selectbox("Council", folders, format_func=os.path.basename)
+            card = read_text(os.path.join(pick, "card.md"))
+            brief = read_text(os.path.join(pick, "brief.md"))
+            if brief:
+                with st.expander("Ερώτημα (brief)", expanded=not card):
+                    st.markdown(brief)
+            if card:
+                with st.container(border=True):
+                    st.markdown("**Κάρτα απόφασης**")
+                    st.markdown(card)
+            cl, cx = st.columns(2)
+            with cl:
+                st.markdown(f"**{AGENTS['coordinator'][2]} Claude**")
+                for fn, lab in (("claude.md", "Πρόταση"), ("claude-r2.md", "Κριτική & αναθεώρηση")):
+                    t = read_text(os.path.join(pick, fn))
+                    if t:
+                        with st.expander(lab, expanded=True):
+                            st.markdown(t)
+            with cx:
+                st.markdown(f"**{AGENTS['codex'][2]} Codex**")
+                for fn, lab in (("codex.md", "Πρόταση"), ("codex-r2.md", "Κριτική & αναθεώρηση")):
+                    t = read_text(os.path.join(pick, fn))
+                    if t:
+                        with st.expander(lab, expanded=True):
+                            st.markdown(t)
 
 # ================================================================ resources
-with tab_res:
-    @st.fragment(run_every=max(10, refresh))
-    def resources():
-        try:
-            import psutil
-        except ImportError:
-            st.warning("Λείπει το psutil στο .venv.")
-            return
-        c = st.columns(4)
-        cpu = psutil.cpu_percent(interval=0.2)
-        mem = psutil.virtual_memory()
-        disk = shutil.disk_usage(ROOT)
-        load1 = os.getloadavg()[0] if hasattr(os, "getloadavg") else None
-        c[0].metric("CPU", f"{cpu:.0f}%", help=f"{psutil.cpu_count()} πυρήνες")
-        c[0].progress(min(1.0, cpu / 100))
-        c[1].metric("RAM", f"{mem.used / 2**30:.1f} / {mem.total / 2**30:.0f} GiB")
-        c[1].progress(mem.percent / 100)
-        c[2].metric("Δίσκος", f"{disk.used / 2**30:.0f} / {disk.total / 2**30:.0f} GiB")
-        c[2].progress(disk.used / disk.total)
-        c[3].metric("Load (1 λεπτό)", f"{load1:.1f}" if load1 is not None else "—")
-        if shutil.which("nvidia-smi"):
-            out = subprocess.run(["nvidia-smi", "--query-gpu=name,utilization.gpu,memory.used,memory.total",
-                                  "--format=csv,noheader"], capture_output=True, text=True, timeout=5).stdout.strip()
-            st.caption("GPU: " + (out or "—"))
-        else:
-            st.caption("GPU: δεν υπάρχει NVIDIA GPU στο VM.")
-    resources()
-    st.caption("Kubernetes: δες την καρτέλα ☸️ Kubernetes.")
+if _tab_live(tab_res):  # lazy: hidden tabs do no work
+    with tab_res:
+        @st.fragment(run_every=max(10, refresh))
+        def resources():
+            try:
+                import psutil
+            except ImportError:
+                st.warning("Λείπει το psutil στο .venv.")
+                return
+            c = st.columns(4)
+            cpu = psutil.cpu_percent(interval=0.2)
+            mem = psutil.virtual_memory()
+            disk = shutil.disk_usage(ROOT)
+            load1 = os.getloadavg()[0] if hasattr(os, "getloadavg") else None
+            c[0].metric("CPU", f"{cpu:.0f}%", help=f"{psutil.cpu_count()} πυρήνες")
+            c[0].progress(min(1.0, cpu / 100))
+            c[1].metric("RAM", f"{mem.used / 2**30:.1f} / {mem.total / 2**30:.0f} GiB")
+            c[1].progress(mem.percent / 100)
+            c[2].metric("Δίσκος", f"{disk.used / 2**30:.0f} / {disk.total / 2**30:.0f} GiB")
+            c[2].progress(disk.used / disk.total)
+            c[3].metric("Load (1 λεπτό)", f"{load1:.1f}" if load1 is not None else "—")
+            if shutil.which("nvidia-smi"):
+                out = subprocess.run(["nvidia-smi", "--query-gpu=name,utilization.gpu,memory.used,memory.total",
+                                      "--format=csv,noheader"], capture_output=True, text=True, timeout=5).stdout.strip()
+                st.caption("GPU: " + (out or "—"))
+            else:
+                st.caption("GPU: δεν υπάρχει NVIDIA GPU στο VM.")
+        resources()
+        st.caption("Kubernetes: δες την καρτέλα ☸️ Kubernetes.")
 
 # ================================================================ files (read-only; NOT in a fragment)
 with tab_files:
@@ -1199,64 +1272,65 @@ with tab_files:
 
 # ================================================================ kubernetes (read-only)
 BADGE = {"ok": "🟢", "degraded": "🟠", "failing": "🔴"}
-with tab_k8s:
-    kc1, kc2, kc3 = st.columns([2, 1, 1])
-    snap0 = k8s_view.fetch()
-    nss = k8s_view.namespaces(snap0["data"]) if snap0["up"] else []
-    ns_sel = kc1.selectbox("Namespace", ["(όλα)"] + nss, key="k8s_ns")
-    auto = kc3.toggle("Αυτόματη ανανέωση (30 δ.)", value=False, key="k8s_auto")
-    if kc2.button("Ανανέωση", key="k8s_refresh"):
-        k8s_view.clear_cache()
+if _tab_live(tab_k8s):  # lazy: hidden tabs do no work
+    with tab_k8s:
+        kc1, kc2, kc3 = st.columns([2, 1, 1])
+        snap0 = k8s_view.fetch()
+        nss = k8s_view.namespaces(snap0["data"]) if snap0["up"] else []
+        ns_sel = kc1.selectbox("Namespace", ["(όλα)"] + nss, key="k8s_ns")
+        auto = kc3.toggle("Αυτόματη ανανέωση (30 δ.)", value=False, key="k8s_auto")
+        if kc2.button("Ανανέωση", key="k8s_refresh"):
+            k8s_view.clear_cache()
 
-    @st.fragment(run_every=30 if auto else None)
-    def k8s_panel(ns):
-        snap = k8s_view.fetch()
-        st.caption(f"context: `{snap['context'] or '—'}` · read-only (`kubectl get`)")
-        if not snap["up"]:
-            st.error("Το cluster δεν είναι διαθέσιμο (API server δεν απαντά)\n\n`" + (snap["error"] or "—") + "`")
-            return
-        v = k8s_view.parse_snapshot(snap["data"], None if ns == "(όλα)" else ns)
-        k = k8s_view.kpis(v)
-        c = st.columns(4)
-        c[0].metric("Nodes ready", f"{k['nodes_ready']}/{k['nodes_total']}")
-        c[1].metric("Pods Running", k["pods_running"])
-        c[2].metric("Pods Pending / Failed", f"{k['pods_pending']} / {k['pods_failed']}")
-        c[3].metric("Deployments υγιή", f"{k['deploys_ok']}/{k['deploys_total']}")
-        bad = k8s_view.failing_items(v)
-        if bad:
-            st.markdown("##### Προβλήματα")
-            st.dataframe(pd.DataFrame([{"": BADGE[h], "Είδος": kd, "Όνομα": nm, "Αιτία": r} for kd, nm, h, r in bad]),
+        @st.fragment(run_every=30 if auto else None)
+        def k8s_panel(ns):
+            snap = k8s_view.fetch()
+            st.caption(f"context: `{snap['context'] or '—'}` · read-only (`kubectl get`)")
+            if not snap["up"]:
+                st.error("Το cluster δεν είναι διαθέσιμο (API server δεν απαντά)\n\n`" + (snap["error"] or "—") + "`")
+                return
+            v = k8s_view.parse_snapshot(snap["data"], None if ns == "(όλα)" else ns)
+            k = k8s_view.kpis(v)
+            c = st.columns(4)
+            c[0].metric("Nodes ready", f"{k['nodes_ready']}/{k['nodes_total']}")
+            c[1].metric("Pods Running", k["pods_running"])
+            c[2].metric("Pods Pending / Failed", f"{k['pods_pending']} / {k['pods_failed']}")
+            c[3].metric("Deployments υγιή", f"{k['deploys_ok']}/{k['deploys_total']}")
+            bad = k8s_view.failing_items(v)
+            if bad:
+                st.markdown("##### Προβλήματα")
+                st.dataframe(pd.DataFrame([{"": BADGE[h], "Είδος": kd, "Όνομα": nm, "Αιτία": r} for kd, nm, h, r in bad]),
+                             hide_index=True, use_container_width=True)
+            else:
+                st.success("Όλα υγιή.")
+            ph = k8s_view.pods_by_phase(v)
+            if ph:
+                fig = go.Figure()
+                colors = {"Running": "#2e9e5b", "Pending": "#e0a100", "Failed": "#d64545", "Succeeded": "#5b8bd6"}
+                for phase in ("Running", "Pending", "Failed", "Succeeded", "Unknown"):
+                    fig.add_bar(name=phase, x=list(ph), y=[ph[n].get(phase, 0) for n in ph],
+                                marker_color=colors.get(phase, "#888"))
+                fig.update_layout(barmode="stack", height=240, margin=dict(l=0, r=0, t=10, b=0), yaxis_title="pods")
+                st.plotly_chart(fig, use_container_width=True)
+            st.markdown("##### Pods")
+            st.dataframe(pd.DataFrame([{"": BADGE[p["health"]], "Όνομα": p["name"], "Namespace": p["namespace"],
+                                        "Phase": p["phase"], "Ready": p["ready"], "Restarts": p["restarts"],
+                                        "Age": p["age"], "Node": p["node"]} for p in v["pods"]]),
                          hide_index=True, use_container_width=True)
-        else:
-            st.success("Όλα υγιή.")
-        ph = k8s_view.pods_by_phase(v)
-        if ph:
-            fig = go.Figure()
-            colors = {"Running": "#2e9e5b", "Pending": "#e0a100", "Failed": "#d64545", "Succeeded": "#5b8bd6"}
-            for phase in ("Running", "Pending", "Failed", "Succeeded", "Unknown"):
-                fig.add_bar(name=phase, x=list(ph), y=[ph[n].get(phase, 0) for n in ph],
-                            marker_color=colors.get(phase, "#888"))
-            fig.update_layout(barmode="stack", height=240, margin=dict(l=0, r=0, t=10, b=0), yaxis_title="pods")
-            st.plotly_chart(fig, use_container_width=True)
-        st.markdown("##### Pods")
-        st.dataframe(pd.DataFrame([{"": BADGE[p["health"]], "Όνομα": p["name"], "Namespace": p["namespace"],
-                                    "Phase": p["phase"], "Ready": p["ready"], "Restarts": p["restarts"],
-                                    "Age": p["age"], "Node": p["node"]} for p in v["pods"]]),
-                     hide_index=True, use_container_width=True)
-        st.markdown("##### Deployments")
-        st.dataframe(pd.DataFrame([{"": BADGE[d["health"]], "Όνομα": d["name"], "Namespace": d["namespace"],
-                                    "Ready": d["ready"], "Up-to-date": d["up_to_date"], "Available": d["available"]}
-                                   for d in v["deployments"]]), hide_index=True, use_container_width=True)
-        st.markdown("##### Services")
-        st.dataframe(pd.DataFrame(v["services"]), hide_index=True, use_container_width=True)
-        st.markdown("##### Nodes")
-        st.dataframe(pd.DataFrame([{"": BADGE[n["health"]], "Όνομα": n["name"], "Ready": "Ναι" if n["ready"] else "ΟΧΙ",
-                                    "CPU": n["cpu"], "Μνήμη": n["memory"]} for n in v["nodes"]]),
-                     hide_index=True, use_container_width=True)
-        if v["hpas"]:
-            st.markdown("##### HPAs")
-            st.dataframe(pd.DataFrame(v["hpas"]), hide_index=True, use_container_width=True)
-    k8s_panel(ns_sel)
+            st.markdown("##### Deployments")
+            st.dataframe(pd.DataFrame([{"": BADGE[d["health"]], "Όνομα": d["name"], "Namespace": d["namespace"],
+                                        "Ready": d["ready"], "Up-to-date": d["up_to_date"], "Available": d["available"]}
+                                       for d in v["deployments"]]), hide_index=True, use_container_width=True)
+            st.markdown("##### Services")
+            st.dataframe(pd.DataFrame(v["services"]), hide_index=True, use_container_width=True)
+            st.markdown("##### Nodes")
+            st.dataframe(pd.DataFrame([{"": BADGE[n["health"]], "Όνομα": n["name"], "Ready": "Ναι" if n["ready"] else "ΟΧΙ",
+                                        "CPU": n["cpu"], "Μνήμη": n["memory"]} for n in v["nodes"]]),
+                         hide_index=True, use_container_width=True)
+            if v["hpas"]:
+                st.markdown("##### HPAs")
+                st.dataframe(pd.DataFrame(v["hpas"]), hide_index=True, use_container_width=True)
+        k8s_panel(ns_sel)
 
 # ================================================================ prometheus (read-only, live)
 @st.cache_data(ttl=300, show_spinner=False)
@@ -1269,85 +1343,87 @@ def _prom_names():
     return prom_view.metric_names()
 
 
-with tab_prom:
-    st.caption(f"Prometheus `{prom_view.BASE_URL}` · μόνο GET (`query`, `query_range`, `label/__name__/values`). "
-               "Δεν υπάρχει node-exporter: τα «Node» βγαίνουν από το cAdvisor (root cgroup).")
-    if web_terminal.tailnet_host(_req_host):
-        st.markdown(f"[Prometheus UI (tailnet)]({web_terminal.service_url(_req_host, 'prometheus', prom_view.BASE_URL)})")
-    try:
-        _avail = _prom_avail()
-    except Exception:  # noqa: BLE001
-        _avail = {}
-    _defaults = [k for k, v in prom_view.CATALOGUE.items() if v["default"]]
+if _tab_live(tab_prom):  # lazy: hidden tabs do no work
+    with tab_prom:
+        st.caption(f"Prometheus `{prom_view.BASE_URL}` · μόνο GET (`query`, `query_range`, `label/__name__/values`). "
+                   "Δεν υπάρχει node-exporter: τα «Node» βγαίνουν από το cAdvisor (root cgroup).")
+        if web_terminal.tailnet_host(_req_host):
+            st.markdown(f"[Prometheus UI (tailnet)]({web_terminal.service_url(_req_host, 'prometheus', prom_view.BASE_URL)})")
+        try:
+            _avail = _prom_avail()
+        except Exception:  # noqa: BLE001
+            _avail = {}
+        _defaults = [k for k, v in prom_view.CATALOGUE.items() if v["default"]]
 
-    def _plabel(k):
-        v = prom_view.CATALOGUE[k]
-        return v["title"] + ("" if _avail.get(k, True) else "  ⚠ χωρίς δεδομένα")
+        def _plabel(k):
+            v = prom_view.CATALOGUE[k]
+            return v["title"] + ("" if _avail.get(k, True) else "  ⚠ χωρίς δεδομένα")
 
-    pr1, pr2 = st.columns([1, 3])
-    p_range = pr1.radio("Εύρος", list(prom_view.RANGES), index=1, horizontal=True, key="prom_range")
-    p_auto = pr1.toggle("Αυτόματη ανανέωση (15 δ.)", value=True, key="prom_auto")
-    p_sel = []
-    with pr2:
-        for cat in prom_view.CATEGORIES:
-            keys = [k for k, v in prom_view.CATALOGUE.items() if v["category"] == cat]
-            p_sel += st.multiselect(cat, keys, default=[k for k in keys if k in _defaults], format_func=_plabel,
-                                    key=f"prom_cat_{cat}")
-    p_names = []
-    try:
-        p_names = _prom_names()
-    except prom_view.PromError as e:
-        st.warning(f"Δεν φορτώθηκε η λίστα μετρικών: {e}")
-    pa1, pa2 = st.columns([2, 1])
-    p_adv = pa1.multiselect("Advanced — οποιαδήποτε μετρική (αναζήτηση)", p_names, key="prom_adv",
-                            help="Counters (…_total/_count/_sum/_bucket) εμφανίζονται ως rate(…[5m]).")
-    p_custom = {n: prom_view.default_expr_for_metric(n) for n in p_adv}
+        pr1, pr2 = st.columns([1, 3])
+        p_range = pr1.radio("Εύρος", list(prom_view.RANGES), index=1, horizontal=True, key="prom_range")
+        p_auto = pr1.toggle("Αυτόματη ανανέωση (15 δ.)", value=True, key="prom_auto")
+        p_sel = []
+        with pr2:
+            for cat in prom_view.CATEGORIES:
+                keys = [k for k, v in prom_view.CATALOGUE.items() if v["category"] == cat]
+                p_sel += st.multiselect(cat, keys, default=[k for k in keys if k in _defaults], format_func=_plabel,
+                                        key=f"prom_cat_{cat}")
+        p_names = []
+        try:
+            p_names = _prom_names()
+        except prom_view.PromError as e:
+            st.warning(f"Δεν φορτώθηκε η λίστα μετρικών: {e}")
+        pa1, pa2 = st.columns([2, 1])
+        p_adv = pa1.multiselect("Advanced — οποιαδήποτε μετρική (αναζήτηση)", p_names, key="prom_adv",
+                                help="Counters (…_total/_count/_sum/_bucket) εμφανίζονται ως rate(…[5m]).")
+        p_custom = {n: prom_view.default_expr_for_metric(n) for n in p_adv}
 
-    @st.fragment(run_every=15 if p_auto else None)
-    def prom_panel(sel, custom, rng):
-        minutes = prom_view.RANGES[rng]
-        items = [(prom_view.CATALOGUE[k]["title"], prom_view.CATALOGUE[k]["expr"], prom_view.CATALOGUE[k]["unit"])
-                 for k in sel] + [(n, e, "") for n, e in custom.items()]
-        if not items:
-            st.info("Διάλεξε τουλάχιστον μία μετρική.")
-            return
-        cols = st.columns(2)
-        for i, (title, expr, unit) in enumerate(items):
-            with cols[i % 2]:
-                try:
-                    series = prom_view.query_range(expr, minutes)
-                except prom_view.PromError as e:
-                    st.error(f"{title}: {e}")
-                    continue
-                fig = go.Figure()
-                for lbl, pts in series[:30]:
-                    fig.add_scatter(x=[dt.datetime.fromtimestamp(t) for t, _ in pts], y=[v for _, v in pts],
-                                    mode="lines", name=lbl)
-                fig.update_layout(title=dict(text=title, font=dict(size=13)), height=260,
-                                  margin=dict(l=0, r=0, t=36, b=0), yaxis_title=unit or None,
-                                  showlegend=len(series) > 1, legend=dict(font=dict(size=9)))
-                if not series:
-                    st.warning(f"{title}: καμία τιμή στο εύρος.")
-                else:
-                    st.plotly_chart(fig, use_container_width=True)
-                with st.expander("PromQL", expanded=False):
-                    st.code(expr, language="promql")
-        st.caption(f"Ανανεώθηκε {dt.datetime.now().strftime('%H:%M:%S')}")
-    prom_panel(p_sel, p_custom, p_range)
+        @st.fragment(run_every=15 if p_auto else None)
+        def prom_panel(sel, custom, rng):
+            minutes = prom_view.RANGES[rng]
+            items = [(prom_view.CATALOGUE[k]["title"], prom_view.CATALOGUE[k]["expr"], prom_view.CATALOGUE[k]["unit"])
+                     for k in sel] + [(n, e, "") for n, e in custom.items()]
+            if not items:
+                st.info("Διάλεξε τουλάχιστον μία μετρική.")
+                return
+            cols = st.columns(2)
+            for i, (title, expr, unit) in enumerate(items):
+                with cols[i % 2]:
+                    try:
+                        series = prom_view.query_range(expr, minutes)
+                    except prom_view.PromError as e:
+                        st.error(f"{title}: {e}")
+                        continue
+                    fig = go.Figure()
+                    for lbl, pts in series[:30]:
+                        fig.add_scatter(x=[dt.datetime.fromtimestamp(t) for t, _ in pts], y=[v for _, v in pts],
+                                        mode="lines", name=lbl)
+                    fig.update_layout(title=dict(text=title, font=dict(size=13)), height=260,
+                                      margin=dict(l=0, r=0, t=36, b=0), yaxis_title=unit or None,
+                                      showlegend=len(series) > 1, legend=dict(font=dict(size=9)))
+                    if not series:
+                        st.warning(f"{title}: καμία τιμή στο εύρος.")
+                    else:
+                        st.plotly_chart(fig, use_container_width=True)
+                    with st.expander("PromQL", expanded=False):
+                        st.code(expr, language="promql")
+            st.caption(f"Ανανεώθηκε {dt.datetime.now().strftime('%H:%M:%S')}")
+        prom_panel(p_sel, p_custom, p_range)
 
 # ================================================================ grafana (iframe + quick links; no credentials here)
 GRAFANA_URL = web_terminal.service_url(_req_host, "grafana", os.environ.get("QRL_GRAFANA_URL", "http://localhost:32000"))
-with tab_grafana:
-    st.info("VS Code → Ports → Forward 32000, μετά κάνε login στο Grafana μία φορά μέσα σε αυτό το frame.", icon="🔌")
-    st.markdown(f"[Άνοιγμα σε νέα καρτέλα]({GRAFANA_URL})")
-    st.markdown("##### Γρήγοροι σύνδεσμοι (Explore, με το προεπιλεγμένο datasource)")
-    gl = st.columns(2)
-    for i, (title, url) in enumerate(prom_view.grafana_links(GRAFANA_URL)):
-        gl[i % 2].markdown(f"- [{title}]({url})")
-    st.caption("Αν δεν υπάρχουν dashboards, ένα Redis/K8s dashboard μπορεί να εισαχθεί αργότερα (χρειάζεται το login "
-               "του ερευνητή· δεν γίνεται αυτόματα). Αν το frame μένει κενό, το Grafana μπορεί να μην επιτρέπει "
-               "embedding (`allow_embedding`) ή να λείπει το port forward.")
-    st.iframe(GRAFANA_URL, height=800)
+if _tab_live(tab_grafana):  # lazy: hidden tabs do no work
+    with tab_grafana:
+        st.info("VS Code → Ports → Forward 32000, μετά κάνε login στο Grafana μία φορά μέσα σε αυτό το frame.", icon="🔌")
+        st.markdown(f"[Άνοιγμα σε νέα καρτέλα]({GRAFANA_URL})")
+        st.markdown("##### Γρήγοροι σύνδεσμοι (Explore, με το προεπιλεγμένο datasource)")
+        gl = st.columns(2)
+        for i, (title, url) in enumerate(prom_view.grafana_links(GRAFANA_URL)):
+            gl[i % 2].markdown(f"- [{title}]({url})")
+        st.caption("Αν δεν υπάρχουν dashboards, ένα Redis/K8s dashboard μπορεί να εισαχθεί αργότερα (χρειάζεται το login "
+                   "του ερευνητή· δεν γίνεται αυτόματα). Αν το frame μένει κενό, το Grafana μπορεί να μην επιτρέπει "
+                   "embedding (`allow_embedding`) ή να λείπει το port forward.")
+        st.iframe(GRAFANA_URL, height=800)
 
 # ================================================================ paper & venues
 with tab_paper:
@@ -1454,40 +1530,61 @@ with tab_paper:
     st.markdown(f"Γραμμές claims.md: **{len(crows)}**")
 
 # ================================================================ venues
-with tab_venues:
-    dl = read_text(os.path.join(ROOT, "docs", "deadlines.json"))
-    if dl:
-        try:
-            items = json.loads(dl)
-            rows = []
-            for it in items:
-                due = dt.datetime.fromisoformat(it["due"])
-                days = (due - dt.datetime.now(dt.timezone.utc)).total_seconds() / 86400
-                rows.append({"συνέδριο": it["venue"], "τι": it["what"], "προθεσμία": it["due_label"],
-                             "μέρες": round(days, 1), "πηγή": it["source"], "επαληθεύτηκε": it["verified"]})
-            st.markdown("##### Προθεσμίες")
-            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch",
-                         column_config={"πηγή": st.column_config.LinkColumn("πηγή")})
-        except (ValueError, KeyError) as e:
-            st.error(f"docs/deadlines.json: {e}")
-    venues = read_text(os.path.join(ROOT, "docs", "VENUES.md"))
-    st.markdown("##### Υποψήφια συνέδρια (scholar)")
-    st.markdown(venues or "_Δεν υπάρχει ακόμη `docs/VENUES.md`._")
-    claims = read_text(os.path.join(ROOT, "paper", "claims.md"))
-    st.markdown("##### Ισχυρισμοί → τεκμήρια")
-    st.markdown(claims or "_Δεν υπάρχει ακόμη `paper/claims.md`._")
+if _tab_live(tab_venues):  # lazy: hidden tabs do no work
+    with tab_venues:
+        dl = read_text(os.path.join(ROOT, "docs", "deadlines.json"))
+        if dl:
+            try:
+                items = json.loads(dl)
+                rows = []
+                for it in items:
+                    due = dt.datetime.fromisoformat(it["due"])
+                    days = (due - dt.datetime.now(dt.timezone.utc)).total_seconds() / 86400
+                    rows.append({"συνέδριο": it["venue"], "τι": it["what"], "προθεσμία": it["due_label"],
+                                 "μέρες": round(days, 1),
+                                 "Πότε / Πού": f"{it.get('event_dates') or '—'} · {it.get('location') or '—'}",
+                                 "πηγή": it["source"], "επαληθεύτηκε": it["verified"]})
+                st.markdown("##### Προθεσμίες")
+                st.html(deadlines_table_html(rows))
+            except (ValueError, KeyError) as e:
+                st.error(f"docs/deadlines.json: {e}")
+        venues = read_text(os.path.join(ROOT, "docs", "VENUES.md"))
+        st.markdown("##### Υποψήφια συνέδρια (scholar)")
+        st.markdown(venues or "_Δεν υπάρχει ακόμη `docs/VENUES.md`._")
+        claims = read_text(os.path.join(ROOT, "paper", "claims.md"))
+        st.markdown("##### Ισχυρισμοί → τεκμήρια")
+        st.markdown(claims or "_Δεν υπάρχει ακόμη `paper/claims.md`._")
+        st.divider()
+        st.subheader("Συζήτηση συνεδρίων")
+        _dv = db()
+        ven_tid = _dv.ensure_thread(VENUES_THREAD_TITLE, "Συζήτηση για συνέδρια/περιοδικά και προθεσμίες (scholar).")
+        _dv.close()
+        show_thread(ven_tid, key="venues_chat", title="Συζήτηση συνεδρίων")
+        ven_in = st.chat_input("Ρώτα για συνέδρια, προθεσμίες, καταλληλότητα… (Enter = αποστολή)", key="venues_composer")
+        if ven_in:
+            try:
+                dd = db()
+                thr = dd.thread(ven_tid)
+                body = ven_in if ven_in.lstrip().startswith(VENUES_TAG) else f"{VENUES_TAG} {ven_in}"
+                dd.researcher_send(body, thread_id=ven_tid, reply_to=thr[-1]["id"] if thr else None)
+                dd.close()
+                st.toast("Στάλθηκε στον συντονιστή (scholar)", icon="📨")
+                st.rerun()
+            except (LabError, ValueError) as ex:
+                st.error(str(ex))
 
 # ================================================================ audit
-with tab_audit:
-    d = db()
-    rows = d.audit(limit=300)
-    d.close()
-    if rows:
-        st.dataframe(pd.DataFrame([{"πότε": fmt_ts(r["ts"]), "ποιος": r["actor"], "ενέργεια": r["action"],
-                                    "στόχος": r["target"], "λεπτομέρεια": r["detail"]} for r in rows]),
-                     hide_index=True, width="stretch")
-    else:
-        st.caption("Κενό ιστορικό.")
+if _tab_live(tab_audit):  # lazy: hidden tabs do no work
+    with tab_audit:
+        d = db()
+        rows = d.audit(limit=300)
+        d.close()
+        if rows:
+            st.dataframe(pd.DataFrame([{"πότε": fmt_ts(r["ts"]), "ποιος": r["actor"], "ενέργεια": r["action"],
+                                        "στόχος": r["target"], "λεπτομέρεια": r["detail"]} for r in rows]),
+                         hide_index=True, width="stretch")
+        else:
+            st.caption("Κενό ιστορικό.")
 
 # ================================================================ sudo grants (researcher approves here)
 with tab_sudo:
@@ -1607,54 +1704,55 @@ with tab_sudo:
             st.caption("Καμία χρήση ακόμη (`.lab/sudo_audit.jsonl`).")
 
 # ================================================================ extensions (catalog only from .lab/extensions_catalog.json)
-with tab_ext:
-    st.subheader("Εγκατεστημένα")
-    st.caption("Ανιχνεύονται τώρα, μόνο για ανάγνωση (ονόματα και περιγραφές).")
-    _inst = installed_view.detect(ROOT)
-    for _i in range(0, len(_inst), 3):
-        for _col, _it in zip(st.columns(3), _inst[_i:_i + 3]):
-            _col.markdown(installed_view.card_html(_it), unsafe_allow_html=True)
-    st.divider()
-    st.markdown("Προτάσεις skills/plugins/MCP **μόνο** από το αρχείο `.lab/extensions_catalog.json`, που το γεμίζει "
-                "ο συντονιστής μετά από αναζήτηση. Τίποτα δεν εγκαθίσταται από εδώ· το «Πρόσθεσε» στέλνει αίτημα έγκρισης.")
-    cat = ext_catalog.load(ROOT)
-    shown = [c for c in ext_catalog.CATEGORIES if c in cat] + [c for c in cat if c not in ext_catalog.CATEGORIES]
-    if not shown:
-        st.info("δεν υπάρχει ακόμα κατάλογος", icon="🧩")
-    for ci, c in enumerate(shown):
-        st.subheader(c)
-        for ei, e in enumerate(cat[c]):
-            with st.container(border=True):
-                st.markdown(f"**{e['name']}** · {e['kind']} · {e['provider']}")
-                st.write(e["description"])
-                st.caption(f"Κόστος: {e['cost']} · [πηγή]({e['url']})")
-                if st.button("Πρόσθεσε", key=f"ext_add_{ci}_{ei}"):
-                    try:
-                        dd = db()
-                        t_, b_ = ext_catalog.add_request(e)
-                        rid_ = dd.ask("approval", t_, b_, author="researcher", scope="external", options=["approve", "reject"])
-                        dd.close()
-                        st.success(f"Στάλθηκε αίτημα έγκρισης {rid_} (καρτέλα Αποφάσεις).")
-                    except LabError as ex:
-                        st.error(str(ex))
-    st.divider()
-    st.subheader("Ζήτα ένα skill")
-    _dx = db()
-    ext_tid = _dx.ensure_thread(ext_catalog.EXT_THREAD_TITLE, "Αιτήματα αναζήτησης επεκτάσεων και οι απαντήσεις τους.")
-    _dx.close()
-    show_thread(ext_tid, key="ext_chat")
-    ext_in = st.chat_input("Περίγραψε ποιο skill/επέκταση θέλεις… (Enter = αποστολή)", key="ext_composer")
-    if ext_in:
-        try:
-            dd = db()
-            thr = dd.thread(ext_tid)
-            dd.researcher_send(ext_catalog.search_message(ext_in), thread_id=ext_tid,
-                               reply_to=thr[-1]["id"] if thr else None)
-            dd.close()
-            st.toast("Στάλθηκε στον συντονιστή", icon="📨")
-            st.rerun()
-        except (LabError, ValueError) as ex:
-            st.error(str(ex))
+if _tab_live(tab_ext):  # lazy: hidden tabs do no work
+    with tab_ext:
+        st.subheader("Εγκατεστημένα")
+        st.caption("Ανιχνεύονται τώρα, μόνο για ανάγνωση (ονόματα και περιγραφές).")
+        _inst = installed_view.detect(ROOT)
+        for _i in range(0, len(_inst), 3):
+            for _col, _it in zip(st.columns(3), _inst[_i:_i + 3]):
+                _col.markdown(installed_view.card_html(_it), unsafe_allow_html=True)
+        st.divider()
+        st.markdown("Προτάσεις skills/plugins/MCP **μόνο** από το αρχείο `.lab/extensions_catalog.json`, που το γεμίζει "
+                    "ο συντονιστής μετά από αναζήτηση. Τίποτα δεν εγκαθίσταται από εδώ· το «Πρόσθεσε» στέλνει αίτημα έγκρισης.")
+        cat = ext_catalog.load(ROOT)
+        shown = [c for c in ext_catalog.CATEGORIES if c in cat] + [c for c in cat if c not in ext_catalog.CATEGORIES]
+        if not shown:
+            st.info("δεν υπάρχει ακόμα κατάλογος", icon="🧩")
+        for ci, c in enumerate(shown):
+            st.subheader(c)
+            for ei, e in enumerate(cat[c]):
+                with st.container(border=True):
+                    st.markdown(f"**{e['name']}** · {e['kind']} · {e['provider']}")
+                    st.write(e["description"])
+                    st.caption(f"Κόστος: {e['cost']} · [πηγή]({e['url']})")
+                    if st.button("Πρόσθεσε", key=f"ext_add_{ci}_{ei}"):
+                        try:
+                            dd = db()
+                            t_, b_ = ext_catalog.add_request(e)
+                            rid_ = dd.ask("approval", t_, b_, author="researcher", scope="external", options=["approve", "reject"])
+                            dd.close()
+                            st.success(f"Στάλθηκε αίτημα έγκρισης {rid_} (καρτέλα Αποφάσεις).")
+                        except LabError as ex:
+                            st.error(str(ex))
+        st.divider()
+        st.subheader("Ζήτα ένα skill")
+        _dx = db()
+        ext_tid = _dx.ensure_thread(ext_catalog.EXT_THREAD_TITLE, "Αιτήματα αναζήτησης επεκτάσεων και οι απαντήσεις τους.")
+        _dx.close()
+        show_thread(ext_tid, key="ext_chat")
+        ext_in = st.chat_input("Περίγραψε ποιο skill/επέκταση θέλεις… (Enter = αποστολή)", key="ext_composer")
+        if ext_in:
+            try:
+                dd = db()
+                thr = dd.thread(ext_tid)
+                dd.researcher_send(ext_catalog.search_message(ext_in), thread_id=ext_tid,
+                                   reply_to=thr[-1]["id"] if thr else None)
+                dd.close()
+                st.toast("Στάλθηκε στον συντονιστή", icon="📨")
+                st.rerun()
+            except (LabError, ValueError) as ex:
+                st.error(str(ex))
 
 # ================================================================ terminal (on demand, localhost only)
 with tab_term:

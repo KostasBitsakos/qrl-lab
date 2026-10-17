@@ -23,6 +23,8 @@ MESSAGE_STATUSES = ("new", "delivered", "acknowledged", "in_progress", "waiting_
 REQ_MODELS = ("haiku", "sonnet", "opus", "codex")
 REQ_EFFORTS = ("low", "med", "high")
 PAPER_THREAD_TITLE = "Paper — συγγραφή"
+VENUES_THREAD_TITLE = "Συζήτηση συνεδρίων"
+VENUES_TAG = "[VENUES]"  # the coordinator routes messages starting with this tag to the scholar
 PAPER_WRITERS = {"writer-sonnet": "writer · Sonnet", "writer-opus": "writer · Opus",
                  "codex-researcher": "codex-researcher · gpt-6.1-sol"}
 PAPER_REVIEWERS = {"codex-reviewer": "codex-reviewer · gpt-6.1-sol", "codex-architect": "codex-architect · gpt-6-astra",

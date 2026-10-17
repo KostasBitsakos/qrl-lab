@@ -5,7 +5,9 @@
     "due": "2026-11-25T11:59:00+00:00",
     "due_label": "24/11/2026 23:59 AoE",
     "source": "https://easychair.org/cfp/ccgrid27",
-    "verified": "2026-10-15"
+    "verified": "2026-10-15",
+    "event_dates": "May 24–27 2027",
+    "location": "Dallas–Fort Worth"
   },
   {
     "venue": "IEEE CCGrid 2027",
@@ -13,7 +15,9 @@
     "due": "2026-12-02T11:59:00+00:00",
     "due_label": "01/12/2026 23:59 AoE",
     "source": "https://easychair.org/cfp/ccgrid27",
-    "verified": "2026-10-15"
+    "verified": "2026-10-15",
+    "event_dates": "May 24–27 2027",
+    "location": "Dallas–Fort Worth"
   },
   {
     "venue": "ACM/SPEC ICPE 2027",
@@ -21,7 +25,9 @@
     "due": "2026-11-10T11:59:00+00:00",
     "due_label": "09/11/2026 23:59 AoE",
     "source": "https://icpe2027.spec.org/important-dates/",
-    "verified": "2026-10-16"
+    "verified": "2026-10-16",
+    "event_dates": "δεν έχει ανακοινωθεί",
+    "location": "Gothenburg"
   },
   {
     "venue": "ACM/SPEC ICPE 2027",
@@ -29,7 +35,9 @@
     "due": "2026-11-17T11:59:00+00:00",
     "due_label": "16/11/2026 23:59 AoE",
     "source": "https://icpe2027.spec.org/important-dates/",
-    "verified": "2026-10-16"
+    "verified": "2026-10-16",
+    "event_dates": "δεν έχει ανακοινωθεί",
+    "location": "Gothenburg"
   },
   {
     "venue": "IEEE/IFIP DSN 2027",
@@ -37,7 +45,9 @@
     "due": "2026-11-26T11:59:00+00:00",
     "due_label": "25/11/2026 23:59 AoE",
     "source": "https://dsn2027-berlin.github.io/call-for-contributions/",
-    "verified": "2026-10-17"
+    "verified": "2026-10-17",
+    "event_dates": "Jun 22–25 2027",
+    "location": "Berlin"
   },
   {
     "venue": "IEEE/IFIP DSN 2027",
@@ -45,7 +55,9 @@
     "due": "2026-12-03T11:59:00+00:00",
     "due_label": "02/12/2026 23:59 AoE",
     "source": "https://dsn2027-berlin.github.io/call-for-contributions/",
-    "verified": "2026-10-17"
+    "verified": "2026-10-17",
+    "event_dates": "Jun 22–25 2027",
+    "location": "Berlin"
   },
   {
     "venue": "ACM SIGMETRICS 2027 (winter cycle)",
@@ -53,7 +65,9 @@
     "due": "2027-01-05T11:59:00+00:00",
     "due_label": "04/01/2027 23:59 AoE",
     "source": "https://www.sigmetrics.org/sigmetrics2027/pages/cfp.html",
-    "verified": "2026-10-17"
+    "verified": "2026-10-17",
+    "event_dates": "Jun 7–11 2027",
+    "location": "Atlanta (FCRC)"
   },
   {
     "venue": "ACM SIGMETRICS 2027 (winter cycle)",
@@ -61,7 +75,9 @@
     "due": "2027-01-12T11:59:00+00:00",
     "due_label": "11/01/2027 23:59 AoE",
     "source": "https://www.sigmetrics.org/sigmetrics2027/pages/cfp.html",
-    "verified": "2026-10-17"
+    "verified": "2026-10-17",
+    "event_dates": "Jun 7–11 2027",
+    "location": "Atlanta (FCRC)"
   },
   {
     "venue": "IEEE PDP 2027",
@@ -69,7 +85,9 @@
     "due": "2026-10-20T11:59:00+00:00",
     "due_label": "19/10/2026 23:59 AoE",
     "source": "https://research.ac.upc.edu/PDP2027/",
-    "verified": "2026-10-17"
+    "verified": "2026-10-17",
+    "event_dates": "Mar 17–19 2027",
+    "location": "Barcelona"
   },
   {
     "venue": "IEEE PDP 2027",
@@ -77,6 +95,8 @@
     "due": "2026-10-27T11:59:00+00:00",
     "due_label": "26/10/2026 23:59 AoE",
     "source": "https://research.ac.upc.edu/PDP2027/",
-    "verified": "2026-10-17"
+    "verified": "2026-10-17",
+    "event_dates": "Mar 17–19 2027",
+    "location": "Barcelona"
   }
 ]
