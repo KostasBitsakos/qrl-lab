@@ -25,7 +25,7 @@ import streamlit.components.v1 as components
 ROOT = os.environ.get("QRL_LAB_DIR") or os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 os.environ["QRL_LAB_DIR"] = ROOT
 sys.path.insert(0, os.path.join(ROOT, "tools"))
-from labdb import DECISIONS, PAPER_REVIEWERS, PAPER_THREAD_TITLE, PAPER_WRITERS, LabDB, LabError, map_choice  # noqa: E402
+from labdb import DECISIONS, PAPER_REVIEWERS, PAPER_THREAD_TITLE, PAPER_WRITERS, LabDB, LabError, map_choice, paper_requests  # noqa: E402
 import file_view  # noqa: E402
 import replytext  # noqa: E402
 import k8s_view  # noqa: E402
@@ -365,6 +365,99 @@ def health_banner():
 
 health_banner()
 
+# ---------------------------------------------------------------- shared decision widget (Decisions + Paper tabs)
+def decision_panel(d, select=lambda reqs: reqs, pre="", label="Αίτημα",
+                   empty_msg="Δεν υπάρχει τίποτα που να περιμένει απόφασή σου."):
+    """One open request at a time with options/proposals and approve/reject/changes + note. Same code path (d.decide,
+    actor='researcher') for every tab; `pre` only prefixes widget keys so two tabs never clash."""
+    # Live check, outside the form: only compares the set of open request ids with the one rendered; it never touches
+    # the form widgets, so unsaved typing is never lost. A full rerun (button) keeps widget state by key.
+    @st.fragment(run_every=5)
+    def new_request_badge(shown_ids):
+        dd = db()
+        now_ids = sorted(r["id"] for r in select(dd.requests(state="open")))
+        dd.close()
+        if now_ids != sorted(shown_ids):
+            fresh = len(set(now_ids) - set(shown_ids))
+            c = st.columns([3, 2])
+            c[0].warning(f"🔔 νέο αίτημα ({fresh} νέα · {len(now_ids)} ανοιχτά συνολικά)", icon=None)
+            if c[1].button("Φόρτωση", key=f"{pre}dec_reload"):
+                st.rerun()
+    # oldest blocking request first, then the oldest overall; one at a time
+    open_reqs = sorted(select(d.requests(state="open")), key=lambda r: (-r["blocking"], r["ts"]))
+    new_request_badge([r["id"] for r in open_reqs])
+    if not open_reqs:
+        st.success(empty_msg, icon="✅")
+    else:
+        N = len(open_reqs)
+        idx = min(max(int(st.session_state.get(f"{pre}dec_idx", 0)), 0), N - 1)
+        st.session_state[f"{pre}dec_idx"] = idx
+        nav = st.columns([1, 2, 1, 4])
+        if nav[0].button("◀ Προηγούμενο", key=f"{pre}dec_prev", disabled=idx == 0):
+            st.session_state[f"{pre}dec_idx"] = idx - 1
+            st.rerun()
+        nav[1].markdown(f"**{label} {idx + 1} από {N}**")
+        if nav[2].button("Επόμενο ▶", key=f"{pre}dec_next", disabled=idx >= N - 1):
+            st.session_state[f"{pre}dec_idx"] = idx + 1
+            st.rerun()
+        r = open_reqs[idx]
+        with st.container(border=True):
+            badges = f"**{REQ_KIND[r['kind']]}** · {REQ_SCOPE.get(r['scope'], r['scope'])}"
+            if r["blocking"]:
+                badges += " · ✋ **μπλοκάρει τη δουλειά**"
+            st.markdown(f"#### {r['title']}")
+            st.caption(f"{badges} · `{r['id']}` · {fmt_ts(r['ts'])} · από {author_info(r['author'])[0]}"
+                       + (f" · κόστος: {r['cost']}" if r["cost"] else ""))
+            st.markdown(r["body"])
+            links = json.loads(r["links"] or "[]")
+            for link in links:
+                p = os.path.join(ROOT, link)
+                txt = read_text(p) if os.path.isfile(p) else None
+                with st.expander(f"📎 {link}"):
+                    st.markdown(txt if txt is not None else "_(δεν βρέθηκε το αρχείο)_")
+            if r["spec_path"]:
+                with st.expander("🧾 Run spec που θα εγκρίνεις (κλειδωμένο)"):
+                    st.code(read_text(r["spec_path"]) or "(missing)", language="json")
+                    st.caption(f"sha256: `{r['spec_hash']}` — αν αλλάξει το spec, η έγκριση ακυρώνεται.")
+            options = json.loads(r["options"])
+            props = json.loads(r.get("proposals") or "[]")
+            with st.form(f"{pre}decide_{r['id']}"):
+                if options == ["ack"]:
+                    choice = "ack"
+                    note = st.text_area("Σχόλιο (προαιρετικό)", key=f"{pre}note_{r['id']}", height=80)
+                    pressed = "ack" if st.form_submit_button("👁️ Το είδα") else None
+                else:
+                    choices, names = [], {}
+                    for i, ptxt in enumerate(props, 1):
+                        star = " ⭐ (προτείνεται)" if r.get("recommended") == i else ""
+                        choices.append(f"p{i}"); names[f"p{i}"] = f"Πρόταση {i}: {ptxt}{star}"
+                    if "approve" in options:
+                        choices.append("yes"); names["yes"] = "Ναι / έγκριση"
+                    if "reject" in options:
+                        choices.append("no"); names["no"] = "Όχι / απόρριψη"
+                    if "changes" in options or "answer" in options:
+                        choices.append("own"); names["own"] = "Δική μου πρόταση"
+                    choice = st.radio("Η απόφασή σου", choices, index=None, format_func=names.get,
+                                      key=f"{pre}choice_{r['id']}")
+                    note = st.text_area("Σχόλιο — ή η δική σου πρόταση (υποχρεωτικό αν διάλεξες «Δική μου πρόταση»)",
+                                        key=f"{pre}note_{r['id']}", height=100)
+                    sent = st.form_submit_button("Υποβολή απόφασης", type="primary")
+                    pressed = choice if sent else None
+                    if sent and not choice:
+                        st.error("Διάλεξε μία επιλογή.")
+                        pressed = None
+            if pressed:
+                try:
+                    if pressed == "ack":
+                        dec, text = "ack", note
+                    else:
+                        dec, text = map_choice(r, pressed, note)
+                    state = d.decide(r["id"], dec, text, actor="researcher")
+                    st.toast(f"{r['id']}: {REQ_STATE[state][1]}", icon=REQ_STATE[state][0])
+                    st.rerun()
+                except LabError as e:
+                    st.error(str(e))
+
 # ---------------------------------------------------------------- shared chat rendering
 @st.fragment(run_every=refresh)
 def show_thread(tid, key="chat", title=None):
@@ -604,93 +697,7 @@ with tab_dec:
     if top[1].button("🔄 Ανανέωση", key="refresh_dec"):
         st.rerun()
     d = db()
-    # Live check, outside the form: only compares the set of open request ids with the one rendered; it never touches
-    # the form widgets, so unsaved typing is never lost. A full rerun (button) keeps widget state by key.
-    @st.fragment(run_every=5)
-    def new_request_badge(shown_ids):
-        dd = db()
-        now_ids = sorted(r["id"] for r in dd.requests(state="open"))
-        dd.close()
-        if now_ids != sorted(shown_ids):
-            fresh = len(set(now_ids) - set(shown_ids))
-            c = st.columns([3, 2])
-            c[0].warning(f"🔔 νέο αίτημα ({fresh} νέα · {len(now_ids)} ανοιχτά συνολικά)", icon=None)
-            if c[1].button("Φόρτωση", key="dec_reload"):
-                st.rerun()
-    # oldest blocking request first, then the oldest overall; one at a time
-    open_reqs = sorted(d.requests(state="open"), key=lambda r: (-r["blocking"], r["ts"]))
-    new_request_badge([r["id"] for r in open_reqs])
-    if not open_reqs:
-        st.success("Δεν υπάρχει τίποτα που να περιμένει απόφασή σου.", icon="✅")
-    else:
-        N = len(open_reqs)
-        idx = min(max(int(st.session_state.get("dec_idx", 0)), 0), N - 1)
-        st.session_state["dec_idx"] = idx
-        nav = st.columns([1, 2, 1, 4])
-        if nav[0].button("◀ Προηγούμενο", key="dec_prev", disabled=idx == 0):
-            st.session_state["dec_idx"] = idx - 1
-            st.rerun()
-        nav[1].markdown(f"**Αίτημα {idx + 1} από {N}**")
-        if nav[2].button("Επόμενο ▶", key="dec_next", disabled=idx >= N - 1):
-            st.session_state["dec_idx"] = idx + 1
-            st.rerun()
-        r = open_reqs[idx]
-        with st.container(border=True):
-            badges = f"**{REQ_KIND[r['kind']]}** · {REQ_SCOPE.get(r['scope'], r['scope'])}"
-            if r["blocking"]:
-                badges += " · ✋ **μπλοκάρει τη δουλειά**"
-            st.markdown(f"#### {r['title']}")
-            st.caption(f"{badges} · `{r['id']}` · {fmt_ts(r['ts'])} · από {author_info(r['author'])[0]}"
-                       + (f" · κόστος: {r['cost']}" if r["cost"] else ""))
-            st.markdown(r["body"])
-            links = json.loads(r["links"] or "[]")
-            for link in links:
-                p = os.path.join(ROOT, link)
-                txt = read_text(p) if os.path.isfile(p) else None
-                with st.expander(f"📎 {link}"):
-                    st.markdown(txt if txt is not None else "_(δεν βρέθηκε το αρχείο)_")
-            if r["spec_path"]:
-                with st.expander("🧾 Run spec που θα εγκρίνεις (κλειδωμένο)"):
-                    st.code(read_text(r["spec_path"]) or "(missing)", language="json")
-                    st.caption(f"sha256: `{r['spec_hash']}` — αν αλλάξει το spec, η έγκριση ακυρώνεται.")
-            options = json.loads(r["options"])
-            props = json.loads(r.get("proposals") or "[]")
-            with st.form(f"decide_{r['id']}"):
-                if options == ["ack"]:
-                    choice = "ack"
-                    note = st.text_area("Σχόλιο (προαιρετικό)", key=f"note_{r['id']}", height=80)
-                    pressed = "ack" if st.form_submit_button("👁️ Το είδα") else None
-                else:
-                    choices, names = [], {}
-                    for i, ptxt in enumerate(props, 1):
-                        star = " ⭐ (προτείνεται)" if r.get("recommended") == i else ""
-                        choices.append(f"p{i}"); names[f"p{i}"] = f"Πρόταση {i}: {ptxt}{star}"
-                    if "approve" in options:
-                        choices.append("yes"); names["yes"] = "Ναι / έγκριση"
-                    if "reject" in options:
-                        choices.append("no"); names["no"] = "Όχι / απόρριψη"
-                    if "changes" in options or "answer" in options:
-                        choices.append("own"); names["own"] = "Δική μου πρόταση"
-                    choice = st.radio("Η απόφασή σου", choices, index=None, format_func=names.get,
-                                      key=f"choice_{r['id']}")
-                    note = st.text_area("Σχόλιο — ή η δική σου πρόταση (υποχρεωτικό αν διάλεξες «Δική μου πρόταση»)",
-                                        key=f"note_{r['id']}", height=100)
-                    sent = st.form_submit_button("Υποβολή απόφασης", type="primary")
-                    pressed = choice if sent else None
-                    if sent and not choice:
-                        st.error("Διάλεξε μία επιλογή.")
-                        pressed = None
-            if pressed:
-                try:
-                    if pressed == "ack":
-                        dec, text = "ack", note
-                    else:
-                        dec, text = map_choice(r, pressed, note)
-                    state = d.decide(r["id"], dec, text, actor="researcher")
-                    st.toast(f"{r['id']}: {REQ_STATE[state][1]}", icon=REQ_STATE[state][0])
-                    st.rerun()
-                except LabError as e:
-                    st.error(str(e))
+    decision_panel(d)
     closed = [r for r in d.requests() if r["state"] != "open"]
     d.close()
     if closed:
@@ -1235,6 +1242,11 @@ with tab_paper:
     _d = db()
     paper_tid = _d.ensure_thread(PAPER_THREAD_TITLE, "Νήμα για τη συγγραφή και το review του paper.")
     _d.close()
+    _pd = db()
+    st.markdown("##### 🗳️ Ερωτήσεις του συντονιστή για το paper")
+    decision_panel(_pd, select=lambda rs: paper_requests(rs, paper_tid), pre="paper_", label="Ερώτηση",
+                   empty_msg="Δεν υπάρχουν ανοιχτές ερωτήσεις για το paper.")
+    _pd.close()
     show_thread(paper_tid, key="paper", title="Συζήτηση paper")
     pw_col, pr_col = st.columns(2)
     p_writers = pw_col.multiselect("Συγγραφή", list(PAPER_WRITERS), default=["writer-sonnet"],

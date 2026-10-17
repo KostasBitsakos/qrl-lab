@@ -1420,6 +1420,35 @@ def test_inline_edit_ui():
     ok("inline edit: button on the message, in-place text area, save")
 
 
+def test_paper_decisions_tab():
+    from streamlit.testing.v1 import AppTest
+    from labdb import PAPER_THREAD_TITLE, paper_requests
+    db = LabDB()
+    for r in db.requests(state="open"):
+        db.decide(r["id"], "ack" if json.loads(r["options"]) == ["ack"] else "reject", "cleanup", actor="researcher")
+    tid = db.ensure_thread(PAPER_THREAD_TITLE, "x")
+    p1 = db.ask("question", "Paper (A): τίτλος;", "σώμα", scope="research", thread_id=tid, proposals=["x", "y"])
+    p2 = db.ask("question", "Paper (B): δεύτερη;", "σώμα", scope="research")
+    other = db.ask("question", "Άσχετο", "σώμα")
+    assert [r["id"] for r in paper_requests(db.requests(state="open"), tid)] == [p2, p1] or \
+        {r["id"] for r in paper_requests(db.requests(state="open"), tid)} == {p1, p2}
+    db.close()
+    at = AppTest.from_file(os.path.join(TMP, "dashboard", "app.py"), default_timeout=60).run()
+    assert not at.exception, at.exception
+    assert any("Ερώτηση 1 από 2" in m.value for m in at.markdown), [m.value[:60] for m in at.markdown if "από" in m.value]
+    at.radio(key=f"paper_choice_{p1}").set_value("p2")
+    [b for b in at.button if b.label == "Υποβολή απόφασης" and b.proto.form_id.endswith(f"paper_decide_{p1}")][0].click().run()
+    assert not at.exception, at.exception
+    db = LabDB()
+    r = db.request(p1)
+    assert r["state"] == "answered" and r["decision_text"] == "Επιλέχθηκε η Πρόταση 2: y", r
+    assert db.request(other)["state"] == "open"
+    for x in (p2, other):
+        db.decide(x, "answer", "cleanup", actor="researcher")
+    db.close()
+    ok("paper tab: filtered decision panel, same decide() path")
+
+
 if __name__ == "__main__":
     print(f"QRL-Lab tests in {TMP}")
     try:
@@ -1453,6 +1482,7 @@ if __name__ == "__main__":
             import streamlit  # noqa: F401
             test_dashboard()
             test_inline_edit_ui()
+            test_paper_decisions_tab()
             test_agents_tab_roles()
             test_paper_tab()
             test_prom_tab()

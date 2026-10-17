@@ -505,6 +505,11 @@ class LabDB:
         return [dict(r) for r in self.conn.execute("SELECT * FROM audit ORDER BY id DESC LIMIT ?", (limit,))]
 
 
+def paper_requests(reqs, paper_tid):
+    """Requests belonging to the paper thread (thread_id match) or titled "Paper (..."."""
+    return [r for r in reqs if r.get("thread_id") == paper_tid or str(r.get("title") or "").startswith("Paper (")]
+
+
 def map_choice(req, choice, note=""):
     """Map a dashboard radio choice to (decision, text) for LabDB.decide. choice is 'p1'..'p3', 'yes', 'no' or 'own'.
     The result is still validated by decide(); this only translates."""
