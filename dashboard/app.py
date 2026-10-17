@@ -496,7 +496,8 @@ def render_message(m, key="chat"):
                 st.session_state.pop(f"edit_txt_{key}_{m['id']}", None)
                 st.rerun()
         else:
-            shown = replytext.readable(m["body"])[0] if m["author"] != "researcher" else m["body"]
+            shown = (replytext.readable(m["body"])[0] if m["author"] != "researcher"
+                     else ext_catalog.strip_instruction(m["body"]))
             st.markdown(file_view.linkify(shown))  # render-time only; stored text unchanged
             if m["author"] == "researcher" and st.button("✏️", key=f"edit_btn_{key}_{m['id']}",
                                                          help="Επεξεργασία του μηνύματος"):

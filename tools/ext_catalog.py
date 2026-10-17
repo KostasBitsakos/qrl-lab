@@ -52,9 +52,14 @@ def search_message(text):
     text = (text or "").strip()
     if not text:
         raise ValueError("empty")
-    return (f"[{EXT_TAG}] Ζητώ skill/επέκταση: {text}\n\n(Συντονιστή: στείλε search agent. Μόνο ελεύθερες/included "
-            "επιλογές, με URL πηγής και κόστος. Τα αποτελέσματα βάλ' τα στο .lab/extensions_catalog.json "
-            "και απάντησε σε αυτό το νήμα.)")
+    # The coordinator's handling rule lives in the inbox procedure, not in the researcher's visible text.
+    return f"[{EXT_TAG}] Ζητώ skill/επέκταση: {text}"
+
+
+def strip_instruction(body):
+    """Hide the coordinator instruction that older EXT-SEARCH messages carried in their body."""
+    i = (body or "").find("\n\n(Συντονιστή: στείλε search agent")
+    return body if i < 0 else body[:i]
 
 
 def add_request(entry):
