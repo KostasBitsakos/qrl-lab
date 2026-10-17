@@ -110,3 +110,8 @@ Both Sim v2.1 gates failed and remain failed; PLAN §8.1 amended (see there) to 
 with unchanged provisional parameters, a disclosed Kubernetes-HPA comparator, development-range evaluation seeds,
 final test seeds untouched; calibration prepared in parallel. Researcher also asked (M-20261017-068) that the HPA be
 reverse-engineered from the official Kubernetes docs/source.
+
+## 2026-10-17 — Venues always carry tier and acceptance rate (M-20261017-114/117)
+Every venue in `docs/deadlines.json` / `docs/VENUES.md`, now and in future updates, includes the CORE tier (source and
+year) and the acceptance rate of the last 3 editions from official sources (proceedings front matter in IEEE Xplore /
+ACM DL, conference or steering-committee pages). Rates that cannot be found are marked as not found, never estimated.

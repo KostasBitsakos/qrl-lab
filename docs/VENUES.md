@@ -76,8 +76,8 @@ CORE tier: CORE2023 ranks read from portal.core.edu.au/conf-ranks (search by acr
 
 | Venue | Tier | Acceptance (2026 / 2025 / 2024) | Sources |
 |---|---|---|---|
-| IEEE CCGrid | CORE B (CORE2023) | n/a / n/a / n/a (only the workshop target 20-25% in the CFW) | https://ccgrid2026.cdms.westernsydney.edu.au/cfw.html |
+| IEEE CCGrid | CORE B (CORE2023) | n/a / 25% (55/219) / 26.3% (51/194) (secondary: table on the CCGrid steering-committee page of R. Buyya, not proceedings front matter; 2026 not published there; CFW only gives the workshop target 20-25%) | https://clouds.cis.unimelb.edu.au/~rbuyya/ccgrid/ ; https://ccgrid2026.cdms.westernsydney.edu.au/cfw.html |
 | ACM/SPEC ICPE | CORE B (CORE2023) | 28% / 34.7% / 34.6% (full papers, research+industry tracks) | https://icpe.spec.org/past-conferences |
 | IEEE/IFIP DSN | CORE A (CORE2023) | 19.75% (65/329) / 20.2% (56/277) / 20.58% (42/204) | https://www.dependability.org/?p=808 |
-| ACM SIGMETRICS | CORE A* (CORE2023) | n/a / n/a / n/a | not found (POMACS issue records give no counts) |
-| IEEE PDP | CORE C (CORE2023) | n/a / n/a / n/a | not found |
+| ACM SIGMETRICS | CORE A* (CORE2023) | No combined rate found. Per cycle (accepted/submitted, POMACS editorials, primary): 2026 summer 23/111, fall 25/149, winter n/a; 2025 summer 20/110, fall 14/113, winter n/a; 2024 summer 20/91, fall 18/118, winter 10/127. Counts include resubmissions, so cycles must not be summed. | Crossref records of POMACS editorials: 10.1145/3771560, 3788083, 3805623 (2026); 3700411, 3711694, 3727107 (2025); 3626773, 3639027, 3656013 (2024), via https://api.crossref.org/works/10.1145/<suffix> |
+| IEEE PDP | CORE C (CORE2023) | n/a / n/a / n/a | not found (pdp2026.org program and EasyChair CFPs give no counts; IEEE Xplore front matter blocked, HTTP 418; pdp2024.org now redirects to an unrelated domain) |

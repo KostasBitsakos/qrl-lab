@@ -22,6 +22,10 @@ Venues (`docs/VENUES.md`):
 - For each: name, official CFP link, abstract and paper deadlines with timezone, page limit and template,
   blind or not, ranking with its source and year (CORE, CCF), fit for cloud/systems and for quantum/QML,
   location and registration/travel notes. Dates only from the official CFP page.
+- Every venue in `docs/deadlines.json` must carry `tier` (CORE rank with source and year; portal.core.edu.au/conf-ranks
+  works with a plain HTTP GET even when WebFetch is refused) and `acceptance` (rates of the last 3 editions, from
+  proceedings front matter in IEEE Xplore / ACM DL, the conference site or the steering committee; never estimated).
+  Missing years are written as not found (researcher, 2026-10-17).
 
 Memory: record stable facts you verified (venue rules, key papers) in your project memory so you do not
 search for them twice. Report in under 300 words with links.

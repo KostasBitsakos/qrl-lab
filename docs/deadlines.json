@@ -9,7 +9,7 @@
     "event_dates": "May 24–27 2027",
     "location": "Dallas–Fort Worth",
     "tier": "CORE B (CORE2023)",
-    "acceptance": "δεν βρέθηκε επίσημο"
+    "acceptance": "≈25% (2026: δεν βρέθηκε, 2025: 25%, 2024: 26.3%)"
   },
   {
     "venue": "IEEE CCGrid 2027",
@@ -21,7 +21,7 @@
     "event_dates": "May 24–27 2027",
     "location": "Dallas–Fort Worth",
     "tier": "CORE B (CORE2023)",
-    "acceptance": "δεν βρέθηκε επίσημο"
+    "acceptance": "≈25% (2026: δεν βρέθηκε, 2025: 25%, 2024: 26.3%)"
   },
   {
     "venue": "ACM/SPEC ICPE 2027",
@@ -81,7 +81,7 @@
     "event_dates": "Jun 7–11 2027",
     "location": "Atlanta (FCRC)",
     "tier": "CORE A* (CORE2023)",
-    "acceptance": "δεν βρέθηκε επίσημο"
+    "acceptance": "δεν βρέθηκε συνολικό ποσοστό· ανά κύκλο (δεκτά/υποβολές): 2026: summer 23/111, fall 25/149, winter δεν βρέθηκε· 2025: summer 20/110, fall 14/113, winter δεν βρέθηκε· 2024: summer 20/91, fall 18/118, winter 10/127"
   },
   {
     "venue": "ACM SIGMETRICS 2027 (winter cycle)",
@@ -93,7 +93,7 @@
     "event_dates": "Jun 7–11 2027",
     "location": "Atlanta (FCRC)",
     "tier": "CORE A* (CORE2023)",
-    "acceptance": "δεν βρέθηκε επίσημο"
+    "acceptance": "δεν βρέθηκε συνολικό ποσοστό· ανά κύκλο (δεκτά/υποβολές): 2026: summer 23/111, fall 25/149, winter δεν βρέθηκε· 2025: summer 20/110, fall 14/113, winter δεν βρέθηκε· 2024: summer 20/91, fall 18/118, winter 10/127"
   },
   {
     "venue": "IEEE PDP 2027",
@@ -105,7 +105,7 @@
     "event_dates": "Mar 17–19 2027",
     "location": "Barcelona",
     "tier": "CORE C (CORE2023)",
-    "acceptance": "δεν βρέθηκε επίσημο"
+    "acceptance": "δεν βρέθηκε (2026: δεν βρέθηκε, 2025: δεν βρέθηκε, 2024: δεν βρέθηκε)"
   },
   {
     "venue": "IEEE PDP 2027",
@@ -117,6 +117,6 @@
     "event_dates": "Mar 17–19 2027",
     "location": "Barcelona",
     "tier": "CORE C (CORE2023)",
-    "acceptance": "δεν βρέθηκε επίσημο"
+    "acceptance": "δεν βρέθηκε (2026: δεν βρέθηκε, 2025: δεν βρέθηκε, 2024: δεν βρέθηκε)"
   }
 ]
