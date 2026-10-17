@@ -1,5 +1,17 @@
-% TODO: 150-200 words, written last, numbers only via macros.
-% - problem: proactive autoscaling of Redis on K8s; DInos as starting point
-% - idea: which part of the model is quantum, and why
-% - result summary (macros) and parameter-matched control
-\todo{Write abstract after results are frozen.}
+% Draft 2026-10-17 (writer). Every result is a macro from generated/results.tex; values are [TBD] until the
+% results are frozen. The last two sentences must be rewritten against the frozen results.
+Autoscaling a Redis cluster on Kubernetes is a control problem with delays. A new pod helps only after it has
+started and joined the cluster, so a rule that reacts to the current CPU level tends to add capacity after the
+load has already risen. Deep reinforcement learning agents such as DInos learn proactive policies from a window
+of recent metrics and carry them from a simulator to a real cluster by fine-tuning. In the DInos implementation,
+almost all of the Q-network's parameters sit in a recurrent encoder, and fine-tuning updates all of them.
+We present Sofia, a hybrid agent in which a variational quantum circuit replaces part of the DInos
+Q-network.\todo{Name the quantum component once D5 (candidate selection) is decided.}
+We evaluate Sofia in a new simulator in which latency follows from a queueing model of the Redis pods, pod
+start-up and data rebalancing take time, and trivial fixed policies lose to a tuned threshold autoscaler.
+Sofia is compared with DInos retrained in the same simulator, with a threshold policy modelled on the Kubernetes
+Horizontal Pod Autoscaler, and with a classical network that has as many trainable parameters as Sofia.
+Over \resNumSeeds{} seeds, Sofia has an SLA violation rate of \resSLAViolQuantum{} against
+\resSLAViolDInos{} for DInos, with \resParamsQuantum{} trainable parameters against \resParamsDInos{} for DInos
+and \resParamsControl{} for the matched classical control.
+All circuits run on a classical simulator, and we make no claim about quantum speed-up.

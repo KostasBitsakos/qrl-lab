@@ -1,6 +1,64 @@
-\section{Introduction}
-% TODO
-% - Redis on K8s, reactive HPA misses spikes; DInos result (cite bitsakos2025dinos)
-% - gap: model size and adaptation cost; quantum candidates (PLAN 8.4)
-% - contributions list (each one tied to a row in claims.md)
-\todo{Draft introduction.}
+\section{Introduction}\label{sec:intro}
+% Draft 2026-10-17 (writer). Claims are listed in paper/claims.md (rows I1-I9). No results are stated as facts.
+
+An in-memory key--value store such as Redis is often the first component to feel a change in load. When it runs
+on Kubernetes, the operator chooses how many pods serve the cluster. Too few pods and requests queue up, so tail
+latency grows and the service misses its latency objective~\cite{dean2013tail}. Too many pods and the operator
+pays for capacity that sits idle. The default answer is the Horizontal Pod Autoscaler (HPA). It runs a control
+loop, by default every 15 seconds, and sets the replica count from the ratio between the current value of a
+metric and its target~\cite{k8sdocs_hpa}. The rule is simple, but it can only respond to load that has
+already arrived. A pod added now serves traffic only after it is scheduled, its image is pulled and it becomes
+ready~\cite{k8sslos,harter2016slacker}, and in Redis Cluster hash slots must then be moved to it before it takes
+its share of the keys~\cite{redisdocs_scaling,redisdocs_clusterspec}.
+
+Learning-based autoscalers try to act before the load arrives. DERP~\cite{bitsakos2018derp} applied deep
+reinforcement learning to elastic resource provisioning. DInos~\cite{bitsakos2025dinos} targets autoscaling
+that generalizes across stateless cloud applications. Its agent reads a window of recent metrics through a Long Short-Term Memory (LSTM)
+network~\cite{hochreiter1997lstm}, is trained in a simulator, and is then fine-tuned for a new environment,
+including a Kubernetes cluster running Redis. That design has a cost that is easy to overlook. In the DInos
+implementation the Q-network has \resParamsDInos{} trainable parameters, and almost all of them belong to the
+recurrent encoder. Fine-tuning for a new environment updates every one of them.
+
+Variational quantum circuits (VQCs) have been used as function approximators in reinforcement learning, both as
+policies~\cite{jerbi2021parametrized} and as Q-functions~\cite{skolik2022quantum}, and hybrid networks that put a
+trainable circuit after a pre-trained classical network have been used for transfer
+learning~\cite{mari2020transfer}. The circuits in these studies are small. A small parameter count alone shows
+little, though. Skolik et al.\ report that architectural and hyperparameter choices matter more than
+the number of parameters~\cite{skolik2022quantum}, so a small classical network could match a small circuit. We
+therefore treat parameter efficiency as a hypothesis and test it against a classical control with the same number
+of trainable parameters. We also keep timing claims apart from it. Our circuits run on a classical simulator, and
+simulator wall-clock time says nothing about speed on quantum hardware.
+
+A comparison of this kind is only as good as the simulator behind it. If latency or CPU did not depend on the
+number of pods, the cheapest policy would be to keep one pod at all times, and a tiny model of any kind would
+look as good as a large one. We therefore built a new simulator for this study. Arrivals enter a queue served by
+the ready pods, so latency and CPU respond to the scaling action. New pods start after a delay, and capacity drops
+for a while after each change while the cluster rebalances. Before any agent is compared, the simulator must pass
+fixed sanity gates: always using the minimum or the maximum number of pods, or the best static pod count, has to
+lose to a tuned threshold policy, and an oracle that knows future arrivals gives an upper bound on the
+reward.\todo{D8: the researcher decides whether and how the paper states why the earlier simulator was replaced.}
+
+This paper presents Sofia, a hybrid quantum--classical deep reinforcement learning agent for Kubernetes
+autoscaling. Sofia keeps the DInos interface: the same window of cluster metrics as input and the same three
+actions (add a pod, remove a pod, keep the current count). It replaces part of the DInos Q-network with a VQC
+of \resQubits{} qubits.\todo{Which part (D5): full Q-function, head after a small encoder, or the fine-tuned
+adaptation layer. Rewrite this sentence and C2 below once decided.}
+
+The paper makes four contributions. First, we describe a simulator for Redis on Kubernetes in which the reward
+depends on the scaling action through queueing, start-up delay and rebalancing, together with the sanity gates and
+the oracle bound that any agent comparison must pass (Section~\ref{sec:simv2}). Second, we design Sofia and
+specify its circuit, its encoding of the metric window and its training procedure
+(Section~\ref{sec:quantum}). Third, we compare Sofia with DInos retrained in the same simulator, a threshold
+policy modelled on the HPA, and a parameter-matched classical control, on a periodic workload with noise and
+spikes as in DInos and on a bursty Poisson-based workload\todo{Workload list per D3 (W0--W3).}, over
+\resNumSeeds{} seeds (Section~\ref{sec:eval}). We report SLA violations, p95 latency, steps to reach a target
+reward, trainable parameters and checkpoint size. Fourth, we check whether the ranking of the agents carries over
+to a Kubernetes cluster running Redis.\todo{Keep only if real-cluster runs are in this paper (PLAN 8.7, G6).}
+Our circuits run on a classical simulator\todo{Add IBM hardware agreement (\resHWAgreement) only if D9 runs are
+done.}, and none of our results is a claim about quantum speed-up.
+
+Section~\ref{sec:bg} gives background on Kubernetes autoscaling, Redis and variational circuits.
+Section~\ref{sec:related} reviews related work. Section~\ref{sec:system} describes the system and
+Section~\ref{sec:simv2} the simulator. Sections~\ref{sec:agents} and~\ref{sec:quantum} present the agents,
+the baselines and the quantum component. Section~\ref{sec:eval} reports the evaluation,
+Section~\ref{sec:disc} discusses limitations and Section~\ref{sec:concl} concludes.
