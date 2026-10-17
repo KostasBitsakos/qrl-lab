@@ -1420,6 +1420,46 @@ def test_inline_edit_ui():
     ok("inline edit: button on the message, in-place text area, save")
 
 
+def test_thread_rename():
+    from streamlit.testing.v1 import AppTest
+    db = LabDB()
+    mid = db.researcher_send("θέμα προς μετονομασία")
+    tid = db.message(mid)["thread_id"]
+    assert db.rename_thread(tid, "  Νέος   τίτλος ") is True
+    assert db.rename_thread(tid, "Νέος τίτλος") is False
+    assert db.message(tid)["title"] == "Νέος τίτλος"
+    assert len(db.title_history(tid)) == 1
+    expect_error(lambda: db.rename_thread(tid, "x", actor="coordinator"), "ερευνητής")
+    expect_error(lambda: db.rename_thread(tid, "  "), "κενός")
+    db.close()
+    src = open(os.path.join(TMP, "tools", "labq.py")).read()
+    assert "rename" not in src
+    at = AppTest.from_file(os.path.join(TMP, "dashboard", "app.py"), default_timeout=60).run()
+    assert not at.exception, at.exception
+    assert [b for b in at.button if b.key == f"rn_btn_chat_{tid}"], "no header pencil"
+    [b for b in at.button if b.key == f"th_rn_{tid}"][0].click().run()
+    ti = [t for t in at.text_input if t.key == f"rn_txt_list_{tid}"]
+    assert ti, "no inline input in the thread list"
+    ti[0].set_value("Από τη λίστα").run()
+    [b for b in at.button if b.key == f"rn_save_list_{tid}"][0].click().run()
+    db = LabDB()
+    assert db.message(tid)["title"] == "Από τη λίστα"
+    db.close()
+    ok("thread rename: db + history, researcher-only, pencil in list and header")
+
+
+def test_single_message_renderer():
+    src = open(os.path.join(TMP, "dashboard", "app.py")).read()
+    assert src.count("st.chat_message(") == 1, "chat messages must be rendered only by render_message"
+    i = src.index("st.chat_message(")
+    assert src.rindex("\ndef ", 0, i) == src.index("\ndef render_message(")
+    assert "edit_btn_" in src[src.index("\ndef render_message("):src.index("\ndef rename_widget(")]
+    # every thread display goes through show_thread (main, paper, extensions)
+    for k in ('show_thread(cur)', 'key="paper"', 'key="ext_chat"'):
+        assert k in src, k
+    ok("one shared message renderer (with edit button) used by all chat views")
+
+
 def test_paper_decisions_tab():
     from streamlit.testing.v1 import AppTest
     from labdb import PAPER_THREAD_TITLE, paper_requests
@@ -1482,6 +1522,8 @@ if __name__ == "__main__":
             import streamlit  # noqa: F401
             test_dashboard()
             test_inline_edit_ui()
+            test_thread_rename()
+            test_single_message_renderer()
             test_paper_decisions_tab()
             test_agents_tab_roles()
             test_paper_tab()

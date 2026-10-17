@@ -64,6 +64,12 @@ CREATE TABLE IF NOT EXISTS message_edits (
   old_body TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_message_edits ON message_edits(message_id, id);
+CREATE TABLE IF NOT EXISTS thread_title_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  thread_id TEXT NOT NULL,
+  ts TEXT NOT NULL,
+  old_title TEXT
+);
 CREATE TABLE IF NOT EXISTS requests (
   id TEXT PRIMARY KEY,
   ts TEXT NOT NULL,
@@ -472,6 +478,30 @@ class LabDB:
                       (new_body, t, int(seen_by_nobody), mid))
             self._audit(c, "researcher", "edit", mid, None)
         return True
+
+    def rename_thread(self, thread_id, new_title, actor="researcher"):
+        """Researcher-only (dashboard; deliberately no labq command). The title lives on the root message; the old
+        title (possibly NULL = derived from the first line) is kept in thread_title_history. True if changed."""
+        if actor != "researcher":
+            raise LabError("Μόνο ο ερευνητής μπορεί να μετονομάσει θέματα.")
+        new_title = " ".join((new_title or "").split())
+        if not new_title:
+            raise LabError("Ο τίτλος δεν μπορεί να είναι κενός.")
+        with self.tx() as c:
+            m = c.execute("SELECT title FROM messages WHERE id=? AND thread_id=?", (thread_id, thread_id)).fetchone()
+            if not m:
+                raise LabError(f"Δεν υπάρχει θέμα {thread_id}.")
+            if m["title"] == new_title:
+                return False
+            c.execute("INSERT INTO thread_title_history(thread_id, ts, old_title) VALUES (?,?,?)",
+                      (thread_id, now(), m["title"]))
+            c.execute("UPDATE messages SET title=? WHERE id=?", (new_title, thread_id))
+            self._audit(c, "researcher", "rename_thread", thread_id, None)
+        return True
+
+    def title_history(self, thread_id):
+        return [dict(r) for r in self.conn.execute(
+            "SELECT ts, old_title FROM thread_title_history WHERE thread_id=? ORDER BY id", (thread_id,))]
 
     def edit_history(self, mid):
         return [dict(r) for r in self.conn.execute(

@@ -459,6 +459,84 @@ def decision_panel(d, select=lambda reqs: reqs, pre="", label="Αίτημα",
                     st.error(str(e))
 
 # ---------------------------------------------------------------- shared chat rendering
+def render_message(m, key="chat"):
+    """The ONLY place a chat message is rendered (author, body, ✏️ inline edit, attachments)."""
+    name, avatar = author_info(m["author"])
+    with st.chat_message("user" if m["author"] == "researcher" else "assistant", avatar=avatar):
+        extra = ""
+        if m["author"] == "researcher" and m["status"]:
+            si, sl = MSG_STATUS.get(m["status"], ("", m["status"]))
+            extra = f" · {si} {sl}"
+            if m.get("req_model") or m.get("req_effort") not in (None, "med"):
+                extra += f" · 🎛️ {m.get('req_model') or 'auto'}/{m.get('req_effort') or 'med'}"
+        label = f"{name} · {m['model']}" if m.get("model") else name
+        st.caption(f"**{label}** · {fmt_ts(m['ts'])} · {KIND_LABEL.get(m['kind'], m['kind'])}"
+                   f"{extra} · `{m['id']}`")
+        ekey = f"editing_{key}_{m['id']}"
+        if m["author"] == "researcher" and st.session_state.get(ekey):
+            # editing in place: keyed widgets keep their text across the fragment's auto-refresh
+            new_txt = st.text_area("Νέο κείμενο", value=m["body"], key=f"edit_txt_{key}_{m['id']}",
+                                   height=140, label_visibility="collapsed")
+            if m["body"].find("docs/uploads/") >= 0:
+                st.caption("Κράτα τις γραμμές με τις διαδρομές των συνημμένων στο κείμενο.")
+            b1, b2, _b3 = st.columns([1, 1, 6])
+            if b1.button("Αποθήκευση", key=f"edit_save_{key}_{m['id']}", type="primary"):
+                try:
+                    de = db()
+                    changed = de.edit_message(m["id"], new_txt)
+                    de.close()
+                    st.session_state[ekey] = False
+                    st.toast("Αποθηκεύτηκε· ο συντονιστής ειδοποιείται" if changed else "Καμία αλλαγή",
+                             icon="✏️")
+                    st.rerun()
+                except LabError as e:
+                    st.error(str(e))
+            if b2.button("Άκυρο", key=f"edit_cancel_{key}_{m['id']}"):
+                st.session_state[ekey] = False
+                st.session_state.pop(f"edit_txt_{key}_{m['id']}", None)
+                st.rerun()
+        else:
+            shown = replytext.readable(m["body"])[0] if m["author"] != "researcher" else m["body"]
+            st.markdown(file_view.linkify(shown))  # render-time only; stored text unchanged
+            if m["author"] == "researcher" and st.button("✏️", key=f"edit_btn_{key}_{m['id']}",
+                                                         help="Επεξεργασία του μηνύματος"):
+                st.session_state[ekey] = True
+                st.rerun()
+        if m.get("edit_count"):
+            st.caption(f"(επεξεργάστηκε) · {fmt_ts(m['edited_at'])}")
+        for ap in attachment_paths(m["body"]):
+            full = os.path.realpath(os.path.join(ROOT, ap))
+            up_root = os.path.realpath(os.path.join(ROOT, "docs", "uploads"))
+            if full.startswith(up_root + os.sep) and os.path.isfile(full):
+                ac1, ac2 = st.columns([1, 1])
+                ac1.download_button(f"⬇️ {os.path.basename(full)}", lambda p=full: open(p, "rb").read(),
+                                    file_name=os.path.basename(full), key=f"dl_{key}_{m['id']}_{ap}")
+                ac2.markdown(f"[📁 Αρχεία]({file_view.deep_link(full)})")
+
+
+def rename_widget(tid, current, key):
+    """✏️ -> inline text input + Save/Cancel; researcher-only (no labq command)."""
+    ek = f"renaming_{key}_{tid}"
+    if st.session_state.get(ek):
+        nt = st.text_input("Νέος τίτλος", value=current, key=f"rn_txt_{key}_{tid}", label_visibility="collapsed")
+        b1, b2, _ = st.columns([1, 1, 6])
+        if b1.button("Αποθήκευση", key=f"rn_save_{key}_{tid}", type="primary"):
+            try:
+                dr = db()
+                dr.rename_thread(tid, nt)
+                dr.close()
+                st.session_state[ek] = False
+                st.rerun()
+            except LabError as e:
+                st.error(str(e))
+        if b2.button("Άκυρο", key=f"rn_cancel_{key}_{tid}"):
+            st.session_state[ek] = False
+            st.session_state.pop(f"rn_txt_{key}_{tid}", None)
+            st.rerun()
+        return True
+    return False
+
+
 @st.fragment(run_every=refresh)
 def show_thread(tid, key="chat", title=None):
     dd = db()
@@ -469,60 +547,16 @@ def show_thread(tid, key="chat", title=None):
     root = msgs[0]
     icon, label = MSG_STATUS.get(root["status"] or "", ("", ""))
     first = (root["title"] or (root["body"] or "").strip().splitlines()[0])[:80] if root["body"] else tid
-    st.markdown(f"**{title or 'Κύρια συζήτηση'}** · {first} · `{tid}` · {icon} {label}")
+    hc1, hc2 = st.columns([12, 1])
+    hc1.markdown(f"**{title or 'Κύρια συζήτηση'}** · {first} · `{tid}` · {icon} {label}")
+    if not st.session_state.get(f"renaming_{key}_{tid}") and hc2.button(
+            "✏️", key=f"rn_btn_{key}_{tid}", help="Μετονομασία θέματος"):
+        st.session_state[f"renaming_{key}_{tid}"] = True
+        st.rerun()
+    rename_widget(tid, root["title"] or first, key)
     with st.container(height=480):  # oldest first, newest at the bottom
         for m in msgs:
-            name, avatar = author_info(m["author"])
-            with st.chat_message("user" if m["author"] == "researcher" else "assistant", avatar=avatar):
-                extra = ""
-                if m["author"] == "researcher" and m["status"]:
-                    si, sl = MSG_STATUS.get(m["status"], ("", m["status"]))
-                    extra = f" · {si} {sl}"
-                    if m.get("req_model") or m.get("req_effort") not in (None, "med"):
-                        extra += f" · 🎛️ {m.get('req_model') or 'auto'}/{m.get('req_effort') or 'med'}"
-                label = f"{name} · {m['model']}" if m.get("model") else name
-                st.caption(f"**{label}** · {fmt_ts(m['ts'])} · {KIND_LABEL.get(m['kind'], m['kind'])}"
-                           f"{extra} · `{m['id']}`")
-                ekey = f"editing_{key}_{m['id']}"
-                if m["author"] == "researcher" and st.session_state.get(ekey):
-                    # editing in place: keyed widgets keep their text across the fragment's auto-refresh
-                    new_txt = st.text_area("Νέο κείμενο", value=m["body"], key=f"edit_txt_{key}_{m['id']}",
-                                           height=140, label_visibility="collapsed")
-                    if m["body"].find("docs/uploads/") >= 0:
-                        st.caption("Κράτα τις γραμμές με τις διαδρομές των συνημμένων στο κείμενο.")
-                    b1, b2, _b3 = st.columns([1, 1, 6])
-                    if b1.button("Αποθήκευση", key=f"edit_save_{key}_{m['id']}", type="primary"):
-                        try:
-                            de = db()
-                            changed = de.edit_message(m["id"], new_txt)
-                            de.close()
-                            st.session_state[ekey] = False
-                            st.toast("Αποθηκεύτηκε· ο συντονιστής ειδοποιείται" if changed else "Καμία αλλαγή",
-                                     icon="✏️")
-                            st.rerun()
-                        except LabError as e:
-                            st.error(str(e))
-                    if b2.button("Άκυρο", key=f"edit_cancel_{key}_{m['id']}"):
-                        st.session_state[ekey] = False
-                        st.session_state.pop(f"edit_txt_{key}_{m['id']}", None)
-                        st.rerun()
-                else:
-                    shown = replytext.readable(m["body"])[0] if m["author"] != "researcher" else m["body"]
-                    st.markdown(file_view.linkify(shown))  # render-time only; stored text unchanged
-                    if m["author"] == "researcher" and st.button("✏️", key=f"edit_btn_{key}_{m['id']}",
-                                                                 help="Επεξεργασία του μηνύματος"):
-                        st.session_state[ekey] = True
-                        st.rerun()
-                if m.get("edit_count"):
-                    st.caption(f"(επεξεργάστηκε) · {fmt_ts(m['edited_at'])}")
-                for ap in attachment_paths(m["body"]):
-                    full = os.path.realpath(os.path.join(ROOT, ap))
-                    up_root = os.path.realpath(os.path.join(ROOT, "docs", "uploads"))
-                    if full.startswith(up_root + os.sep) and os.path.isfile(full):
-                        ac1, ac2 = st.columns([1, 1])
-                        ac1.download_button(f"⬇️ {os.path.basename(full)}", lambda p=full: open(p, "rb").read(),
-                                            file_name=os.path.basename(full), key=f"dl_{key}_{m['id']}_{ap}")
-                        ac2.markdown(f"[📁 Αρχεία]({file_view.deep_link(full)})")
+            render_message(m, key)
         st.html("<div id='chat-end'></div>")
     for m in msgs:
         if m["author"] == "researcher" and m["status"] == "delivered" and (since(m["updated_at"]) or 0) > 180:
@@ -586,8 +620,18 @@ with tab_chat:
         with st.expander(f"📚 Θέματα ({len(ids)})"):
             if ids:
                 with st.container(height=260):
-                    st.radio("Θέματα", ids, key="thread_sel", format_func=thread_label,
-                             label_visibility="collapsed", on_change=_leave_new_topic)
+                    for tid_ in ids:
+                        if rename_widget(tid_, by_id[tid_]["title"] or thread_label(tid_), "list"):
+                            continue
+                        lc1, lc2 = st.columns([12, 1])
+                        if lc1.button(thread_label(tid_), key=f"th_sel_{tid_}", width="stretch",
+                                      type="primary" if tid_ == cur else "secondary"):
+                            st.session_state["thread_sel"] = tid_
+                            _leave_new_topic()
+                            st.rerun()
+                        if lc2.button("✏️", key=f"th_rn_{tid_}", help="Μετονομασία θέματος"):
+                            st.session_state[f"renaming_list_{tid_}"] = True
+                            st.rerun()
             else:
                 st.caption("Δεν υπάρχουν ακόμη θέματα.")
     with top_r:
