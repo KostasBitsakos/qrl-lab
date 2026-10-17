@@ -619,7 +619,10 @@ with tab_chat:
     with top_l:
         with st.expander(f"📚 Θέματα ({len(ids)})"):
             if ids:
-                with st.container(height=260):
+                st.html("<style>.st-key-thread_list button{justify-content:flex-start;text-align:left}"
+                        ".st-key-thread_list button div,.st-key-thread_list button p{justify-content:flex-start;"
+                        "text-align:left;width:100%}</style>")
+                with st.container(height=260, key="thread_list"):
                     for tid_ in ids:
                         if rename_widget(tid_, by_id[tid_]["title"] or thread_label(tid_), "list"):
                             continue
