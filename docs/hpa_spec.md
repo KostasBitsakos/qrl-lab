@@ -65,7 +65,7 @@ else:
 |---|---|---|---|
 | Step | 15s sync | 15s step | 1 step = 1 sync; windows in steps: 300s = 20 steps |
 | Action size | multi-pod (up to 100%/4 pods per 15s) | ±max_delta | HPA baseline alone may exceed `max_delta`; report this, it favors HPA vs RL |
-| Metric | usage / request, can exceed 100% | served/capacity clipped to [0,1] | Request must equal per-pod capacity so util=100*cpu; clipping hides overload, so ratio <= 1/target and one-step up-scaling is under-estimated. Unclipped demand/capacity is the faithful input |
+| Metric | usage / request, can exceed 100% only if limit > request | served/capacity (unclipped noisy reading) | Implemented as a busy-fraction proxy: served / effective capacity, saturating at 100 % before noise/offset. Request = limit is an ASSUMPTION; the proxy cannot distinguish moderate from extreme overload (at target 40 % a saturated reading requests about 2.5x the ready replicas, whatever the real backlog). Requests do NOT shrink during rebalancing or with theta < 1: the proxy's denominator is the reduced effective capacity, so it reads higher than usage over a fixed request would. A real request < limit needs a calibrated CPU usage/request model (future work). Arrivals/demand is offered load, not a CPU metric, and is not used |
 | Readiness | Ready condition, init period 5m, window skip | ready after d steps | Pods in warm-up are U (unready, 0 on scale-up); skip first post-ready sample for `ceil(window/15s)` steps (`Window` not found) |
 | Metric lag | metrics-server scrape window | none stated | Parameter (delay k steps); default value not found |
 | Count in ratio | pods with metrics | ready pods | Use ready, non-terminating pods |
