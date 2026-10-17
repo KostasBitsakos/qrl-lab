@@ -564,10 +564,10 @@ confirms the baseline → `git worktree add` for `qrl-dev`.
 | ID | Question | Status |
 |---|---|---|
 | D1 | Coordinator on the VM in tmux, accessed via Remote Control (not on the laptop) | proposed |
-| D2 | Simulation v2 design and reward weights (§8.1) | design accepted 2026-10-16 (C-20261016-01, option 1); weights/SLO pending |
+| D2 | Simulation v2 design and reward weights (§8.1) | design accepted 2026-10-16 (C-20261016-01, option 1); reward = researcher's DInos reward via frozen adapter (R-20261017-017, C-20261017-02) |
 | D3 | Workloads W0–W3 (§8.2) | accepted 2026-10-17 (R-20261017-008): W0+W1 train, W2 test, W3 adaptation |
 | D4 | Baselines (§8.3) | proposed; researcher agreed on DInos+T as main |
-| D5 | Quantum candidates to screen (§8.4) | accepted 2026-10-17 (R-20261017-006): screen QC4 + QC1, keep the better |
+| D5 | Quantum candidates to screen (§8.4) | accepted 2026-10-17 (R-20261017-006): screen QC4 + QC1, keep the better; PAUSED 2026-10-17 (R-20261017-017): classical comparison first |
 | D6 | Publication gate thresholds (§9) | pending |
 | D7 | Target venue CCGrid 2027 + alternatives from scholar | pending |
 | D8 | How to handle F1/F5 with respect to published work and the public repo | decided 2026-10-17 (R-20261017-007): not mentioned in the paper; DInos claims unchanged |
