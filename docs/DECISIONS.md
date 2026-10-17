@@ -100,3 +100,7 @@ simulation numbers as comparison points (claims discipline); comparisons use our
 ## 2026-10-17 — D3 workloads (R-20261017-008, researcher chose option 1)
 W0 + W1 for training, W2 (public production trace, scaled) for testing only, W3 (regime shift) for adaptation,
 as in PLAN §8.2. W0 runs first (sim-first priority, 2026-10-17).
+
+## 2026-10-17 — IBM Quantum in this paper (R-20261017-011, researcher chose option 1)
+Yes, inference only: the final trained model is evaluated on IBM hardware with a few QPU-seconds; training stays in
+simulation; no speed-up claims. Each job still needs its own approval (D9).
