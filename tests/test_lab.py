@@ -609,6 +609,111 @@ def test_sudo_tab():
     ok("dashboard: Sudo tab lists the request, approves through a mocked sudo_grant")
 
 
+def test_edit_messages():
+    import lab_bridge_watch as bw
+    db = LabDB()
+    m = db.researcher_send("tpyo here")
+    db.edit_message(m, "typo here")  # still 'new': the delivery itself carries the new text
+    assert db.message(m)["body"] == "typo here" and db.undelivered_edits() == []
+    bw.cycle(db, False)
+    assert db.message(m)["status"] == "delivered"
+    assert db.edit_message(m, "typo fixed") is True and db.edit_message(m, "typo fixed") is False
+    assert [h["old_body"] for h in db.edit_history(m)] == ["tpyo here", "typo here"]
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        bw.cycle(db, False)
+        bw.cycle(db, False)
+    out = [l for l in buf.getvalue().splitlines() if l]
+    assert len(out) == 1 and out[0].startswith(f"QRL-INBOX edit {m} thread={m}:") and "typo fixed" in out[0], out
+    assert db.message(m)["edit_count"] == 2 and db.message(m)["edited_at"]
+    c = db.post("coordinator", "ok", m)
+    expect_error(lambda: db.edit_message(c, "forged"), "ερευνητή")
+    expect_error(lambda: db.edit_message(m, "x", actor="coordinator"), "ερευνητή")
+    expect_error(lambda: db.edit_message(m, "  "), "κενό")
+    expect_error(lambda: db.edit_message("M-nope", "x"), "Δεν υπάρχει")
+    r = subprocess.run([sys.executable, os.path.join(TMP, "tools", "labq.py"), "edit", m, "x"], capture_output=True, text=True)
+    assert r.returncode != 0  # agents have no CLI path to edit
+    ok("message edit: history kept, edited marker, bridge QRL-INBOX edit line once, agents cannot edit")
+
+
+def test_perm_hook():
+    import json as _j
+    import perm_hook, perm_store
+    root = tempfile.mkdtemp(prefix="perm-", dir=TMP)
+    ev = _j.dumps({"hook_event_name": "PermissionRequest", "tool_name": "Bash", "cwd": "/x",
+                   "tool_input": {"command": "rm -rf /tmp/a", "description": "delete"}})
+
+    def decider(approve):  # stands in for the dashboard click, fires on the first poll
+        def sleep(_):
+            for r in perm_store.pending(root):
+                perm_store.decide(r["id"], approve, "no thanks", root)
+        return sleep
+    r = perm_hook.handle(ev, root=root, wait=5, poll=0, sleep=decider(True))
+    assert r == {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "allow"}}}, r
+    r = perm_hook.handle(ev, root=root, wait=5, poll=0, sleep=decider(False))
+    d = r["hookSpecificOutput"]["decision"]
+    assert d["behavior"] == "deny" and d["message"] == "no thanks", r
+    assert perm_hook.handle(ev, root=root, wait=0.05, poll=0, sleep=lambda _: None) is None  # timeout: no decision
+    assert perm_store.pending(root) == [] and perm_store.recent(root)[0]["state"] == "timeout"
+    for bad in ("", "not json", "[]", "{}", _j.dumps({"hook_event_name": "PreToolUse", "tool_name": "Bash"}),
+                _j.dumps({"hook_event_name": "PermissionRequest"})):
+        assert perm_hook.handle(bad, root=root, wait=0.01, poll=0, sleep=lambda _: None) is None, bad
+    assert perm_hook.handle(ev, root="/proc/nonexistent/x", wait=0.01) is None  # unwritable store: no decision
+    rid = perm_store.create("Write", {"file_path": "/a/b.py"}, "/c", root)
+    rec = perm_store.read(rid, root)
+    assert rec["detail"] == "/a/b.py" and rec["state"] == "pending" and "αρχείου" in rec["description"]
+    assert perm_store.decide(rid, True, root=root) and not perm_store.decide(rid, False, root=root)  # decided once
+    # end to end through the real script with an empty store: times out -> no output, exit 0
+    env = dict(os.environ, QRL_LAB_DIR=root)
+    p = subprocess.run([sys.executable, os.path.join(TMP, "tools", "perm_hook.py")], input="garbage", text=True,
+                       capture_output=True, env=env, timeout=20)
+    assert p.returncode == 0 and p.stdout == "", (p.stdout, p.stderr)
+    ok("perm hook: allow, deny, timeout, malformed input and unwritable store never auto-allow")
+
+
+def test_ext_catalog_and_tab():
+    from streamlit.testing.v1 import AppTest
+    import ext_catalog
+    assert ext_catalog.load(TMP) == {}
+    at = AppTest.from_file(os.path.join(TMP, "dashboard", "app.py"), default_timeout=60)
+    at.run()
+    assert not at.exception, at.exception
+    assert any("δεν υπάρχει ακόμα κατάλογος" in i.value for i in at.info), [i.value for i in at.info]
+    ent = {"name": "demo-skill", "kind": "skill", "provider": "Claude", "description": "does x",
+           "url": "https://example.org/x", "cost": "free"}
+    with open(os.path.join(TMP, ".lab", "extensions_catalog.json"), "w") as f:
+        json.dump({"categories": {"Testing": [ent, dict(ent, url="javascript:1"), {"name": "bad"}]}}, f)
+    cat = ext_catalog.load(TMP)
+    assert list(cat) == ["Testing"] and len(cat["Testing"]) == 1
+    at.run()
+    assert not at.exception, at.exception
+    btn = [b for b in at.button if b.label == "Πρόσθεσε"][0]
+    btn.click(); at.run()
+    assert not at.exception, at.exception
+    rq = [r for r in LabDB().requests(state="open") if r["scope"] == "external"]
+    assert len(rq) == 1 and rq[0]["kind"] == "approval" and "demo-skill" in rq[0]["title"], rq
+    at.chat_input(key="ext_composer").set_value("ένα skill για LaTeX").run()
+    assert not at.exception, at.exception
+    msgs = [m for m in LabDB().conn.execute("SELECT * FROM messages WHERE author='researcher'").fetchall()
+            if "[EXT-SEARCH]" in m["body"]]
+    assert len(msgs) == 1 and msgs[0]["kind"] == "message", msgs
+    ok("extensions: catalog only from file (empty state, validation), add -> approval/external, chat -> EXT-SEARCH")
+
+
+def test_perm_section_in_sudo_tab():
+    from streamlit.testing.v1 import AppTest
+    import perm_store
+    rid = perm_store.create("Bash", {"command": "echo hello-perm", "description": "demo"}, "/w", TMP)
+    at = AppTest.from_file(os.path.join(TMP, "dashboard", "app.py"), default_timeout=60)
+    at.run()
+    assert not at.exception, at.exception
+    assert any("echo hello-perm" in c.value for c in at.code), [c.value for c in at.code]
+    [b for b in at.button if b.key == f"perm_ok_{rid}"][0].click(); at.run()
+    assert not at.exception, at.exception
+    assert perm_store.read(rid, TMP)["state"] == "approved"
+    ok("dashboard: terminal permission request shown in Sudo tab and approved by click")
+
+
 def test_k8s_view():
     import k8s_view as kv
     from unittest import mock
@@ -1050,7 +1155,7 @@ def test_decisions_live_and_tab():
     at.run()  # stands in for the 5 s fragment rerun / any rerun
     assert any("από 2" in m.value for m in at.markdown), "navigator not updated to 2 requests"
     # form text is kept client-side until submit; server side the same form/key must still be the one rendered
-    assert [x.key for x in at.text_area] == [f"note_{a}"], "current form was replaced by the new request"
+    assert [x.key for x in at.text_area if not x.key.startswith("edit_")] == [f"note_{a}"], "current form was replaced by the new request"
     # tab labels stay constant (label change = new tab identity = jump to first tab)
     assert [t.label for t in at.tabs] == labels0
     # clicking a decision keeps the same tab list, so the browser keeps the Αποφάσεις tab selected
@@ -1285,6 +1390,8 @@ if __name__ == "__main__":
         test_codex_health()
         test_watchdog()
         test_sudo_ui()
+        test_perm_hook()
+        test_edit_messages()
         test_labels_and_race()
         test_deputy()
         test_voice()
@@ -1303,6 +1410,8 @@ if __name__ == "__main__":
             test_grafana_tab()
             test_decisions_live_and_tab()
             test_sudo_tab()
+            test_perm_section_in_sudo_tab()
+            test_ext_catalog_and_tab()
         except ImportError:
             print("  --  dashboard test skipped (streamlit not installed in this interpreter)")
         print(f"ALL PASSED ({len(PASSED)})")

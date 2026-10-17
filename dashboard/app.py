@@ -32,6 +32,8 @@ import prom_view  # noqa: E402
 import web_terminal  # noqa: E402
 import sudo_ui  # noqa: E402
 import race_view  # noqa: E402
+import perm_store  # noqa: E402
+import ext_catalog  # noqa: E402
 import summarize_runs  # noqa: E402
 import paper_plots  # noqa: E402
 import paper_build  # noqa: E402
@@ -264,6 +266,40 @@ def read_text(path):
 
 
 # ---------------------------------------------------------------- sidebar (auto-refresh)
+LOGO_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 170" width="100%" role="img" aria-label="Πάρις">'
+    '<defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1b3a7a"/>'
+    '<stop offset=".55" stop-color="#e8708a"/><stop offset="1" stop-color="#ffd27a"/></linearGradient>'
+    '<linearGradient id="sea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1fa3c4"/>'
+    '<stop offset="1" stop-color="#0b3f73"/></linearGradient>'
+    '<linearGradient id="sand" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4d58b"/>'
+    '<stop offset="1" stop-color="#c99a4b"/></linearGradient>'
+    '<linearGradient id="ttl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff6d6"/>'
+    '<stop offset="1" stop-color="#ffc24a"/></linearGradient></defs>'
+    '<rect width="260" height="170" rx="14" fill="url(#sky)"/>'
+    '<circle cx="206" cy="58" r="22" fill="#fff1b0" opacity=".95"/><circle cx="206" cy="58" r="30" fill="#fff1b0" opacity=".25"/>'
+    '<g fill="#fff" opacity=".7"><ellipse cx="60" cy="26" rx="22" ry="5"/><ellipse cx="78" cy="22" rx="14" ry="4"/>'
+    '<ellipse cx="170" cy="20" rx="18" ry="4"/></g>'
+    '<rect y="92" width="260" height="78" fill="url(#sea)"/>'
+    '<g stroke="#bff0ff" stroke-width="1.6" fill="none" opacity=".7" stroke-linecap="round">'
+    '<path d="M20 104 q8 -4 16 0 t16 0"/><path d="M170 112 q8 -4 16 0 t16 0"/><path d="M110 100 q8 -4 16 0 t16 0"/></g>'
+    '<path d="M28 100 Q70 76 130 84 Q172 88 196 100 Q120 112 28 100Z" fill="url(#sand)"/>'
+    '<path d="M60 96 Q64 56 92 30" stroke="#6b3f17" stroke-width="5" fill="none" stroke-linecap="round"/>'
+    '<path d="M92 30 Q70 14 44 28 Q66 22 90 34Z M92 30 Q82 6 60 4 Q82 14 90 32Z M92 30 Q110 6 134 12 Q108 14 94 34Z'
+    ' M92 30 Q122 24 140 44 Q112 32 94 36Z M92 30 Q100 12 96 -2 Q92 18 90 32Z" fill="#1f9d55"/>'
+    '<circle cx="90" cy="38" r="3.4" fill="#6b3f17"/><circle cx="96" cy="39" r="3.4" fill="#5a3412"/>'
+    '<g fill="#8a5a22" opacity=".9"><ellipse cx="150" cy="92" rx="4" ry="6.5" transform="rotate(-18 150 92)"/>'
+    '<circle cx="143" cy="83" r="1.8"/><circle cx="148" cy="81.5" r="1.8"/><circle cx="153" cy="82" r="1.8"/>'
+    '<circle cx="157.5" cy="84" r="1.8"/>'
+    '<ellipse cx="170" cy="98" rx="4" ry="6.5" transform="rotate(18 170 98)"/>'
+    '<circle cx="163" cy="89" r="1.8"/><circle cx="168" cy="87.5" r="1.8"/><circle cx="173" cy="88" r="1.8"/>'
+    '<circle cx="177.5" cy="90" r="1.8"/></g>'
+    '<text x="130" y="152" text-anchor="middle" font-family="Georgia,\'Palatino Linotype\',serif" font-size="46" '
+    'font-weight="bold" font-style="italic" letter-spacing="2" fill="#0b2a52" opacity=".55" transform="translate(2 3)">Πάρις</text>'
+    '<text x="130" y="152" text-anchor="middle" font-family="Georgia,\'Palatino Linotype\',serif" font-size="46" '
+    'font-weight="bold" font-style="italic" letter-spacing="2" fill="url(#ttl)" stroke="#7a3d00" stroke-width=".8">Πάρις</text>'
+    '</svg>')
+st.sidebar.markdown(f'<div style="width:100%;max-width:250px;margin:0 auto 6px">{LOGO_SVG}</div>', unsafe_allow_html=True)
 st.sidebar.markdown("### 🧪 QRL-Lab")
 refresh = st.sidebar.select_slider("Ανανέωση κάθε (δευτ.)", options=[3, 5, 10, 30], value=5)
 
@@ -354,6 +390,8 @@ def show_thread(tid, key="chat"):
                 st.caption(f"**{label}** · {fmt_ts(m['ts'])} · {KIND_LABEL.get(m['kind'], m['kind'])}"
                            f"{extra} · `{m['id']}`")
                 st.markdown(file_view.linkify(m["body"]))  # render-time only; stored text unchanged
+                if m.get("edit_count"):
+                    st.caption(f"(επεξεργάστηκε) · {fmt_ts(m['edited_at'])}")
                 for ap in attachment_paths(m["body"]):
                     full = os.path.realpath(os.path.join(ROOT, ap))
                     up_root = os.path.realpath(os.path.join(ROOT, "docs", "uploads"))
@@ -370,6 +408,31 @@ def show_thread(tid, key="chat"):
             break
 
 
+def edit_box(tid, key):
+    """✏️ Edit of the researcher's own messages. Deliberately NOT inside the auto-refreshing fragment."""
+    dd = db()
+    mine = [m for m in dd.thread(tid) if m["author"] == "researcher"]
+    dd.close()
+    if not mine:
+        return
+    with st.expander("✏️ Επεξεργασία μηνύματός μου"):
+        ids = [m["id"] for m in mine]
+        mid = st.selectbox("Μήνυμα", ids[::-1], key=f"edit_sel_{key}",
+                           format_func=lambda i: f"{i} · {next(x for x in mine if x['id'] == i)['body'][:50]}")
+        cur = next(x for x in mine if x["id"] == mid)
+        st.caption("Αν το μήνυμα έχει συνημμένα, κράτα τις γραμμές με τις διαδρομές τους στο κείμενο.")
+        txt = st.text_area("Νέο κείμενο", value=cur["body"], key=f"edit_txt_{key}_{mid}", height=140)
+        if st.button("Αποθήκευση", key=f"edit_save_{key}"):
+            try:
+                dd = db()
+                changed = dd.edit_message(mid, txt)
+                dd.close()
+                st.toast("Αποθηκεύτηκε· ο συντονιστής ειδοποιείται" if changed else "Καμία αλλαγή", icon="✏️")
+                st.rerun()
+            except LabError as e:
+                st.error(str(e))
+
+
 # ---------------------------------------------------------------- tabs
 d0 = db()
 n_open = len(d0.requests(state="open"))
@@ -381,7 +444,7 @@ DEC_TAB = "✅ Αποφάσεις"
 _open_files = "path" in st.query_params and not st.session_state.get("fb_tab_done")
 st.session_state["fb_tab_done"] = True
 TAB_NAMES = ["💬 Συνομιλία", DEC_TAB, "🤖 Πράκτορες", "📈 Πειράματα", "⚖️ Council",
-             "🖥️ Πόροι", "☸️ Kubernetes", "📡 Prometheus", "📊 Grafana", FILES_TAB, "📝 Paper", "🎓 Συνέδρια", "🧾 Ιστορικό", "🔐 Sudo", "⌨️ Terminal"]
+             "🖥️ Πόροι", "☸️ Kubernetes", "📡 Prometheus", "📊 Grafana", FILES_TAB, "📝 Paper", "🎓 Συνέδρια", "🧾 Ιστορικό", "🔐 Sudo", "🧩 Επεκτάσεις", "⌨️ Terminal"]
 _term_url = web_terminal.iframe_url() if web_terminal.running() else ""
 _side = bool(_term_url) and st.sidebar.toggle("Terminal στα δεξιά", key="term_side")
 if _side:  # tabs in the left column, the terminal in a right-hand column
@@ -390,10 +453,10 @@ if _side:  # tabs in the left column, the terminal in a right-hand column
         st.iframe(_term_url, height=700)
     with _left:
         (tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_prom, tab_grafana, tab_files, tab_paper, tab_venues,
-         tab_audit, tab_sudo, tab_term) = st.tabs(TAB_NAMES, default=FILES_TAB if _open_files else None)
+         tab_audit, tab_sudo, tab_ext, tab_term) = st.tabs(TAB_NAMES, default=FILES_TAB if _open_files else None)
 else:
     (tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_prom, tab_grafana, tab_files, tab_paper, tab_venues,
-     tab_audit, tab_sudo, tab_term) = st.tabs(TAB_NAMES, default=FILES_TAB if _open_files else None)
+     tab_audit, tab_sudo, tab_ext, tab_term) = st.tabs(TAB_NAMES, default=FILES_TAB if _open_files else None)
 
 # ================================================================ conversation
 with tab_chat:
@@ -455,6 +518,7 @@ with tab_chat:
             st.info("⏳ ο συντονιστής δουλεύει…" + (" · ενεργοί τώρα: " + ", ".join(names) if names else ""))
 
         show_thread(cur)
+        edit_box(cur, 'chat')
         working_indicator(cur)
 
     kind = st.segmented_control("Τύπος μηνύματος", ["message", "proposal", "code_question"],
@@ -1168,6 +1232,7 @@ with tab_paper:
     paper_tid = _d.ensure_thread(PAPER_THREAD_TITLE, "Νήμα για τη συγγραφή και το review του paper.")
     _d.close()
     show_thread(paper_tid, key="paper")
+    edit_box(paper_tid, "paper")
     pw_col, pr_col = st.columns(2)
     p_writers = pw_col.multiselect("Συγγραφή", list(PAPER_WRITERS), default=["writer-sonnet"],
                                    format_func=PAPER_WRITERS.get, key="paper_writers",
@@ -1301,6 +1366,35 @@ with tab_sudo:
                 f"{sudo_ui.MAX_MINUTES} λεπτά, χωρίς shells/editors).")
     st.warning("Το dashboard και οι πράκτορες τρέχουν με τον ίδιο χρήστη Unix. Το grant ελέγχεται από το hook "
                "`sudo_gate.py` και το αρχείο ανήκει στον root, αλλά αυτό δεν είναι απομόνωση ασφαλείας (PLAN §7).", icon="⚠️")
+    st.subheader("Αιτήματα άδειας από το terminal")
+
+    @st.fragment(run_every=refresh)
+    def perm_requests():
+        pend = perm_store.pending()
+        if not pend:
+            st.caption("Κανένα αίτημα άδειας από το terminal αυτή τη στιγμή. Όταν ο συντονιστής ζητήσει άδεια, "
+                       "εμφανίζεται εδώ για ~90 δευτερόλεπτα· αν δεν απαντήσεις, ρωτάει κανονικά το terminal.")
+        for pr in pend:
+            with st.container(border=True):
+                left = max(0, int(90 - (time.time() - pr["ts"])))
+                st.markdown(f"**{pr['tool']}** · {pr['description']} · απομένουν ~{left} δευτ.")
+                st.code(pr["detail"] or "(κενό)", language="bash" if pr["tool"] == "Bash" else "text")
+                st.caption(f"φάκελος: `{pr['cwd']}` · {dt.datetime.fromtimestamp(pr['ts']).strftime('%H:%M:%S')}")
+                pc = st.columns(2)
+                if pc[0].button("Έγκριση", key=f"perm_ok_{pr['id']}", type="primary"):
+                    perm_store.decide(pr["id"], True)
+                    st.rerun()
+                if pc[1].button("Απόρριψη", key=f"perm_no_{pr['id']}"):
+                    perm_store.decide(pr["id"], False, "Απορρίφθηκε από τον ερευνητή στο dashboard.")
+                    st.rerun()
+        rec = perm_store.recent(limit=5)
+        if rec:
+            lab = {"approved": "εγκρίθηκε", "denied": "απορρίφθηκε", "timeout": "έληξε (ρώτησε το terminal)"}
+            st.caption("Πρόσφατα: " + " · ".join(
+                f"{dt.datetime.fromtimestamp(r['ts']).strftime('%H:%M')} {r['tool']} {lab.get(r['state'], r['state'])}"
+                for r in rec))
+
+    perm_requests()
     _can_sudo = sudo_ui.sudo_available()
     d = db()
     sreqs = [r for r in d.requests(state="open") if r["scope"] == "sudo"]
@@ -1370,6 +1464,50 @@ with tab_sudo:
                                    for a in aud]), hide_index=True, width="stretch")
     else:
         st.caption("Καμία χρήση ακόμη (`.lab/sudo_audit.jsonl`).")
+
+# ================================================================ extensions (catalog only from .lab/extensions_catalog.json)
+with tab_ext:
+    st.markdown("Προτάσεις skills/plugins/MCP **μόνο** από το αρχείο `.lab/extensions_catalog.json`, που το γεμίζει "
+                "ο συντονιστής μετά από αναζήτηση. Τίποτα δεν εγκαθίσταται από εδώ· το «Πρόσθεσε» στέλνει αίτημα έγκρισης.")
+    cat = ext_catalog.load(ROOT)
+    shown = [c for c in ext_catalog.CATEGORIES if c in cat] + [c for c in cat if c not in ext_catalog.CATEGORIES]
+    if not shown:
+        st.info("δεν υπάρχει ακόμα κατάλογος", icon="🧩")
+    for ci, c in enumerate(shown):
+        st.subheader(c)
+        for ei, e in enumerate(cat[c]):
+            with st.container(border=True):
+                st.markdown(f"**{e['name']}** · {e['kind']} · {e['provider']}")
+                st.write(e["description"])
+                st.caption(f"Κόστος: {e['cost']} · [πηγή]({e['url']})")
+                if st.button("Πρόσθεσε", key=f"ext_add_{ci}_{ei}"):
+                    try:
+                        dd = db()
+                        t_, b_ = ext_catalog.add_request(e)
+                        rid_ = dd.ask("approval", t_, b_, author="researcher", scope="external", options=["approve", "reject"])
+                        dd.close()
+                        st.success(f"Στάλθηκε αίτημα έγκρισης {rid_} (καρτέλα Αποφάσεις).")
+                    except LabError as ex:
+                        st.error(str(ex))
+    st.divider()
+    st.subheader("Ζήτα ένα skill")
+    _dx = db()
+    ext_tid = _dx.ensure_thread(ext_catalog.EXT_THREAD_TITLE, "Αιτήματα αναζήτησης επεκτάσεων και οι απαντήσεις τους.")
+    _dx.close()
+    show_thread(ext_tid, key="ext_chat")
+    edit_box(ext_tid, "ext")
+    ext_in = st.chat_input("Περίγραψε ποιο skill/επέκταση θέλεις… (Enter = αποστολή)", key="ext_composer")
+    if ext_in:
+        try:
+            dd = db()
+            thr = dd.thread(ext_tid)
+            dd.researcher_send(ext_catalog.search_message(ext_in), thread_id=ext_tid,
+                               reply_to=thr[-1]["id"] if thr else None)
+            dd.close()
+            st.toast("Στάλθηκε στον συντονιστή", icon="📨")
+            st.rerun()
+        except (LabError, ValueError) as ex:
+            st.error(str(ex))
 
 # ================================================================ terminal (on demand, localhost only)
 with tab_term:

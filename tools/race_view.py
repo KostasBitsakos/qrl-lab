@@ -97,7 +97,7 @@ def annotate(events):
 LABEL_FALLBACK = 14
 
 
-def lanes(events, now=None, roles=None, window=6 * 3600, max_lanes=10):
+def lanes(events, now=None, roles=None, window=6 * 3600, max_lanes=16):
     """Race lanes: one per subagent run (plus the coordinator when it acted in the last 2 minutes).
 
     Active runs first, then the most recently finished. Each lane: dict(role, name, model, label, start, end,
@@ -152,30 +152,30 @@ CAR = ('<svg class="car" viewBox="0 0 24 12" width="48" height="24" shape-render
 
 CSS = """
 *{box-sizing:border-box}html,body{margin:0;background:#0b0221}
-body{font-family:'Press Start 2P',ui-monospace,'Courier New',monospace;color:#05d9e8;font-size:10px;line-height:1.5}
+body{font-family:'Press Start 2P',ui-monospace,'Courier New',monospace;color:#05d9e8;font-size:9px;line-height:1.5}
 .screen{position:relative;padding:10px;border:3px solid #ff2a6d;box-shadow:0 0 12px #ff2a6d,inset 0 0 18px #3a0a5e;
  background:linear-gradient(#0b0221,#1a0a3a);overflow:hidden}
 .screen:after{content:"";position:absolute;inset:0;pointer-events:none;
  background:repeating-linear-gradient(0deg,rgba(0,0,0,.28) 0,rgba(0,0,0,.28) 1px,transparent 1px,transparent 3px)}
 h1{margin:0 0 8px;font-size:12px;color:#fffb96;text-shadow:0 0 6px #ff2a6d,2px 2px 0 #ff2a6d;letter-spacing:1px}
 .sub{color:#d1f7ff;margin-bottom:8px;font-size:9px}
-.lane{margin-bottom:8px}.hd{display:flex;justify-content:space-between;gap:6px;flex-wrap:wrap;margin-bottom:2px;font-size:9px}
-.role{color:#d1f7ff;overflow-wrap:anywhere}.st{white-space:nowrap}
-.track{position:relative;height:30px;background:#14082e;border-top:2px solid #05d9e8;border-bottom:2px solid #05d9e8}
-.track:before{content:"";position:absolute;left:0;right:34px;top:13px;height:2px;
- background:repeating-linear-gradient(90deg,#fffb96 0 8px,transparent 8px 16px);opacity:.55}
-.finish{position:absolute;right:0;top:0;bottom:0;width:30px;
- background:repeating-conic-gradient(#fff 0 25%,#000 0 50%) 0 0/10px 10px;border-left:2px solid #fff}
-.finish span{position:absolute;left:-1px;top:50%;transform:translateY(-50%);font-size:11px;background:#000;padding:0 2px}
-.runner{position:absolute;top:2px;display:flex;align-items:center;gap:4px;white-space:nowrap}
-.runner .w{color:#fff;text-shadow:0 0 4px currentColor;font-size:9px}
+.road{display:flex;width:100%;overflow-x:auto;border:2px solid #05d9e8;background:#14082e}
+.lane{flex:1 1 0;min-width:84px;border-right:2px dashed #fffb96aa;display:flex;flex-direction:column}
+.lane:last-child{border-right:0}
+.hd{padding:4px 3px;text-align:center;min-height:46px;font-size:8px;overflow-wrap:anywhere}
+.role{display:block;color:#d1f7ff}.st{display:block;white-space:nowrap;margin-top:2px}
+.track{position:relative;height:var(--h,300px);margin:0 auto;width:100%}
+.finish{position:absolute;left:0;right:0;top:0;height:18px;
+ background:repeating-conic-gradient(#fff 0 25%,#000 0 50%) 0 0/10px 10px;border-bottom:2px solid #fff}
+.runner{position:absolute;left:0;right:0;display:flex;flex-direction:column;align-items:center;gap:2px}
+.runner .w{color:#fff;text-shadow:0 0 4px currentColor;font-size:8px;text-align:center;max-width:100%;overflow-wrap:anywhere}
+.car{transform:rotate(-90deg);margin:12px 0}
 .run{animation:bob .35s steps(2) infinite}
 .loop{animation:loop 5s linear infinite,bob .35s steps(2) infinite}
-.parked{right:34px}
-@keyframes bob{50%{transform:translateY(1px)}}
-@keyframes loop{from{left:0}to{left:calc(100% - 200px)}}
+.parked{top:22px}
+@keyframes bob{50%{margin-left:1px}}
+@keyframes loop{from{bottom:0}to{bottom:calc(100% - 100px)}}
 .ok{color:#39ff14}.bad{color:#ff3860}.go{color:#fffb96}
-@media (max-width:420px){body{font-size:8px}.hd,.sub,.runner .w{font-size:8px}}
 @media (prefers-reduced-motion:reduce){.run,.loop{animation:none}}
 """
 
@@ -186,7 +186,11 @@ def _clock(sec):
 
 
 def render(lane_list, now=None):
-    """The complete HTML document for st.components.v1.html. All dynamic text is escaped."""
+    """The complete HTML document for st.components.v1.html. All dynamic text is escaped.
+
+    A vertical road: one lane (column) per agent side by side, cars drive upward to the finish line.
+    The road is as wide as the iframe; every lane keeps at least 84px (horizontal scroll beyond that).
+    """
     esc = html.escape
     active = sum(1 for r in lane_list if r["status"] == "running")
     parts = [f'<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
@@ -195,6 +199,8 @@ def render(lane_list, now=None):
              f'<h1>🏁 QRL GRAND PRIX</h1><div class="sub">{active} στην πίστα · {len(lane_list) - active} τερμάτισαν</div>']
     if not lane_list:
         parts.append('<div class="sub">Η πίστα είναι άδεια. Κανένας πράκτορας δεν τρέχει.</div>')
+    else:
+        parts.append(f'<div class="road" style="--h:{TRACK_H}px">')
     for r in lane_list:
         color = r["color"] if str(r.get("color", "")).startswith("#") and len(r["color"]) in (4, 7) else DEFAULT_COLOR
         who = esc(r["name"] if not r["model"] else f'{r["name"].split(" · ")[0]} · {r["model"]}')
@@ -202,9 +208,9 @@ def render(lane_list, now=None):
         if r["status"] == "running":
             st_html = f'<span class="go">▶ {_clock(r["elapsed"])}</span>'
             if r["progress"] is None:
-                run = f'<div class="runner loop" style="left:0">{CAR.format(c=color)}<span class="w">{word}</span></div>'
+                run = f'<div class="runner loop" style="bottom:0">{CAR.format(c=color)}<span class="w">{word}</span></div>'
             else:
-                run = (f'<div class="runner run" style="left:calc((100% - 200px) * {r["progress"]:.3f})">'
+                run = (f'<div class="runner run" style="bottom:calc((100% - 100px) * {r["progress"]:.3f})">'
                        f'{CAR.format(c=color)}<span class="w">{word}</span></div>')
         else:
             good = r["status"] == "done"
@@ -212,11 +218,16 @@ def render(lane_list, now=None):
             st_html = f'{mark} {_clock(r["elapsed"])}'
             run = f'<div class="runner parked">{CAR.format(c=color)}<span class="w">{word} {mark}</span></div>'
         parts.append(f'<div class="lane"><div class="hd"><span class="role" style="color:{color}">{who}</span>'
-                     f'<span class="st">{st_html}</span></div><div class="track">{run}'
-                     f'<div class="finish"><span>🏁</span></div></div></div>')
+                     f'<span class="st">{st_html}</span></div><div class="track">'
+                     f'<div class="finish"></div>{run}</div></div>')
+    if lane_list:
+        parts.append('</div>')
     parts.append("</div></body></html>")
     return "".join(parts)
 
 
+TRACK_H = 300
+
+
 def height_for(n):
-    return 90 + 62 * max(1, n)
+    return 110 + TRACK_H + 20

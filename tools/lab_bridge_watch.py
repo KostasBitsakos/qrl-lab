@@ -46,6 +46,11 @@ def emit_message(m):
           f"-> handle with: python3 tools/labq.py take {m['id']}", flush=True)
 
 
+def emit_edit(m):
+    print(f"QRL-INBOX edit {m['id']} thread={m['thread_id']}: \"{one_line(m['body'])}\" "
+          f"(the researcher corrected his message; original in message_edits; if you already answered, re-check)", flush=True)
+
+
 def emit_decision(r):
     text = f" note: \"{one_line(r['decision_text'], 400)}\"" if r["decision_text"] else ""
     print(f"QRL-DECISION {r['id']} [{r['kind']}/{r['scope']}] \"{one_line(r['title'], 80)}\" -> {r['state']}{text}",
@@ -67,6 +72,11 @@ def cycle(db, first):
         emit_message(m)
     for r in decs:
         emit_decision(r)
+    edits = db.undelivered_edits()
+    for m in edits:
+        emit_edit(m)
+    if edits:
+        db.mark_edits_delivered([m["id"] for m in edits])
     if msgs or decs:
         db.mark_delivered([m["id"] for m in msgs], [r["id"] for r in decs])
 

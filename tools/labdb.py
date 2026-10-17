@@ -57,6 +57,13 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS ix_messages_thread ON messages(thread_id, ts);
 CREATE INDEX IF NOT EXISTS ix_messages_status ON messages(status);
+CREATE TABLE IF NOT EXISTS message_edits (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  message_id TEXT NOT NULL,
+  ts TEXT NOT NULL,
+  old_body TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_message_edits ON message_edits(message_id, id);
 CREATE TABLE IF NOT EXISTS requests (
   id TEXT PRIMARY KEY,
   ts TEXT NOT NULL,
@@ -151,7 +158,9 @@ class LabDB:
     # column -> type, per table; added idempotently to databases created by older versions
     MIGRATIONS = {
         "messages": {"model": "TEXT", "req_model": "TEXT", "req_effort": "TEXT",
-                     "req_writers": "TEXT", "req_reviewers": "TEXT"},
+                     "req_writers": "TEXT", "req_reviewers": "TEXT",
+                     "edited_at": "TEXT", "edit_count": "INTEGER NOT NULL DEFAULT 0",
+                     "edit_delivered": "INTEGER NOT NULL DEFAULT 0"},
         "requests": {"proposals": "TEXT", "recommended": "INTEGER"},
     }
 
@@ -425,6 +434,45 @@ class LabDB:
                           " delivered_count=delivered_count+1, updated_at=? WHERE id=?", (now(), mid))
             for rid in req_ids:
                 c.execute("UPDATE requests SET decision_delivered=1 WHERE id=?", (rid,))
+
+    # ---------- edits of the researcher's own messages ----------
+    def edit_message(self, mid, new_body, actor="researcher"):
+        """Only the researcher (the dashboard) may edit, and only his own messages. The previous text is kept in
+        message_edits (the first row is the original). Returns True when the text changed."""
+        if actor != "researcher":
+            raise LabError("Μόνο ο ερευνητής μπορεί να επεξεργαστεί τα μηνύματά του.")
+        new_body = (new_body or "").strip()
+        if not new_body:
+            raise LabError("Το μήνυμα δεν μπορεί να μείνει κενό.")
+        with self.tx() as c:
+            m = c.execute("SELECT * FROM messages WHERE id=?", (mid,)).fetchone()
+            if not m:
+                raise LabError(f"Δεν υπάρχει μήνυμα {mid}.")
+            if m["author"] != "researcher":
+                raise LabError("Επεξεργασία επιτρέπεται μόνο σε μηνύματα του ερευνητή.")
+            if new_body == m["body"]:
+                return False
+            t = now()
+            c.execute("INSERT INTO message_edits(message_id, ts, old_body) VALUES (?,?,?)", (mid, t, m["body"]))
+            seen_by_nobody = m["status"] == "new"  # not delivered yet: the delivery itself carries the new text
+            c.execute("UPDATE messages SET body=?, edited_at=?, edit_count=edit_count+1,"
+                      " edit_delivered=CASE WHEN ? THEN edit_count+1 ELSE edit_delivered END WHERE id=?",
+                      (new_body, t, int(seen_by_nobody), mid))
+            self._audit(c, "researcher", "edit", mid, None)
+        return True
+
+    def edit_history(self, mid):
+        return [dict(r) for r in self.conn.execute(
+            "SELECT ts, old_body FROM message_edits WHERE message_id=? ORDER BY id", (mid,))]
+
+    def undelivered_edits(self):
+        return [dict(r) for r in self.conn.execute(
+            "SELECT * FROM messages WHERE author='researcher' AND edit_count>edit_delivered ORDER BY edited_at")]
+
+    def mark_edits_delivered(self, mids):
+        with self.tx() as c:
+            for mid in mids:
+                c.execute("UPDATE messages SET edit_delivered=edit_count WHERE id=?", (mid,))
 
     # ---------- runs ----------
     def runs(self, limit=200):
