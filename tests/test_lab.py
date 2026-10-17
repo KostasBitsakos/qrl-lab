@@ -1508,6 +1508,37 @@ def test_paper_decisions_tab():
     ok("paper tab: filtered decision panel, same decide() path")
 
 
+def test_modreload_and_installed():
+    import modreload
+    import installed_view
+    d = os.path.join(TMP, "modr")
+    os.makedirs(d)
+    sys.path.insert(0, d)
+    f = os.path.join(d, "tmpmod_x.py")
+    open(f, "w").write("A = 1\n")
+    import tmpmod_x
+    cache = {}
+    assert modreload.reload_changed(["tmpmod_x"], cache) == []
+    open(f, "w").write("A = 1\nB = 2\n")
+    os.utime(f, (time.time() + 5, time.time() + 5))
+    assert modreload.reload_changed(["tmpmod_x"], cache) == ["tmpmod_x"] and tmpmod_x.B == 2
+    assert modreload.reload_changed(["tmpmod_x"], cache) == []
+    h = os.path.join(TMP, "home")
+    os.makedirs(os.path.join(h, ".claude/plugins"))
+    json.dump({"plugins": {"codex@openai-codex": [{}]}}, open(os.path.join(h, ".claude/plugins/installed_plugins.json"), "w"))
+    r = os.path.join(TMP, "proj")
+    os.makedirs(os.path.join(r, ".claude/skills/council"))
+    os.makedirs(os.path.join(r, ".claude/agents"))
+    open(os.path.join(r, ".claude/skills/council/SKILL.md"), "w").write("---\nname: council\ndescription: x\n---\nSECRET body\n")
+    open(os.path.join(r, ".claude/agents/foo.md"), "w").write("---\nname: foo\ndescription: does foo\n---\nbody\n")
+    json.dump({"hooks": {"Stop": []}}, open(os.path.join(r, ".claude/settings.json"), "w"))
+    its = installed_view.detect(r, home=h, codex_cmd="definitely-not-a-cmd")
+    kinds = sorted((i["kind"], i["name"]) for i in its)
+    assert kinds == [("agent", "foo"), ("hook", "Stop"), ("plugin", "codex@openai-codex"), ("skill", "council")], kinds
+    assert "SECRET" not in json.dumps(its) and "does foo" in json.dumps(its)
+    ok("modreload + installed_view")
+
+
 if __name__ == "__main__":
     print(f"QRL-Lab tests in {TMP}")
     try:
@@ -1538,6 +1569,7 @@ if __name__ == "__main__":
         test_web_terminal()
         test_paper_plots()
         test_paper_build()
+        test_modreload_and_installed()
         try:
             import streamlit  # noqa: F401
             test_dashboard()

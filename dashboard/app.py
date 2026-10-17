@@ -25,6 +25,13 @@ import streamlit.components.v1 as components
 ROOT = os.environ.get("QRL_LAB_DIR") or os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 os.environ["QRL_LAB_DIR"] = ROOT
 sys.path.insert(0, os.path.join(ROOT, "tools"))
+import modreload  # noqa: E402
+import importlib  # noqa: E402
+_LOCAL_MODS = ["labdb", "file_view", "replytext", "k8s_view", "prom_view", "web_terminal", "sudo_ui", "race_view",
+               "perm_store", "ext_catalog", "summarize_runs", "paper_plots", "paper_build", "uploads", "installed_view"]
+for _n in _LOCAL_MODS:  # first import so they are in sys.modules, then reload those whose file changed
+    importlib.import_module(_n)
+modreload.reload_changed(_LOCAL_MODS)
 from labdb import DECISIONS, PAPER_REVIEWERS, PAPER_THREAD_TITLE, PAPER_WRITERS, LabDB, LabError, map_choice, paper_requests  # noqa: E402
 import file_view  # noqa: E402
 import replytext  # noqa: E402
@@ -35,6 +42,7 @@ import sudo_ui  # noqa: E402
 import race_view  # noqa: E402
 import perm_store  # noqa: E402
 import ext_catalog  # noqa: E402
+import installed_view  # noqa: E402
 import summarize_runs  # noqa: E402
 import paper_plots  # noqa: E402
 import paper_build  # noqa: E402
@@ -1549,6 +1557,13 @@ with tab_sudo:
 
 # ================================================================ extensions (catalog only from .lab/extensions_catalog.json)
 with tab_ext:
+    st.subheader("Εγκατεστημένα")
+    st.caption("Ανιχνεύονται τώρα, μόνο για ανάγνωση (ονόματα και περιγραφές).")
+    _inst = installed_view.detect(ROOT)
+    for _i in range(0, len(_inst), 3):
+        for _col, _it in zip(st.columns(3), _inst[_i:_i + 3]):
+            _col.markdown(installed_view.card_html(_it), unsafe_allow_html=True)
+    st.divider()
     st.markdown("Προτάσεις skills/plugins/MCP **μόνο** από το αρχείο `.lab/extensions_catalog.json`, που το γεμίζει "
                 "ο συντονιστής μετά από αναζήτηση. Τίποτα δεν εγκαθίσταται από εδώ· το «Πρόσθεσε» στέλνει αίτημα έγκρισης.")
     cat = ext_catalog.load(ROOT)
