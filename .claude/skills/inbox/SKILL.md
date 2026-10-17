@@ -12,6 +12,9 @@ description: Handle a researcher message from the QRL-Lab dashboard (a QRL-INBOX
    for `codex` use `codex:codex-rescue` with `--effort <low|medium|high>` (med = medium). Give the subagent the full
    thread (from `labq.py take`), then post its answer (Greek, short) with `--model` set to the model that wrote it
    (e.g. "Haiku 4.5", "Sonnet 5.5", "Opus 5.5", "gpt-6-sol"). `auto` (or no tag) = you decide as usual.
+   **Codex limited** (`.lab/health.json` key `codex` has state `limit`, or a Codex call just failed with a usage
+   limit: pipe its output to `python3 tools/codex_health.py record`): do not call Codex, use Claude instead:
+   reviewer → Sonnet, researcher → `scholar`, quick → Haiku; say so in the reply.
    Effort is a hint for depth: low = short answer, high = careful, verified answer.
    **Paper thread** («Paper — συγγραφή»): the line may carry `[paper writers=<ids> reviewers=<ids>]` (stored as
    `req_writers`/`req_reviewers`). Writer ids: `writer-sonnet`, `writer-opus`, `codex-researcher`; reviewer ids:
@@ -47,4 +50,4 @@ Never leave a taken message without a reply and a final status. Never paste secr
 point to the file instead.
 When you ask the researcher to look at files, write their absolute or `~/` paths (optionally `:line`) so the dashboard renders them as links to the 📁 Αρχεία tab.
 
-At session start also read `.lab/deputy_queue.jsonl` and the posts by `codex` with model «gpt-6-sol · αναπληρωτής» (the read-only deputy that answered while you were unavailable); handle every queued item that needs execution.
+At session start also read `.lab/deputy_queue.jsonl` and the posts by `codex` with model «<gpt-6.1-sol|gpt-6-luna> · αναπληρωτής» (the read-only deputy that answered while you were unavailable); handle every queued item that needs execution.

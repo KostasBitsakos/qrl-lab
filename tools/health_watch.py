@@ -14,6 +14,7 @@ import re
 import subprocess
 import sys
 import time
+import traceback
 
 LAB = os.environ.get("QRL_LAB_DIR") or os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".lab"))
 SESSION = "lab"
@@ -98,6 +99,8 @@ def step(result, lab=LAB, now=None):
     since = now if changed or not prev.get("since") else prev["since"]
     cur = {"state": result["state"], "detail": result["detail"], "line": result["line"], "since": since,
            "checked": now}
+    if prev.get("codex"):  # written by tools/codex_health.py; this watcher only watches the coordinator window
+        cur["codex"] = prev["codex"]
     os.makedirs(lab, exist_ok=True)
     _atomic_write(path, cur)
     if changed:
@@ -108,19 +111,53 @@ def step(result, lab=LAB, now=None):
     return cur
 
 
+def log_error(msg, lab=LAB):
+    """Append to .lab/health_watch.log (the tmux window has vanished twice without a trace, 2026-10-17)."""
+    try:
+        os.makedirs(lab, exist_ok=True)
+        with open(os.path.join(lab, "health_watch.log"), "a", encoding="utf-8") as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} pid={os.getpid()} {msg}\n")
+    except OSError:
+        pass
+
+
+def heartbeat(lab=LAB, now=None):
+    """.lab/health_watch.heartbeat = {"ts", "pid"}; tools/watchdog.sh restarts the window when it goes stale."""
+    try:
+        _atomic_write(os.path.join(lab, "health_watch.heartbeat"),
+                      {"ts": time.time() if now is None else now, "pid": os.getpid()})
+    except OSError:
+        pass
+
+
+def _on_signal(signum, _frame):
+    log_error(f"received signal {signum}, exiting")
+    sys.exit(0)
+
+
 def main():
     once = "--once" in sys.argv
+    if not once:
+        import atexit
+        import signal
+        log_error("started")
+        atexit.register(log_error, "exiting")
+        for s in (signal.SIGTERM, signal.SIGHUP):
+            signal.signal(s, _on_signal)
     while True:
+        heartbeat()
         try:
             cur = step(detect(*sample()))
             try:
                 import deputy  # Codex deputy: file the request / start the window (never fatal)
                 deputy.tick(LAB)
             except Exception as e:
+                log_error(f"deputy tick: {type(e).__name__}: {e}\n{traceback.format_exc()}")
                 print(f"deputy tick warning: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
             if once:
                 print(json.dumps(cur, ensure_ascii=False))
         except Exception as e:  # never die: the next cycle may work
+            log_error(f"{type(e).__name__}: {e}\n{traceback.format_exc()}")
             print(f"health_watch warning: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
         if once:
             return

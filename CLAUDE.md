@@ -22,7 +22,7 @@ at the start of every session, the rest when relevant. The rules in AGENTS.md (i
 ## Dashboard protocol
 - **At the start of every session** (and after a usage-limit pause): run `python3 tools/labq.py pending`, then read
   and handle every open researcher message and decision, oldest first, before anything else (researcher, 2026-10-16).
-- At session start also read `.lab/deputy_queue.jsonl` and the Codex deputy's posts (model «gpt-6-sol · αναπληρωτής»);
+- At session start also read `.lab/deputy_queue.jsonl` and the Codex deputy's posts (model «gpt-6.1-sol · αναπληρωτής» or «gpt-6-luna · αναπληρωτής»);
   queued items need your execution.
 - Questions for the researcher go in the chat or the Decisions tab, with `~/` paths so they render as links.
   Never only in docs files.
@@ -39,6 +39,8 @@ at the start of every session, the rest when relevant. The rules in AGENTS.md (i
   `--effort`: pick the role in `docs/DECISIONS.md` (quick `gpt-6-luna`/low, review `gpt-6.1-sol`/medium, major `gpt-6-astra`/high with a logged reason), then
   `READ-ONLY: research and review only, do not edit files.` unless it is approved implementation work.
 - Before and after every Codex call run `python3 tools/agent_log.py start --agent <role> --model <m> --effort <e> --task "..."` and `agent_log.py end <id> [--status failed]`, with its role (codex-quick, codex-reviewer, codex-researcher, codex-architect).
+- If Codex is limited (banner, `.lab/health.json` key `codex`; report a failure with `tools/codex_health.py record`),
+  route Codex roles to Claude: reviewer → Claude Sonnet, researcher → `scholar`, quick → Haiku.
 - Run Codex calls one at a time (`--resume` follows the latest thread in this repo).
 - Post Codex's answer into the thread with `--author codex --kind contribution`, then your own synthesis as
   coordinator: where you agree, where you disagree, what you recommend. Decisions that change the research go

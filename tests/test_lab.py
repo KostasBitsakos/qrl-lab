@@ -444,7 +444,59 @@ def test_health_watch():
     assert c3["state"] == "ok" and c3["since"] == 200.0
     evs = [json.loads(l) for l in open(os.path.join(lab, "events.jsonl"))]
     assert [e["state"] for e in evs] == ["api_error", "ok"] and all("ts" in e and "hook_event_name" in e for e in evs), evs
-    ok("health_watch: detector table, state file, change events")
+    # codex key survives the watcher's rewrite; log + heartbeat helpers
+    import codex_health as ch
+    ch.record("", "ERROR: You've hit your usage limit. Try again at 3:20 AM.", lab=lab, now=300.0)
+    c4 = hw.step(d("fine", True, "claude"), lab, now=320.0)
+    assert c4["codex"]["state"] == "limit", c4
+    hw.log_error("boom", lab); hw.heartbeat(lab, now=5.0)
+    assert "boom" in open(os.path.join(lab, "health_watch.log")).read()
+    assert json.load(open(os.path.join(lab, "health_watch.heartbeat")))["ts"] == 5.0
+    ok("health_watch: detector table, state file, change events, codex key kept, log, heartbeat")
+
+
+def test_codex_health():
+    import codex_health as ch
+    lab = tempfile.mkdtemp(prefix="cx-", dir=TMP)
+    cases = [("ERROR: You've hit your usage limit. Try again at 3:20 AM.", "3:20 AM"),
+             ("rate limit exceeded, try again in 20 minutes", "20 minutes"),
+             ("usage limit reached; resets at 11pm (UTC)", "11pm (UTC)"),
+             ("Error 429 Too Many Requests", "")]
+    for text, when in cases:
+        r = ch.detect(text, "")
+        assert r and r["state"] == "limit" and r["detail"].rstrip(".") == when, (text, r)
+    assert ch.detect("all good", "warning: something") is None
+    assert ch.record("fine", "", lab=lab) is None and not os.path.exists(os.path.join(lab, "health.json"))
+    r = ch.record("", "usage limit. try again at 3:20 AM", lab=lab, now=10.0)
+    r2 = ch.record("", "usage limit. try again at 3:20 AM", lab=lab, now=20.0)
+    assert r["since"] == r2["since"] == 10.0 and ch.is_limited(lab)
+    ch.mark_ok(lab, now=30.0)
+    assert json.load(open(os.path.join(lab, "health.json")))["codex"]["state"] == "ok" and not ch.is_limited(lab)
+    ok("codex_health: patterns, record, since kept, mark_ok")
+
+
+def test_watchdog():
+    if not shutil.which("tmux"):
+        print("  --  watchdog test skipped (no tmux)"); return
+    sess = f"qrltest{os.getpid()}"
+    wl = tempfile.mkdtemp(prefix="wd-", dir=TMP)
+    os.makedirs(os.path.join(wl, ".lab")); os.makedirs(os.path.join(wl, "tools"))
+    open(os.path.join(wl, "tools", "health_watch.py"), "w").write("import time\ntime.sleep(60)\n")
+    env = dict(os.environ, QRL_LAB_DIR=wl, QRL_TMUX_SESSION=sess)
+    wd = os.path.join(KIT, "tools", "watchdog.sh")
+    wins = lambda: subprocess.run(["tmux", "list-windows", "-t", sess, "-F", "#W"], capture_output=True, text=True).stdout.split()
+    try:
+        assert subprocess.run([wd], env=env).returncode == 0 and not wins(), "no session: nothing happens"
+        subprocess.run(["tmux", "new-session", "-d", "-s", sess, "-n", "coordinator", "sleep 60"], check=True)
+        subprocess.run([wd], env=env); subprocess.run([wd], env=env)  # idempotent
+        assert wins().count("health") == 1 and "coordinator" in wins(), wins()
+        hb = os.path.join(wl, ".lab", "health_watch.heartbeat")
+        open(hb, "w").write("{}"); os.utime(hb, (1, 1))  # stale heartbeat -> window recreated
+        subprocess.run([wd], env=env)
+        assert wins().count("health") == 1 and "stale" in open(os.path.join(wl, ".lab", "watchdog.log")).read()
+    finally:
+        subprocess.run(["tmux", "kill-session", "-t", sess], capture_output=True)
+    ok("watchdog.sh: starts missing window, idempotent, recreates on stale heartbeat")
 
 
 def test_k8s_view():
@@ -839,6 +891,17 @@ def test_dashboard():
     json.dump({"state": "down", "detail": "", "line": "", "since": time.time(), "checked": time.time()}, open(hp, "w"))
     at.run()
     assert any("Ο συντονιστής δεν τρέχει" in e.value for e in at.error)
+    json.dump({"state": "limit", "detail": "2:45am", "line": "x", "since": time.time(), "checked": time.time(),
+               "codex": {"state": "limit", "detail": "3:20 AM", "line": "x", "since": time.time() - 65}}, open(hp, "w"))
+    at.run()
+    errs = [e.value for e in at.error]
+    assert any(v.startswith("Ο συντονιστής σταμάτησε: όριο χρήσης Claude") for v in errs), errs
+    assert any(v.startswith("Codex: όριο χρήσης — ξαναρχίζει 3:20 AM (ώρα VM)") for v in errs), errs
+    json.dump({"state": "ok", "detail": "", "line": "", "since": time.time(), "checked": time.time(),
+               "codex": {"state": "limit", "detail": "", "line": "", "since": time.time()}}, open(hp, "w"))
+    at.run()
+    errs = [e.value for e in at.error]
+    assert any(v.startswith("Codex: όριο χρήσης") for v in errs) and not any(v.startswith("Ο συντονιστής σταμάτησε") for v in errs), errs
     os.remove(hp)
     at.run()
     assert not any("Ο συντονιστής" in e.value and "εδώ και" in e.value for e in at.error), "stale/missing = no banner"
@@ -944,14 +1007,19 @@ def test_deputy():
     assert deputy.cycle(db, lab, health, run=fake) >= 1
     cmd, kw = [c for c in calls if "τι κάνουμε;" in c[1]["input"]][0]
     assert cmd[:4] == ["codex", "exec", "--sandbox", "read-only"] and 'approval_policy="never"' in cmd
-    assert "gpt-6-sol" in cmd and 'model_reasoning_effort="medium"' in cmd and cmd[-1] == "-" and "-C" in cmd
+    assert "gpt-6-luna" in cmd and 'model_reasoning_effort="low"' in cmd and cmd[-1] == "-" and "-C" in cmd, cmd
+    assert "delegate simple sub-tasks" in kw["input"] and "read-only" in cmd
     assert kw["timeout"] == 600 and "Never invent numbers" in kw["input"]
     assert "τι κάνουμε;" in kw["input"] and ".env" not in cmd
     th = db.thread(mid)
-    assert th[-1]["author"] == "codex" and th[-1]["model"] == "gpt-6-sol · αναπληρωτής" and "NEEDS" not in th[-1]["body"]
+    assert th[-1]["author"] == "codex" and th[-1]["model"] == "gpt-6-luna · αναπληρωτής" and "NEEDS" not in th[-1]["body"]
     assert db.message(mid)["status"] == "done"
     assert not os.path.exists(os.path.join(lab, "deputy_queue.jsonl"))
-    ok("deputy: message selection, command construction, answer")
+    mk = lambda t: [{"author": "researcher", "body": t}]
+    assert deputy.choose_model(mk("γεια, τι ώρα είναι;")) == ("gpt-6-luna", "low")
+    assert deputy.choose_model(mk("έλεγξε τον κώδικα του sim")) == ("gpt-6.1-sol", "medium")
+    assert deputy.choose_model(mk("x" * 300)) == ("gpt-6.1-sol", "medium")
+    ok("deputy: message selection, command construction, model choice, answer")
 
     # needs execution: waiting_approval + queue line; a failing codex is queued too
     FAKE["text"] = "Χρειάζεται αλλαγή κώδικα.\nNEEDS_EXECUTION: yes"
@@ -960,9 +1028,14 @@ def test_deputy():
     assert db.message(m4)["status"] == "waiting_approval" and "σε ουρά για τον Claude" in db.thread(m4)[-1]["body"]
     FAKE["rc"] = 1
     m5 = db.researcher_send("ξανά")
+    _fake_ok = fake
+    def fake(cmd, **kw):  # codex fails with a usage limit on stderr
+        r = _fake_ok(cmd, **kw); r.stderr = "ERROR: You've hit your usage limit. Try again at 3:20 AM."; return r
     deputy.cycle(db, lab, health, run=fake)
+    hj = json.load(open(os.path.join(lab, "health.json")))
+    assert hj["codex"]["state"] == "limit" and hj["codex"]["detail"].startswith("3:20 AM"), hj
     q = [json.loads(l) for l in open(os.path.join(lab, "deputy_queue.jsonl"))]
-    assert [e["message"] for e in q] == [m4, m5] and q[1]["reason"] == "codex exit 1", q
+    assert [e["message"] for e in q] == [m4, m5] and q[1]["reason"].startswith("codex exit 1"), q
     assert db.message(m5)["status"] == "waiting_approval"
     ok("deputy: queue writing")
 
@@ -1099,6 +1172,8 @@ if __name__ == "__main__":
         test_agent_log()
         test_uploads()
         test_health_watch()
+        test_codex_health()
+        test_watchdog()
         test_deputy()
         test_voice()
         test_k8s_view()

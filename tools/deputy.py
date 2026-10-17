@@ -23,6 +23,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from labdb import LabDB, LabError  # noqa: E402
 import agent_log  # noqa: E402
+import codex_health  # noqa: E402
 
 KIT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 TITLE_PREFIX = "Να αναλάβει ο Codex"
@@ -31,9 +32,15 @@ DOWN_GRACE = 600
 TIMEOUT = 600
 INTERVAL = float(os.environ.get("QRL_DEPUTY_INTERVAL", "10"))
 ACTOR = "codex-deputy"
-MODEL_LABEL = "gpt-6-sol · αναπληρωτής"
-CODEX_MODEL = "gpt-6-sol"
-CODEX_EFFORT = "medium"
+# Model per message (DECISIONS 2026-10-17): simple/short -> luna, otherwise sol. Both read-only.
+SOL_MODEL, SOL_EFFORT = "gpt-6.1-sol", "medium"
+LUNA_MODEL, LUNA_EFFORT = "gpt-6-luna", "low"
+SIMPLE_MAX_CHARS = 200
+COMPLEX_HINTS = ("κώδικ", "code", "sim", "paper", "review", "έλεγξ", "ανάλυσ", "analy", "σχέδι", "design", "plan",
+                 "literature", "βιβλιογραφ", "bug", "test", "why", "γιατί")
+MODEL_LABEL = "gpt-6.1-sol · αναπληρωτής"  # default / stop note
+CODEX_MODEL = SOL_MODEL
+CODEX_EFFORT = SOL_EFFORT
 MARK = "NEEDS_EXECUTION:"
 OUTAGE_STATES = ("limit", "down")
 BODY = (
@@ -109,6 +116,18 @@ def pick_messages(db):
     return [m for m in db.researcher_open() if m["status"] in ("new", "delivered")]
 
 
+def choose_model(thread):
+    """(model, effort) for the researcher's last message: short and without complexity hints -> luna, else sol."""
+    last = ""
+    for m in thread:
+        if m.get("author") == "researcher":
+            last = m.get("body") or ""
+    low = last.lower()
+    if last and len(last) <= SIMPLE_MAX_CHARS and last.count("\n") < 3 and not any(h in low for h in COMPLEX_HINTS):
+        return LUNA_MODEL, LUNA_EFFORT
+    return SOL_MODEL, SOL_EFFORT
+
+
 def build_prompt(agents_md, thread):
     lines = []
     for m in thread:
@@ -116,15 +135,17 @@ def build_prompt(agents_md, thread):
     return (
         f"{agents_md}\n\n---\nYou are the READ-ONLY deputy coordinator of QRL-Lab while Claude is unavailable. "
         "Read docs/PLAN.md if needed. Never read or print secrets (.env, ~/.ssh, tokens, credentials). "
+        "You may delegate simple sub-tasks (lookups, summaries, formatting) to gpt-6-luna; keep the important reasoning "
+        "on gpt-6.1-sol. You stay read-only either way. "
         "Answer the researcher's last message in Greek, under 300 words, short and direct, with file pointers. "
         "If answering well requires execution (editing files, code changes, running anything, sudo, kubectl, "
         "starting runs), do not attempt it: say what is needed and end your answer with a final line "
         f"'{MARK} yes'. Otherwise end with '{MARK} no'.\n\n--- THREAD ---\n" + "\n\n".join(lines))
 
 
-def build_command(out_file, cwd=KIT):
+def build_command(out_file, cwd=KIT, model=CODEX_MODEL, effort=CODEX_EFFORT):
     return ["codex", "exec", "--sandbox", "read-only", "-c", 'approval_policy="never"',
-            "-c", f'model_reasoning_effort="{CODEX_EFFORT}"', "-m", CODEX_MODEL, "-C", cwd,
+            "-c", f'model_reasoning_effort="{effort}"', "-m", model, "-C", cwd,
             "--skip-git-repo-check", "--ephemeral", "-o", out_file, "-"]
 
 
@@ -150,16 +171,22 @@ def handle_message(db, lab, mid, run=subprocess.run, now=None):
     with open(os.path.join(KIT, "AGENTS.md"), encoding="utf-8") as f:
         agents = f.read()
     prompt = build_prompt(agents, thread)
+    model, effort = choose_model(thread)
+    label = f"{model} · αναπληρωτής"
     out = tempfile.mktemp(prefix="deputy-", suffix=".txt")
-    log_id = agent_log.start("codex-deputy", CODEX_MODEL, CODEX_EFFORT, f"deputy reply to {mid}", m["thread_id"])
+    log_id = agent_log.start("codex-deputy", model, effort, f"deputy reply to {mid}", m["thread_id"])
     answer, needs, err = "", False, ""
     try:
-        r = run(build_command(out), input=prompt, capture_output=True, text=True, timeout=TIMEOUT, cwd=KIT)
+        r = run(build_command(out, model=model, effort=effort), input=prompt, capture_output=True, text=True,
+                timeout=TIMEOUT, cwd=KIT)
         if r.returncode == 0 and os.path.exists(out):
             with open(out, encoding="utf-8") as f:
                 answer, needs = parse_answer(f.read())
+            codex_health.mark_ok(lab)
         else:
             err = f"codex exit {r.returncode}"
+            if codex_health.record(getattr(r, "stdout", "") or "", getattr(r, "stderr", "") or "", lab=lab):
+                err += " (όριο χρήσης Codex)"
     except subprocess.TimeoutExpired:
         err = f"timeout {TIMEOUT}s"
     except OSError as e:
@@ -172,7 +199,7 @@ def handle_message(db, lab, mid, run=subprocess.run, now=None):
         needs, answer = True, f"Ο αναπληρωτής Codex δεν κατάφερε να απαντήσει ({err or 'κενή απάντηση'})."
     if needs:
         answer += "\n\n_(σε ουρά για τον Claude)_"
-    db.post("codex", answer, mid, kind="reply", model=MODEL_LABEL, set_status="waiting_approval" if needs else "done")
+    db.post("codex", answer, mid, kind="reply", model=label, set_status="waiting_approval" if needs else "done")
     if needs:
         queue_append(lab, {"ts": time.time() if now is None else now, "message": mid, "thread": m["thread_id"],
                            "reason": err or "needs execution", "answer": answer[:2000]})

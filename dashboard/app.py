@@ -48,7 +48,7 @@ AGENTS = {
     "codex-reviewer": ("codex-reviewer · gpt-6.1-sol · medium", "#d9480f", "🟠"),
     "codex-researcher": ("codex-researcher · gpt-6.1-sol · medium", "#a8561f", "🟠"),
     "codex-architect": ("codex-architect · gpt-6-astra · high", "#7a2e0e", "🟠"),
-    "codex-deputy": ("codex-deputy · gpt-6-sol · medium", "#b58900", "🟠"),
+    "codex-deputy": ("codex-deputy · gpt-6.1-sol/luna", "#b58900", "🟠"),
     "Explore": ("Explore (Claude Haiku)", "#1baf7a", "🔎"),
     "runner": ("runner (Claude Haiku)", "#eda100", "🏃"),
     "engineer": ("engineer (Claude Sonnet)", "#e87ba4", "🛠️"),
@@ -233,6 +233,20 @@ def health_banner_text(h, now=None):
     return f"{msg} · εδώ και {ago(max(0, int(sec)))}"
 
 
+def codex_banner_text(h, now=None):
+    """Exact Greek message for the Codex state (health.json key `codex`), or None when Codex is fine/unknown."""
+    c = (h or {}).get("codex") or {}
+    if c.get("state") != "limit":
+        return None
+    when = (c.get("detail") or "").strip()
+    tz = "" if "(" in when else " (ώρα VM)"
+    msg = ("⛔ Codex: όριο χρήσης"
+           + (f" — ξαναρχίζει {when}{tz}" if when else " — δεν βρέθηκε ώρα επαναφοράς")
+           + " · οι ρόλοι Codex περνούν σε πράκτορες Claude")
+    sec = (now if now is not None else time.time()) - float(c.get("since", 0) or 0)
+    return f"{msg} · εδώ και {ago(max(0, int(sec)))}"
+
+
 def read_text(path):
     try:
         with open(path, encoding="utf-8") as f:
@@ -295,9 +309,13 @@ with st.sidebar:
 # ---------------------------------------------------------------- health banner (every tab; no inputs inside)
 @st.fragment(run_every=refresh)
 def health_banner():
-    txt = health_banner_text(read_health())
+    h = read_health()
+    txt = health_banner_text(h)
     if txt:
         st.error(txt)
+    ctxt = codex_banner_text(h)
+    if ctxt:
+        st.error(ctxt)
 
 
 health_banner()
