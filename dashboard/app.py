@@ -46,6 +46,7 @@ import ext_catalog  # noqa: E402
 import installed_view  # noqa: E402
 import access  # noqa: E402
 import outage  # noqa: E402
+import changes_view  # noqa: E402
 import summarize_runs  # noqa: E402
 import paper_plots  # noqa: E402
 import paper_build  # noqa: E402
@@ -700,7 +701,7 @@ DEC_TAB = "✅ Αποφάσεις"
 _open_files = "path" in st.query_params and not st.session_state.get("fb_tab_done")
 st.session_state["fb_tab_done"] = True
 TAB_NAMES = [HOME_TAB, DEC_TAB, "🤖 Πράκτορες", "📈 Πειράματα", "⚖️ Council",
-             "🖥️ Πόροι", "☸️ Kubernetes", "📡 Prometheus", "📊 Grafana", FILES_TAB, "📝 Paper", "🎓 Συνέδρια", "🧾 Ιστορικό", "🔐 Sudo", "🧩 Επεκτάσεις", "🔌 Διακοπές", "⌨️ Terminal"]
+             "🖥️ Πόροι", "☸️ Kubernetes", "📡 Prometheus", "📊 Grafana", FILES_TAB, "📝 Paper", "🎓 Συνέδρια", "🧾 Ιστορικό", "🔐 Sudo", "🧩 Επεκτάσεις", "🔌 Διακοπές", "🧭 Ιστορικό αλλαγών", "⌨️ Terminal"]
 # Tab persistence (F5 / shared link): st.tabs(key="tab", bind="query-params") in Streamlit 1.66 keeps the active
 # label in ?tab=... and restores it on load; ?path=... (file deep link) only picks the default when ?tab is absent.
 # The default is part of the tabs widget identity: it must stay the same on every rerun of the session, otherwise the first
@@ -716,10 +717,10 @@ if _side:  # tabs in the left column, the terminal in a right-hand column
         st.iframe(_term_url, height=700)
     with _left:
         (tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_prom, tab_grafana, tab_files, tab_paper, tab_venues,
-         tab_audit, tab_sudo, tab_ext, tab_outage, tab_term) = st.tabs(TAB_NAMES, default=_tab_default, key="tab", bind="query-params")
+         tab_audit, tab_sudo, tab_ext, tab_outage, tab_changes, tab_term) = st.tabs(TAB_NAMES, default=_tab_default, key="tab", bind="query-params")
 else:
     (tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_prom, tab_grafana, tab_files, tab_paper, tab_venues,
-     tab_audit, tab_sudo, tab_ext, tab_outage, tab_term) = st.tabs(TAB_NAMES, default=_tab_default, key="tab", bind="query-params")
+     tab_audit, tab_sudo, tab_ext, tab_outage, tab_changes, tab_term) = st.tabs(TAB_NAMES, default=_tab_default, key="tab", bind="query-params")
 
 # ================================================================ conversation
 with tab_chat:
@@ -1749,6 +1750,22 @@ if _tab_live(tab_outage):  # lazy: hidden tabs do no work
             st.info("Καμία καταγεγραμμένη διακοπή. Η καταγραφή γίνεται από το `tools/boot_recover.sh` (cron @reboot).")
         st.caption("Ο χρόνος «Έπεσε» είναι το τελευταίο heartbeat (ανά λεπτό), άρα ±1 λεπτό. Το είδος προκύπτει από το `last -x` "
                    "(καθαρή επανεκκίνηση ή κατάρρευση/ρεύμα· «unknown» αν δεν είναι σαφές).")
+
+# ================================================================ research change history (docs/changes.json, curated)
+if _tab_live(tab_changes):  # lazy: hidden tabs do no work
+    with tab_changes:
+        try:
+            _chg = changes_view.load()
+        except (OSError, ValueError) as ex:
+            _chg = []
+            st.error(f"Δεν φορτώθηκε το docs/changes.json: {ex}")
+        st.caption("Οι σημαντικές αλλαγές της έρευνας, από την πιο πρόσφατη. Πάτα σε μια γραμμή για την αναλυτική εξήγηση. "
+                   "Τύποι: " + " · ".join(f"{changes_view.BADGE[t]} {t}" for t in changes_view.TYPES))
+        for _it in _chg:
+            with st.expander(changes_view.label(_it)):
+                st.markdown(f"**{_it['summary_el']}**")
+                st.markdown(_it["details_el"])
+                st.caption("Αποδείξεις: " + " · ".join(f"`{r}`" for r in _it["refs"]))
 
 # ================================================================ extensions (catalog only from .lab/extensions_catalog.json)
 if _tab_live(tab_ext):  # lazy: hidden tabs do no work

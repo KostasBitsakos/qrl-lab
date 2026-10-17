@@ -823,6 +823,26 @@ def test_outage_logic_and_dry_run():
     ok("outage: heartbeat parsing, kinds, banner TTL, boot_recover.sh dry run (temp files only)")
 
 
+def test_changes_tab():
+    from streamlit.testing.v1 import AppTest
+    import changes_view
+    items = changes_view.load()
+    assert 12 <= len(items) <= 25 and [i["date"] for i in items] == sorted((i["date"] for i in items), reverse=True)
+    for bad in ([{}], [dict(items[0], type="x")], [dict(items[0], refs=[])], [dict(items[0], date="17/10/2026")], {}):
+        try:
+            changes_view.validate(bad)
+        except changes_view.ChangesError:
+            continue
+        raise AssertionError(f"accepted invalid changes: {bad!r}")
+    at = AppTest.from_file(os.path.join(TMP, "dashboard", "app.py"), default_timeout=60).run()
+    assert not at.exception, at.exception
+    assert any("Ιστορικό αλλαγών" in tb.label for tb in at.tabs)
+    labels = [e.label for e in at.expander]
+    mine = [changes_view.label(i) for i in items]
+    assert all(m in labels for m in mine) and len([l for l in labels if l in mine]) == len(items), labels
+    ok(f"changes tab: {len(items)} items validated, one expander each, newest first")
+
+
 def test_outage_tab():
     from streamlit.testing.v1 import AppTest
     import outage
@@ -1887,6 +1907,7 @@ if __name__ == "__main__":
             test_perm_section_in_sudo_tab()
             test_ext_catalog_and_tab()
             test_outage_tab()
+            test_changes_tab()
         except ImportError:
             print("  --  dashboard test skipped (streamlit not installed in this interpreter)")
         print(f"ALL PASSED ({len(PASSED)})")
