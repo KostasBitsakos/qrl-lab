@@ -8,6 +8,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -1872,10 +1873,232 @@ def test_access_control():
     ok("access: allowlist deny, scrypt PIN, lockout, alert rate limit")
 
 
+def test_models_view():
+    import copy as _copy
+    import models_view as mv
+    ms = {m["id"]: m for m in mv.load()}
+    assert set(ms) == {"derp", "dinos_published", "dinos", "dinos_t", "quantum_sampler", "qc4", "qc1"}, list(ms)
+    assert [ms[i]["status"] for i in ("derp", "dinos_t", "qc4", "qc1")] == ["used", "used", "proposed", "proposed"]
+    assert ms["dinos_t"]["hyperparams"]["epsilon"]["value"].startswith("0.2") and ms["dinos_t"]["blocks"][1]["num_layers"] == 3
+    raw = json.load(open(os.path.join(TMP, "docs", "models.json")))
+    def bad(fn):
+        d = _copy.deepcopy(raw)
+        fn(d)
+        try:
+            mv.validate(d)
+        except mv.ModelsError:
+            return
+        raise AssertionError("invalid models.json accepted")
+    bad(lambda d: d["models"][0].update(status="maybe"))
+    bad(lambda d: d["models"][0].update(sources=[]))
+    bad(lambda d: d["models"][0]["blocks"][1].update(activation="swish"))
+    bad(lambda d: d["models"][0]["blocks"][1].update(units=0))
+    bad(lambda d: d["models"][0]["connections"].append({"from": "nope", "to": "in", "kind": "dense"}))
+    bad(lambda d: d["models"][0]["blocks"].append(d["models"][0]["blocks"][0]))
+    bad(lambda d: d["models"][0]["hyperparams"]["gamma"].pop("src"))
+    bad(lambda d: d["models"][2]["blocks"].insert(1, {"id": "d0", "type": "dense", "role": "dense", "label_el": "x", "units": 4, "activation": "relu", "desc_el": "x", "src": "x"}))
+    # parameter counts and circuit statistics
+    assert mv.stats(ms["derp"])["params"] == 17795 and mv.stats(ms["dinos"])["params"] == 334211
+    q = mv.stats(ms["quantum_sampler"])
+    assert (q["qubits"], q["params"], q["depth"], q["gate_counts"]) == (4, 16, 9, {"RX": 4, "RY": 8, "RZ": 8, "CNOT": 4}), q
+    assert mv.stats(ms["qc4"])["params"] == 19 and mv.stats(ms["qc1"])["params"] == 129
+    # every model renders an SVG with all its block labels, and a self-contained page
+    for m in ms.values():
+        svg = mv.render_svg(m)
+        assert svg.startswith("<svg") and svg.endswith("</svg>") and "NaN" not in svg
+        assert all(mv._e(b["label_el"]) in svg for b in m["blocks"]), m["id"]
+        page, h = mv.render_html(m, m["blocks"][1]["id"])
+        assert "<script>" in page and "overflow-x:auto" in page and h > 300 and "cdn" not in page
+    assert "Double DQN" in mv.render_svg(ms["dinos"]) and "DQN (απλό max" in mv.render_svg(ms["derp"])
+    assert "h_T" in mv.render_svg(ms["dinos"]) and "re-uploading" in mv.render_svg(ms["qc1"])
+    # edits
+    d2 = mv.edit_block(ms["derp"], "fc1", units=64, activation="tanh")
+    assert mv.stats(d2)["params"] == 6 * 64 + 64 + 64 * 128 + 128 + 387 and ms["derp"]["blocks"][1]["units"] == 128
+    d3 = mv.move_block(mv.add_block(d2, "fc1", "dense"), "fc1", 1)
+    assert [b["id"] for b in d3["blocks"]] == ["in", "dense1", "fc1", "fc2", "out"] and len(d3["connections"]) == 4
+    assert len(mv.remove_block(d3, "dense1")["blocks"]) == 4
+    for fn in (lambda: mv.edit_block(ms["derp"], "fc1", units=0), lambda: mv.edit_block(ms["derp"], "fc1", activation="x"),
+               lambda: mv.move_block(ms["derp"], "in", 1), lambda: mv.remove_block(ms["dinos"], "lstm"),
+               lambda: mv.move_block(ms["dinos"], "out", -1), lambda: mv.edit_block(ms["derp"], "fc1", src="x")):
+        try:
+            fn()
+        except mv.ModelsError:
+            continue
+        raise AssertionError("invalid edit accepted")
+    assert mv.stats(mv.edit_hyper(ms["qc1"], "n_qubits", 8))["qubits"] == 8
+    g = mv.edit_block(ms["quantum_sampler"], "v1", gates=["RY"])
+    assert mv.stats(g)["params"] == 12
+    # proposal file goes to the given directory only
+    out = os.path.join(TMP, "props")
+    path = mv.save_proposal(ms["derp"], d2, "my try/1", outdir=out)
+    assert os.path.dirname(path) == out and re.search(r"my-try-1-\d{8}-\d{6}\.json$", path), path
+    doc = json.load(open(path))
+    assert doc["note_el"] == "πρόταση — δεν αλλάζει τον κώδικα" and doc["base_model"] == "derp" and doc["model"]["blocks"][1]["units"] == 64
+    assert any("fc1.units" in c for c in doc["changes"]) and doc["stats"]["params"] == mv.stats(d2)["params"]
+    ok("models_view: schema (7 models, 8 invalid docs rejected), param counts, circuit stats, SVG for each model, edits, proposal file")
+
+
+def test_models_arch_config_equivalence():
+    import importlib.util
+    import models_view as mv
+    try:
+        import torch
+    except ImportError:
+        print("  --  torch missing: arch equivalence skipped")
+        return
+    code = os.path.join(KIT, "code")
+    sys.dont_write_bytecode = True   # keep the real code/ worktree free of __pycache__
+    spec = importlib.util.spec_from_file_location("arch_t", os.path.join(code, "models", "arch.py"))
+    arch = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(arch)
+    def imp(name, rel):
+        sp = importlib.util.spec_from_file_location(name, os.path.join(code, "sim", "timeseries", "Pytorch", rel))
+        mod = importlib.util.module_from_spec(sp)
+        sp.loader.exec_module(mod)
+        return mod
+    dense, lstm = imp("net_dense", "dense/network.py"), imp("net_lstm", "lstm_transfer/networks.py")
+    pc = lambda n: sum(p.numel() for p in n.parameters())  # noqa: E731
+    torch.manual_seed(7); a = dense.MyDenseNet(6, 128, 3)
+    torch.manual_seed(7); b = arch.build(arch.load_config("derp"))
+    x = torch.randn(9, 6)
+    assert pc(a) == pc(b) == 17795 and torch.equal(a(x), b(x)) and list(a.state_dict()) == list(b.state_dict())
+    for name in ("dinos", "dinos_t"):
+        torch.manual_seed(7); a = lstm.myLSTM(6, 128, 3, 3)
+        torch.manual_seed(7); b = arch.build(arch.load_config(name))
+        x = torch.randn(4, 10, 6)
+        assert pc(a) == pc(b) == 334211 and torch.equal(a(x), b(x)) and list(a.state_dict()) == list(b.state_dict()), name
+    # docs/models.json and the committed default configs describe the same architecture
+    for m in mv.load():
+        if m.get("config_name"):
+            assert mv.arch_config(m) == arch.load_config(m["config_name"]), m["id"]
+    # an edited config builds and has the parameter count the dashboard shows
+    m = {x["id"]: x for x in mv.load()}["dinos"]
+    e = mv.add_block(mv.edit_block(mv.edit_block(m, "lstm", units=64, num_layers=2), "out", activation="tanh"), "lstm", "dense")
+    cfg = mv.arch_config(e)
+    os.environ["QRL_CODE_DIR"] = code
+    try:
+        errs = mv.validate_arch(cfg)
+        bad_errs = [mv.validate_arch(b) for b in (dict(cfg, hidden_size=0), dict(cfg, head=[{"units": 4, "activation": "swish"}]),
+                                                  dict(cfg, kind="gru"), dict(cfg, output_size=-1))]
+    finally:
+        os.environ.pop("QRL_CODE_DIR", None)
+    assert errs == [] and all(bad_errs), (errs, bad_errs)
+    assert True and pc(arch.build(cfg)) == mv.stats(e)["params"]
+    assert arch.build(cfg)(torch.randn(2, 10, 6)).shape == (2, 3)
+    ok("config-driven nets: same params and forward output as MyDenseNet/myLSTM for a fixed seed; edited config builds; invalid configs rejected")
+
+
+def test_models_apply_to_code():
+    import models_view as mv
+    repo = os.path.join(TMP, "coderepo")
+    os.makedirs(os.path.join(repo, "models", "configs"))
+    shutil.copy(os.path.join(KIT, "code", "models", "arch.py"), os.path.join(repo, "models", "arch.py"))
+    shutil.copy(os.path.join(KIT, "code", "models", "configs", "derp.json"), os.path.join(repo, "models", "configs", "derp.json"))
+    def git(*a, cwd=repo):
+        r = subprocess.run(["git", "-C", cwd, *a], capture_output=True, text=True)
+        assert r.returncode == 0, (a, r.stderr)
+        return r.stdout.strip()
+    git("init", "-q", "-b", "qrl-dev"); git("config", "user.name", "Tester"); git("config", "user.email", "t@example.org")
+    git("add", "."); git("commit", "-q", "-m", "init"); git("branch", "other")
+    os.environ["QRL_CODE_DIR"] = repo
+    try:
+        m = {x["id"]: x for x in mv.load()}["derp"]
+        e = mv.edit_block(m, "fc1", units=64)
+        head0, status0 = git("rev-parse", "HEAD"), git("status", "--porcelain")
+        assert sorted(mv.list_branches()) == ["other", "qrl-dev"]
+        # new branch: plumbing, the checked-out branch and working tree stay untouched
+        p = mv.plan_apply(e, new_branch="model-edit-derp-64", base="qrl-dev")
+        assert p["ok"] and "-      \"units\": 128" in p["diff"] and "+      \"units\": 64" in p["diff"] and "units" in p["summary"], p
+        assert p["message"].splitlines()[0].startswith("Model edit from dashboard: derp ") and "Claude-Session:" in p["message"]
+        sha = mv.apply_commit(p)
+        assert git("rev-parse", "model-edit-derp-64") == sha and git("rev-parse", "HEAD") == head0 and git("status", "--porcelain") == status0
+        assert git("branch", "--show-current") == "qrl-dev"
+        assert json.loads(git("show", "model-edit-derp-64:models/configs/derp.json"))["layers"][0]["units"] == 64
+        assert json.loads(git("show", "qrl-dev:models/configs/derp.json"))["layers"][0]["units"] == 128
+        body = git("log", "-1", "--format=%an <%ae>|%B", "model-edit-derp-64")
+        assert body.startswith("Tester <t@example.org>|Model edit from dashboard: derp") and "Co-Authored-By: Claude Opus 5.5" in body
+        assert git("diff", "--name-only", "qrl-dev", "model-edit-derp-64") == "models/configs/derp.json"
+        # refusals
+        assert not mv.plan_apply(e, new_branch="model-edit-derp-64", base="qrl-dev")["ok"]          # exists
+        assert not mv.plan_apply(e, new_branch="bad name~", base="qrl-dev")["ok"]                   # invalid ref
+        assert not mv.plan_apply(e, new_branch="x", base="nope")["ok"]                              # unknown base
+        assert not mv.plan_apply(m, branch="qrl-dev")["ok"]                                         # no change
+        assert not mv.plan_apply({**e, "config_name": None}, branch="other")["ok"]                  # not mapped
+        assert not mv.plan_apply(mv.edit_hyper(e, "gamma", 0.9) and {**e, "blocks": [dict(b, units=0) if b["id"] == "fc1" else b for b in e["blocks"]]}, branch="other")["ok"]
+        for outside in ("/home/ubuntu/simulations", os.path.expanduser("~/simulations")):
+            assert not mv.plan_apply(e, branch="other", repo=outside)["ok"]
+        try:
+            mv.apply_commit(mv.plan_apply(m, branch="qrl-dev"))
+        except mv.ModelsError:
+            pass
+        else:
+            raise AssertionError("committed a refused plan")
+        # running run: warning for a branch nobody has checked out, refusal for the checked-out one
+        run = [{"run_id": "R-1-e1-a1", "status": "running"}]
+        pw = mv.plan_apply(e, branch="other", running=run)
+        assert pw["ok"] and any("R-1-e1-a1" in w for w in pw["warnings"])
+        assert any("R-1-e1-a1" in x for x in mv.plan_apply(e, branch="qrl-dev", running=run)["errors"])
+        assert mv.running_runs([{"status": "done"}, {"status": "starting", "run_id": "a"}]) == [{"status": "starting", "run_id": "a"}]
+        # existing, not checked-out branch: plumbing with compare-and-swap
+        old_other = git("rev-parse", "other")
+        sha2 = mv.apply_commit(mv.plan_apply(e, branch="other"))
+        assert git("rev-parse", "other") == sha2 != old_other and git("rev-parse", "other~1") == old_other and git("rev-parse", "HEAD") == head0
+        # checked-out branch: refused while dirty, committed (only our path) when clean
+        open(os.path.join(repo, "models", "arch.py"), "a").write("# dirty\n")
+        pd_ = mv.plan_apply(e, branch="qrl-dev")
+        assert not pd_["ok"] and any("μη committed" in x for x in pd_["errors"])
+        git("checkout", "--", "models/arch.py")
+        open(os.path.join(repo, "untracked.txt"), "w").write("x")          # untracked files do not block and are not committed
+        sha3 = mv.apply_commit(mv.plan_apply(e, branch="qrl-dev"))
+        assert git("rev-parse", "HEAD") == sha3 and git("show", "--name-only", "--format=", "HEAD") == "models/configs/derp.json"
+        assert git("branch", "--show-current") == "qrl-dev" and "untracked.txt" in git("status", "--porcelain")
+    finally:
+        os.environ.pop("QRL_CODE_DIR", None)
+    ok("apply to code: new branch via plumbing (checkout untouched), CAS on existing branch, dirty/running/invalid/outside-repo refused, trailers")
+
+
+def test_models_tab():
+    from streamlit.testing.v1 import AppTest
+    import models_view as mv
+    os.environ["QRL_PROPOSALS_DIR"] = os.path.join(TMP, "props_tab")
+    try:
+        at = AppTest.from_file(os.path.join(TMP, "dashboard", "app.py"), default_timeout=90).run()
+        assert not at.exception, at.exception
+        assert any("Μοντέλα" in tb.label for tb in at.tabs)
+        assert any("πρόταση — δεν αλλάζει τον κώδικα" in i.value for i in at.info)
+        assert any(m.value.startswith("## DERP") for m in at.markdown) and any("## QC1" in m.value for m in at.markdown)
+        assert any("προτεινόμενο — δεν έχει υλοποιηθεί" in m.value for m in at.markdown)
+        at.radio(key="mdl_sel_derp").set_value("fc1").run()
+        at.number_input(key="mdl_0_derp_fc1_u").set_value(64).run()
+        assert not at.exception, at.exception
+        assert at.session_state["mdl_ed"]["derp"]["blocks"][1]["units"] == 64
+        at.selectbox(key="mdl_0_derp_fc1_a").set_value("tanh").run()
+        assert at.session_state["mdl_ed"]["derp"]["blocks"][1]["activation"] == "tanh"
+        at.button(key="mdl_add_0_derp").click().run()
+        assert len(at.session_state["mdl_ed"]["derp"]["blocks"]) == 5, at.session_state["mdl_ed"]["derp"]["blocks"]
+        at.button(key="mdl_save_0_derp").click().run()
+        files = os.listdir(os.environ["QRL_PROPOSALS_DIR"])
+        assert len(files) == 1 and files[0].startswith("derp-") and any("δεν αλλάζει τον κώδικα" in s.value for s in at.success)
+        saved = json.load(open(os.path.join(os.environ["QRL_PROPOSALS_DIR"], files[0])))
+        assert saved["model"]["blocks"][1]["units"] == 64 and len(saved["model"]["blocks"]) == 5
+        # quantum edit and reset
+        at.number_input(key="mdl_0_qc1_nq").set_value(8).run()
+        assert at.session_state["mdl_ed"]["qc1"]["hyperparams"]["n_qubits"]["value"] == 8
+        at.button(key="mdl_reset_0_derp").click().run()
+        assert not at.exception and at.session_state["mdl_ed"]["derp"]["blocks"][1]["units"] == 128
+        assert not os.path.exists(os.path.join(KIT, "docs", "model_proposals", files[0]))
+    finally:
+        os.environ.pop("QRL_PROPOSALS_DIR", None)
+    ok("models tab: renders all models, edits (units, activation, add layer, qubits), proposal saved to the tmp dir, reset")
+
+
 if __name__ == "__main__":
     print(f"QRL-Lab tests in {TMP}")
     try:
         test_message_round_trip()
+        test_models_view()
+        test_models_arch_config_equivalence()
+        test_models_apply_to_code()
         test_model_label()
         test_routing_tags()
         test_paper_selections()
@@ -1930,6 +2153,7 @@ if __name__ == "__main__":
             test_ext_catalog_and_tab()
             test_outage_tab()
             test_changes_tab()
+            test_models_tab()
         except ImportError:
             print("  --  dashboard test skipped (streamlit not installed in this interpreter)")
         print(f"ALL PASSED ({len(PASSED)})")

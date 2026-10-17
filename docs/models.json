@@ -1,0 +1,240 @@
+{
+ "version": 1,
+ "note_el": "Προδιαγραφές εξαγμένες από τον πραγματικό κώδικα (read-only). Κάθε μέγεθος έχει δείκτη αρχείο:γραμμή. Τα μοντέλα με status «proposed» προέρχονται από το docs/PLAN.md και δεν έχουν υλοποιηθεί: οι διαστάσεις τους είναι ενδεικτικές.",
+ "models": [
+  {
+   "id": "derp",
+   "name": "DERP (dense DDQN)",
+   "status": "used",
+   "kind": "classical",
+   "config_name": "derp",
+   "desc_el": "Πλήρως συνδεδεμένο δίκτυο (MLP) πάνω στο τελευταίο διάνυσμα παρατήρησης (6 τιμές, χωρίς παράθυρο). Δύο αντίγραφα: online και target. Το target παίρνει αντίγραφο των βαρών μετά από ΚΑΘΕ replay (δηλ. σχεδόν ταυτίζεται με το online) και η εκτίμηση στόχου είναι απλό max του target, όχι Double-DQN argmax.",
+   "sources": [
+    {"path": "code/sim/timeseries/Pytorch/dense/network.py", "lines": "4-18", "note": "MyDenseNet: fc1 ReLU fc2 ReLU fc3"},
+    {"path": "code/sim/timeseries/Pytorch/dense/ddqnagent.py", "lines": "10-31", "note": "hyper-parameters, online/target"},
+    {"path": "code/experiments/dinos_simv2/agents.py", "lines": "52-59", "note": "make_derp, agent sees only window[-1]"}
+   ],
+   "hyperparams": {
+    "batch_size": {"value": 16, "src": "code/experiments/dinos_simv2/train_eval.py:1169"},
+    "gamma": {"value": 0.95, "src": "code/sim/timeseries/Pytorch/dense/ddqnagent.py:16"},
+    "replay_size": {"value": 500, "src": "code/sim/timeseries/Pytorch/dense/ddqnagent.py:15"},
+    "target_sync_every": {"value": 1, "src": "code/sim/timeseries/Pytorch/dense/ddqnagent.py:86", "note": "σε replay() κλήσεις"},
+    "lr": {"value": 0.0001, "src": "code/sim/timeseries/Pytorch/dense/ddqnagent.py:20"},
+    "epsilon": {"value": "1.0 → 0.01, decay 0.995", "src": "code/sim/timeseries/Pytorch/dense/ddqnagent.py:17-19"},
+    "double_dqn": {"value": false, "src": "code/sim/timeseries/Pytorch/dense/ddqnagent.py:65"},
+    "loss": {"value": "SmoothL1 (Huber)", "src": "code/sim/timeseries/Pytorch/dense/ddqnagent.py:26"},
+    "actions": {"value": "3: -1 / 0 / +1 pod", "src": "code/sim_v2/env.py:33"}
+   },
+   "blocks": [
+    {"id": "in", "type": "input", "role": "input", "label_el": "Είσοδος", "units": 6, "window": 1, "activation": "linear",
+     "features": ["completed_ops", "cpu_pct", "p95_ms", "failed_per_s", "ready", "pending"],
+     "desc_el": "6 κανονικοποιημένα χαρακτηριστικά του τελευταίου βήματος.", "src": "code/experiments/dinos_simv2/adapter.py:34-38"},
+    {"id": "fc1", "type": "dense", "role": "dense", "label_el": "Κρυφό 1", "units": 128, "activation": "relu",
+     "desc_el": "Linear 6→128 και ReLU.", "src": "code/sim/timeseries/Pytorch/dense/network.py:7-8"},
+    {"id": "fc2", "type": "dense", "role": "dense", "label_el": "Κρυφό 2", "units": 128, "activation": "relu",
+     "desc_el": "Linear 128→128 και ReLU.", "src": "code/sim/timeseries/Pytorch/dense/network.py:9-10"},
+    {"id": "out", "type": "output", "role": "output", "label_el": "Q-values", "units": 3, "activation": "linear",
+     "desc_el": "Linear 128→3, χωρίς ενεργοποίηση: μία τιμή Q ανά δράση (-1, 0, +1 pod).", "src": "code/sim/timeseries/Pytorch/dense/network.py:10"}
+   ],
+   "connections": [
+    {"from": "in", "to": "fc1", "kind": "dense", "label_el": "πλήρως συνδεδεμένο"},
+    {"from": "fc1", "to": "fc2", "kind": "dense", "label_el": "πλήρως συνδεδεμένο"},
+    {"from": "fc2", "to": "out", "kind": "dense", "label_el": "πλήρως συνδεδεμένο"}
+   ]
+  },
+  {
+   "id": "dinos_published",
+   "name": "DInos (δημοσιευμένη εκδοχή DDQN-LSTM)",
+   "status": "used",
+   "kind": "classical",
+   "desc_el": "Το δίκτυο του DInos όπως δημοσιεύτηκε: LSTM 3 στρωμάτων × 128 κελιά πάνω σε παράθυρο 10 βημάτων και ένα Linear στο τέλος. Στην αρχική εκδοχή η κρυφή κατάσταση (h, c) κουβαλιέται ανάμεσα στις κλήσεις, το target αντιγράφεται μετά από κάθε replay και ο στόχος είναι απλό max του target (όχι πραγματικό Double-DQN). Αυτό δεν είναι το μοντέλο που τρέχει στο Sim v2 (βλ. επόμενο).",
+   "sources": [
+    {"path": "~/simulations/redisk8s/timeseries/Pytorch/lstm_transfer/networks.py", "lines": "4-20", "note": "myLSTM (self.hidden carried)"},
+    {"path": "~/simulations/redisk8s/timeseries/Pytorch/lstm_transfer/agentHuber.py", "lines": "8-92", "note": "DDQNAgentLSTM, replay, sync at line 91"},
+    {"path": "~/simulations/redisk8s/timeseries/Pytorch/lstm_transfer/lstm_transfer.py", "lines": "136-139", "note": "state 6, actions 3, window 10, fine-tune batch 16"}
+   ],
+   "hyperparams": {
+    "batch_size": {"value": 16, "src": "~/simulations/redisk8s/timeseries/Pytorch/lstm_transfer/lstm_transfer.py:139"},
+    "gamma": {"value": 0.98, "src": "~/simulations/redisk8s/timeseries/Pytorch/lstm_transfer/agentHuber.py:14"},
+    "replay_size": {"value": 5000, "src": "~/simulations/redisk8s/timeseries/Pytorch/lstm_transfer/agentHuber.py:13"},
+    "target_sync_every": {"value": 1, "src": "~/simulations/redisk8s/timeseries/Pytorch/lstm_transfer/agentHuber.py:91", "note": "σε replay() κλήσεις"},
+    "lr": {"value": 5e-05, "src": "~/simulations/redisk8s/timeseries/Pytorch/lstm_transfer/agentHuber.py:18"},
+    "epsilon": {"value": "1.0 → 0.1, decay 0.995", "src": "~/simulations/redisk8s/timeseries/Pytorch/lstm_transfer/agentHuber.py:15-17"},
+    "double_dqn": {"value": false, "src": "~/simulations/redisk8s/timeseries/Pytorch/lstm_transfer/agentHuber.py:69"},
+    "loss": {"value": "SmoothL1 (Huber)", "src": "~/simulations/redisk8s/timeseries/Pytorch/lstm_transfer/agentHuber.py:24"},
+    "actions": {"value": "3: -1 / 0 / +1 pod", "src": "code/sim_v2/env.py:33"}
+   },
+   "blocks": [
+    {"id": "in", "type": "input", "role": "input", "label_el": "Παράθυρο", "units": 6, "window": 10, "activation": "linear",
+     "features": ["completed_ops", "cpu_pct", "p95_ms", "failed_per_s", "ready", "pending"],
+     "desc_el": "10 τελευταία βήματα × 6 χαρακτηριστικά.", "src": "~/simulations/redisk8s/timeseries/Pytorch/lstm_transfer/lstm_transfer.py:136"},
+    {"id": "lstm", "type": "lstm", "role": "recurrent", "label_el": "LSTM", "units": 128, "num_layers": 3, "activation": "σ/tanh",
+     "desc_el": "nn.LSTM, 3 στρώματα, 128 κρυφές μονάδες, batch_first. Κάθε στρώμα έχει κρυφή κατάσταση h και κατάσταση κελιού c. Οι πύλες (forget, input, output) χρησιμοποιούν σ και το υποψήφιο περιεχόμενο tanh (σταθερά).",
+     "src": "~/simulations/redisk8s/timeseries/Pytorch/lstm_transfer/networks.py:9"},
+    {"id": "out", "type": "output", "role": "output", "label_el": "Q-values", "units": 3, "activation": "linear",
+     "desc_el": "Linear 128→3 πάνω στην έξοδο του τελευταίου χρονικού βήματος.", "src": "~/simulations/redisk8s/timeseries/Pytorch/lstm_transfer/networks.py:10,19"}
+   ],
+   "connections": [
+    {"from": "in", "to": "lstm", "kind": "sequence", "label_el": "ακολουθία 10 βημάτων"},
+    {"from": "lstm", "to": "lstm", "kind": "recurrent", "label_el": "h, c → επόμενο βήμα (στο δημοσιευμένο: και ανάμεσα σε κλήσεις)"},
+    {"from": "lstm", "to": "out", "kind": "dense", "label_el": "h του τελευταίου βήματος"}
+   ]
+  },
+  {
+   "id": "dinos",
+   "name": "DInos στο Sim v2 (DDQN-LSTM, διορθωμένο)",
+   "status": "used",
+   "kind": "classical",
+   "config_name": "dinos",
+   "desc_el": "Ίδιο δίκτυο με το DInos, όπως το τρέχει το Sim v2 (agent lstm_scratch, ή dinos_t με προεκπαιδευμένα βάρη). Διορθώσεις (legacy=False): μηδενική αρχική κατάσταση σε κάθε forward, πραγματικό Double DQN (η online διαλέγει την δράση, το target την αποτιμά), batched ενημέρωση και συγχρονισμός του target κάθε 100 replay.",
+   "sources": [
+    {"path": "code/sim/timeseries/Pytorch/lstm_transfer/networks.py", "lines": "17-18,25-29", "note": "nn.LSTM + Linear, zero initial state"},
+    {"path": "code/sim/timeseries/Pytorch/lstm_transfer/agentHuber.py", "lines": "9-31,65-100", "note": "agent, Double-DQN targets, sync every 100 replays"},
+    {"path": "code/experiments/dinos_simv2/adapter.py", "lines": "34-38", "note": "WINDOW 10, 6 features, 3 actions, REWARD_SCALE 0.02"},
+    {"path": "code/experiments/dinos_simv2/train_eval.py", "lines": "1169-1170", "note": "batch 16, replay every step"}
+   ],
+   "hyperparams": {
+    "batch_size": {"value": 16, "src": "code/experiments/dinos_simv2/train_eval.py:1169"},
+    "gamma": {"value": 0.98, "src": "code/sim/timeseries/Pytorch/lstm_transfer/agentHuber.py:21"},
+    "replay_size": {"value": 5000, "src": "code/sim/timeseries/Pytorch/lstm_transfer/agentHuber.py:20"},
+    "target_sync_every": {"value": 100, "src": "code/sim/timeseries/Pytorch/lstm_transfer/agentHuber.py:10,91", "note": "σε replay() κλήσεις"},
+    "lr": {"value": 5e-05, "src": "code/sim/timeseries/Pytorch/lstm_transfer/agentHuber.py:25"},
+    "epsilon": {"value": "1.0 → 0.1, decay 0.995", "src": "code/sim/timeseries/Pytorch/lstm_transfer/agentHuber.py:22-24"},
+    "double_dqn": {"value": true, "src": "code/sim/timeseries/Pytorch/lstm_transfer/agentHuber.py:95-99"},
+    "loss": {"value": "SmoothL1 (Huber)", "src": "code/sim/timeseries/Pytorch/lstm_transfer/agentHuber.py:31"},
+    "actions": {"value": "3: -1 / 0 / +1 pod", "src": "code/sim_v2/env.py:33"}
+   },
+   "blocks": [
+    {"id": "in", "type": "input", "role": "input", "label_el": "Παράθυρο", "units": 6, "window": 10, "activation": "linear",
+     "features": ["completed_ops", "cpu_pct", "p95_ms", "failed_per_s", "ready", "pending"],
+     "desc_el": "10 τελευταία βήματα × 6 κανονικοποιημένα χαρακτηριστικά του Sim v2.", "src": "code/experiments/dinos_simv2/adapter.py:34-35"},
+    {"id": "lstm", "type": "lstm", "role": "recurrent", "label_el": "LSTM", "units": 128, "num_layers": 3, "activation": "σ/tanh",
+     "desc_el": "nn.LSTM, 3 στρώματα × 128, batch_first. Σε κάθε forward οι h και c ξεκινούν από μηδέν.",
+     "src": "code/sim/timeseries/Pytorch/lstm_transfer/networks.py:17"},
+    {"id": "out", "type": "output", "role": "output", "label_el": "Q-values", "units": 3, "activation": "linear",
+     "desc_el": "Linear 128→3 πάνω στο τελευταίο χρονικό βήμα.", "src": "code/sim/timeseries/Pytorch/lstm_transfer/networks.py:18,28"}
+   ],
+   "connections": [
+    {"from": "in", "to": "lstm", "kind": "sequence", "label_el": "ακολουθία 10 βημάτων"},
+    {"from": "lstm", "to": "lstm", "kind": "recurrent", "label_el": "h, c → επόμενο βήμα"},
+    {"from": "lstm", "to": "out", "kind": "dense", "label_el": "h του τελευταίου βήματος"}
+   ]
+  },
+  {
+   "id": "dinos_t",
+   "extends": "dinos",
+   "name": "DInos+T (με μεταφορά, modelCPU_5.pth)",
+   "status": "used",
+   "kind": "classical",
+   "config_name": "dinos_t",
+   "desc_el": "Ίδια αρχιτεκτονική με το DInos στο Sim v2, αλλά τα βάρη του online και του target ξεκινούν από το προεκπαιδευμένο modelCPU_5.pth (agent dinos_t, --pretrained 5) και το ε ξεκινά από 0.2.",
+   "extra_sources": [
+    {"path": "code/sim/timeseries/Pytorch/lstm_transfer/agentHuber.py", "lines": "37-42", "note": "load_state_dict of pretrained model, epsilon 0.2"},
+    {"path": "code/experiments/dinos_simv2/explore_w0.json", "lines": "26", "note": "pretrained: 5"}
+   ],
+   "hyperparams_override": {
+    "epsilon": {"value": "0.2 → 0.1, decay 0.995 (μετά τη φόρτωση)", "src": "code/sim/timeseries/Pytorch/lstm_transfer/agentHuber.py:41"}
+   },
+   "block_overrides": {
+    "lstm": {"desc_el": "Ίδιο LSTM· τα βάρη φορτώνονται από modelCPU_5.pth (προεκπαίδευση στο παλιό περιβάλλον)."}
+   }
+  },
+  {
+   "id": "quantum_sampler",
+   "name": "Κβαντικός sampler εξερεύνησης (παλιό πείραμα, 4 qubits)",
+   "status": "used",
+   "kind": "quantum",
+   "desc_el": "Το μόνο κβαντικό κύκλωμα που υπάρχει στον κώδικα: 4 qubits, AngleEmbedding των 4 πρώτων χαρακτηριστικών, δύο επίπεδα περιστροφών RY/RZ και ένας δακτύλιος CNOT ανάμεσα. Οι 16 πιθανότητες που βγαίνουν χρησιμοποιούνται ΜΟΝΟ για να διαλέξουν τυχαία δράση όταν το ε-greedy εξερευνά, μετά από 200 βήματα warm-up. Δεν είναι Q-συνάρτηση. Δεν χρησιμοποιείται στο Sim v2.",
+   "sources": [
+    {"path": "code/sim/timeseries/Pytorch/Quantum/agentHuber.py", "lines": "12-34", "note": "quantum_sampler (default.qubit, 4 wires)"},
+    {"path": "code/sim/timeseries/Pytorch/Quantum/agentHuber.py", "lines": "51,83-98", "note": "16 weights, used only in exploration after warmup"}
+   ],
+   "hyperparams": {
+    "n_qubits": {"value": 4, "src": "code/sim/timeseries/Pytorch/Quantum/agentHuber.py:13"},
+    "device": {"value": "default.qubit", "src": "code/sim/timeseries/Pytorch/Quantum/agentHuber.py:13"},
+    "warmup_steps": {"value": 200, "src": "code/sim/timeseries/Pytorch/Quantum/agentHuber.py:38"}
+   },
+   "blocks": [
+    {"id": "pre", "type": "pre", "role": "classical_pre", "label_el": "Προεπεξεργασία", "desc_el": "state[-1][:4]: τα 4 πρώτα χαρακτηριστικά του τελευταίου βήματος.", "src": "code/sim/timeseries/Pytorch/Quantum/agentHuber.py:89"},
+    {"id": "enc", "type": "encoding", "role": "q_encoding", "label_el": "Κωδικοποίηση", "gates": ["RX"], "desc_el": "qml.AngleEmbedding (προεπιλεγμένη περιστροφή RX), μία γωνία ανά qubit.", "src": "code/sim/timeseries/Pytorch/Quantum/agentHuber.py:18"},
+    {"id": "v1", "type": "variational", "role": "q_variational", "label_el": "Παραμετρικό 1", "gates": ["RY", "RZ"], "desc_el": "RY(w[i]) και RZ(w[i+4]) σε κάθε qubit.", "src": "code/sim/timeseries/Pytorch/Quantum/agentHuber.py:21-23"},
+    {"id": "ent", "type": "entangle", "role": "q_entangle", "label_el": "Εμπλοκή", "pattern": "ring", "desc_el": "CNOT(i, (i+1) mod 4): δακτύλιος.", "src": "code/sim/timeseries/Pytorch/Quantum/agentHuber.py:26-27"},
+    {"id": "v2", "type": "variational", "role": "q_variational", "label_el": "Παραμετρικό 2", "gates": ["RY", "RZ"], "desc_el": "RY(w[i+8]) και RZ(w[i+12]).", "src": "code/sim/timeseries/Pytorch/Quantum/agentHuber.py:30-32"},
+    {"id": "meas", "type": "measure", "role": "q_measure", "label_el": "Μέτρηση", "mode": "probs", "readout": 4, "desc_el": "qml.probs σε όλα τα qubits: 16 πιθανότητες.", "src": "code/sim/timeseries/Pytorch/Quantum/agentHuber.py:34"},
+    {"id": "post", "type": "post", "role": "classical_post", "label_el": "Μετεπεξεργασία", "extra_params": 0, "desc_el": "Κρατά τις 3 πρώτες πιθανότητες, τις κανονικοποιεί και δειγματίζει δράση (np.random.choice).", "src": "code/sim/timeseries/Pytorch/Quantum/agentHuber.py:90-95"}
+   ],
+   "connections": [
+    {"from": "pre", "to": "enc", "kind": "sequence", "label_el": ""},
+    {"from": "enc", "to": "v1", "kind": "sequence", "label_el": ""},
+    {"from": "v1", "to": "ent", "kind": "sequence", "label_el": ""},
+    {"from": "ent", "to": "v2", "kind": "sequence", "label_el": ""},
+    {"from": "v2", "to": "meas", "kind": "sequence", "label_el": ""},
+    {"from": "meas", "to": "post", "kind": "sequence", "label_el": ""}
+   ]
+  },
+  {
+   "id": "qc4",
+   "name": "QC4 — κβαντική κεφαλή πάνω σε παγωμένο encoder",
+   "status": "proposed",
+   "kind": "quantum",
+   "desc_el": "Προτεινόμενο, δεν έχει υλοποιηθεί. Ο κλασικός encoder (LSTM του DInos+T) προεκπαιδεύεται στον προσομοιωτή και παγώνει· στο νέο περιβάλλον εκπαιδεύεται μόνο ένα μικρό VQC. Ο έλεγχος είναι κλασική κεφαλή με ίδιο αριθμό παραμέτρων. Οι διαστάσεις εδώ (4 qubits, 2 παραμετρικά επίπεδα, δακτύλιος CNOT, 3 qubits ανάγνωσης) είναι ενδεικτικές, δεν έχουν αποφασιστεί.",
+   "sources": [
+    {"path": "docs/PLAN.md", "lines": "441", "note": "QC4 row, §8.4"},
+    {"path": "docs/DECISIONS.md", "lines": "90-93", "note": "D5: screen QC4 + QC1"},
+    {"path": "docs/PLAN.md", "lines": "430", "note": "frozen-encoder classical control"}
+   ],
+   "hyperparams": {
+    "n_qubits": {"value": 4, "src": "ενδεικτικό (PLAN.md:441: 10^1-10^2 παράμετροι)"},
+    "device": {"value": "lightning.qubit (adjoint)", "src": "docs/PLAN.md:450"}
+   },
+   "blocks": [
+    {"id": "pre", "type": "pre", "role": "classical_pre", "label_el": "Παγωμένος encoder", "frozen": true, "extra_params": 0, "desc_el": "LSTM 3×128 από το modelCPU_5.pth (παγωμένος) και σταθερή προβολή 128→4 γωνίες. Δεν εκπαιδεύεται.", "src": "docs/PLAN.md:441"},
+    {"id": "enc", "type": "encoding", "role": "q_encoding", "label_el": "Κωδικοποίηση", "gates": ["RX"], "desc_el": "Οι 4 γωνίες μπαίνουν με RX (ενδεικτικά).", "src": "docs/PLAN.md:438"},
+    {"id": "v1", "type": "variational", "role": "q_variational", "label_el": "Παραμετρικό 1", "gates": ["RY", "RZ"], "desc_el": "Εκπαιδευόμενες περιστροφές (ενδεικτικά).", "src": "docs/PLAN.md:441"},
+    {"id": "ent", "type": "entangle", "role": "q_entangle", "label_el": "Εμπλοκή", "pattern": "ring", "desc_el": "Δακτύλιος CNOT (ενδεικτικά).", "src": "docs/PLAN.md:441"},
+    {"id": "v2", "type": "variational", "role": "q_variational", "label_el": "Παραμετρικό 2", "gates": ["RY", "RZ"], "desc_el": "Δεύτερο παραμετρικό επίπεδο (ενδεικτικά).", "src": "docs/PLAN.md:441"},
+    {"id": "meas", "type": "measure", "role": "q_measure", "label_el": "Μέτρηση", "mode": "expval", "readout": 3, "desc_el": "⟨Z⟩ σε 3 qubits: μία τιμή ανά δράση.", "src": "docs/PLAN.md:438"},
+    {"id": "post", "type": "post", "role": "classical_post", "label_el": "Κλιμάκωση εξόδου", "extra_params": 3, "desc_el": "Εκπαιδευόμενη κλιμάκωση w·⟨Z⟩ ανά δράση → 3 τιμές Q (ενδεικτικά 3 παράμετροι).", "src": "docs/PLAN.md:438"}
+   ],
+   "connections": [
+    {"from": "pre", "to": "enc", "kind": "sequence", "label_el": ""},
+    {"from": "enc", "to": "v1", "kind": "sequence", "label_el": ""},
+    {"from": "v1", "to": "ent", "kind": "sequence", "label_el": ""},
+    {"from": "ent", "to": "v2", "kind": "sequence", "label_el": ""},
+    {"from": "v2", "to": "meas", "kind": "sequence", "label_el": ""},
+    {"from": "meas", "to": "post", "kind": "sequence", "label_el": ""}
+   ]
+  },
+  {
+   "id": "qc1",
+   "name": "QC1 — πλήρες VQC με data re-uploading",
+   "status": "proposed",
+   "kind": "quantum",
+   "desc_el": "Προτεινόμενο, δεν έχει υλοποιηθεί. Όλη η Q-συνάρτηση είναι κβαντικό κύκλωμα: τα 10 βήματα του παραθύρου ανεβαίνουν διαδοχικά (re-uploading) με παραμετρικό επίπεδο και εμπλοκή ανάμεσα, με εκπαιδευόμενη κλιμάκωση εισόδου και εξόδου. Το PLAN δίνει 6-8 qubits και 10^2-10^3 παραμέτρους· οι υπόλοιπες επιλογές (6 qubits, RX, RY/RZ, δακτύλιος, ανεξάρτητα βάρη ανά βήμα) είναι ενδεικτικές.",
+   "sources": [
+    {"path": "docs/PLAN.md", "lines": "438", "note": "QC1 row, §8.4"},
+    {"path": "docs/DECISIONS.md", "lines": "90-93", "note": "D5: screen QC4 + QC1"}
+   ],
+   "hyperparams": {
+    "n_qubits": {"value": 6, "src": "ενδεικτικό (PLAN.md:438: 6-8 qubits)"},
+    "device": {"value": "lightning.qubit (adjoint)", "src": "docs/PLAN.md:450"},
+    "separate_weights": {"value": true, "src": "ενδεικτικό: ανεξάρτητα βάρη ανά βήμα χρόνου (δεν ορίζεται στο PLAN)"}
+   },
+   "blocks": [
+    {"id": "pre", "type": "pre", "role": "classical_pre", "label_el": "Παράθυρο 10×6 + κλιμάκωση εισόδου", "extra_params": 6, "desc_el": "Εκπαιδευόμενη κλιμάκωση εισόδου (ενδεικτικά 6 παράμετροι).", "src": "docs/PLAN.md:438"},
+    {"id": "enc", "type": "encoding", "role": "q_encoding", "label_el": "Κωδικοποίηση βήματος t", "gates": ["RX"], "group": "R", "repeat": 10, "desc_el": "Το βήμα t του παραθύρου μπαίνει ως γωνίες.", "src": "docs/PLAN.md:438"},
+    {"id": "v1", "type": "variational", "role": "q_variational", "label_el": "Παραμετρικό", "gates": ["RY", "RZ"], "group": "R", "repeat": 10, "desc_el": "Εκπαιδευόμενες περιστροφές ανά βήμα.", "src": "docs/PLAN.md:438"},
+    {"id": "ent", "type": "entangle", "role": "q_entangle", "label_el": "Εμπλοκή", "pattern": "ring", "group": "R", "repeat": 10, "desc_el": "Δακτύλιος CNOT ανά βήμα.", "src": "docs/PLAN.md:438"},
+    {"id": "meas", "type": "measure", "role": "q_measure", "label_el": "Μέτρηση", "mode": "expval", "readout": 3, "desc_el": "⟨Z⟩ σε 3 qubits.", "src": "docs/PLAN.md:438"},
+    {"id": "post", "type": "post", "role": "classical_post", "label_el": "Κλιμάκωση εξόδου", "extra_params": 3, "desc_el": "Εκπαιδευόμενη κλιμάκωση εξόδου → 3 τιμές Q (ενδεικτικά 3 παράμετροι).", "src": "docs/PLAN.md:438"}
+   ],
+   "connections": [
+    {"from": "pre", "to": "enc", "kind": "sequence", "label_el": ""},
+    {"from": "enc", "to": "v1", "kind": "sequence", "label_el": ""},
+    {"from": "v1", "to": "ent", "kind": "sequence", "label_el": ""},
+    {"from": "ent", "to": "meas", "kind": "sequence", "label_el": ""},
+    {"from": "meas", "to": "post", "kind": "sequence", "label_el": ""}
+   ]
+  }
+ ]
+}

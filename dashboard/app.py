@@ -8,6 +8,7 @@ Design rules:
   (messages, decisions, stop requests); the coordinator and the launcher act on them.
 - Widgets where the researcher types are never inside auto-refreshing fragments, so nothing typed is lost.
 """
+import copy
 import datetime as dt
 import glob
 import json
@@ -28,7 +29,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 import modreload  # noqa: E402
 import importlib  # noqa: E402
 _LOCAL_MODS = ["labdb", "file_view", "replytext", "k8s_view", "prom_view", "web_terminal", "sudo_ui", "race_view", "brain_view",
-               "perm_store", "ext_catalog", "summarize_runs", "paper_plots", "paper_build", "uploads", "installed_view", "access", "outage"]
+               "perm_store", "ext_catalog", "summarize_runs", "paper_plots", "paper_build", "uploads", "installed_view", "access", "outage", "models_view"]
 for _n in _LOCAL_MODS:  # first import so they are in sys.modules, then reload those whose file changed
     importlib.import_module(_n)
 modreload.reload_changed(_LOCAL_MODS)
@@ -47,6 +48,7 @@ import installed_view  # noqa: E402
 import access  # noqa: E402
 import outage  # noqa: E402
 import changes_view  # noqa: E402
+import models_view  # noqa: E402
 import summarize_runs  # noqa: E402
 import paper_plots  # noqa: E402
 import paper_build  # noqa: E402
@@ -701,7 +703,7 @@ DEC_TAB = "✅ Αποφάσεις"
 _open_files = "path" in st.query_params and not st.session_state.get("fb_tab_done")
 st.session_state["fb_tab_done"] = True
 TAB_NAMES = [HOME_TAB, DEC_TAB, "🤖 Πράκτορες", "📈 Πειράματα", "⚖️ Council",
-             "🖥️ Πόροι", "☸️ Kubernetes", "📡 Prometheus", "📊 Grafana", FILES_TAB, "📝 Paper", "🎓 Συνέδρια", "🧾 Ιστορικό", "🔐 Sudo", "🧩 Επεκτάσεις", "🔌 Διακοπές", "🧭 Ιστορικό αλλαγών", "⌨️ Terminal"]
+             "🖥️ Πόροι", "☸️ Kubernetes", "📡 Prometheus", "📊 Grafana", FILES_TAB, "📝 Paper", "🎓 Συνέδρια", "🧾 Ιστορικό", "🔐 Sudo", "🧩 Επεκτάσεις", "🔌 Διακοπές", "🧭 Ιστορικό αλλαγών", "🧠 Μοντέλα", "⌨️ Terminal"]
 # Tab persistence (F5 / shared link): st.tabs(key="tab", bind="query-params") in Streamlit 1.66 keeps the active
 # label in ?tab=... and restores it on load; ?path=... (file deep link) only picks the default when ?tab is absent.
 # The default is part of the tabs widget identity: it must stay the same on every rerun of the session, otherwise the first
@@ -717,10 +719,10 @@ if _side:  # tabs in the left column, the terminal in a right-hand column
         st.iframe(_term_url, height=700)
     with _left:
         (tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_prom, tab_grafana, tab_files, tab_paper, tab_venues,
-         tab_audit, tab_sudo, tab_ext, tab_outage, tab_changes, tab_term) = st.tabs(TAB_NAMES, default=_tab_default, key="tab", bind="query-params")
+         tab_audit, tab_sudo, tab_ext, tab_outage, tab_changes, tab_models, tab_term) = st.tabs(TAB_NAMES, default=_tab_default, key="tab", bind="query-params")
 else:
     (tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_prom, tab_grafana, tab_files, tab_paper, tab_venues,
-     tab_audit, tab_sudo, tab_ext, tab_outage, tab_changes, tab_term) = st.tabs(TAB_NAMES, default=_tab_default, key="tab", bind="query-params")
+     tab_audit, tab_sudo, tab_ext, tab_outage, tab_changes, tab_models, tab_term) = st.tabs(TAB_NAMES, default=_tab_default, key="tab", bind="query-params")
 
 # ================================================================ conversation
 with tab_chat:
@@ -1768,6 +1770,198 @@ if _tab_live(tab_changes):  # lazy: hidden tabs do no work
                 st.markdown(f"**{_it['summary_el']}**")
                 st.markdown(_it["details_el"])
                 st.caption("Αποδείξεις: " + " · ".join(f"`{r}`" for r in _it["refs"]))
+
+# ================================================================ models (docs/models.json -> diagrams; design sandbox + apply to code/ via git)
+def _mdl_apply(mid, fn, *args, **kw):
+    """Callback: apply an edit function to the sandbox copy of model `mid`; errors are shown, never raised."""
+    try:
+        st.session_state["mdl_ed"][mid] = fn(st.session_state["mdl_ed"][mid], *args, **kw)
+        st.session_state.pop("mdl_err", None)
+    except models_view.ModelsError as ex:
+        st.session_state["mdl_err"] = f"{mid}: {ex}"
+
+
+def _mdl_field(mid, bid, field, key):
+    _mdl_apply(mid, models_view.edit_block, bid, **{field: st.session_state[key]})
+
+
+def _mdl_group_repeat(mid, bid, key):
+    cur = st.session_state["mdl_ed"][mid]
+    grp = next(b for b in cur["blocks"] if b["id"] == bid).get("group")
+    m = cur
+    try:
+        for b in cur["blocks"]:
+            if b.get("group") == grp:
+                m = models_view.edit_block(m, b["id"], repeat=st.session_state[key])
+        st.session_state["mdl_ed"][mid] = m
+    except models_view.ModelsError as ex:
+        st.session_state["mdl_err"] = f"{mid}: {ex}"
+
+
+def _mdl_select(mid, bid):
+    st.session_state[f"mdl_sel_{mid}"] = bid
+
+
+def _models_tab():
+    base_models = models_view.load()
+    st.session_state.setdefault("mdl_ed", {})
+    st.session_state.setdefault("mdl_gen", 0)
+    st.info(f"Διάγραμμα, hyper-parameters και πηγές κάθε μοντέλου, από τον πραγματικό κώδικα (docs/models.json). Οι αλλαγές εδώ είναι "
+            f"**sandbox σχεδιασμού**: «{models_view.PROPOSAL_NOTE}». Μόνο το κουμπί «Εφαρμογή στον κώδικα» γράφει (ένα config JSON, "
+            "με commit σε branch της επιλογής σου).")
+    ids = [m["id"] for m in base_models]
+    names = {m["id"]: m["name"] for m in base_models}
+    c1, c2 = st.columns([4, 1])
+    show = c1.multiselect("Μοντέλα που εμφανίζονται", ids, default=ids, format_func=lambda i: names[i], key="mdl_show")
+    if c2.button("↺ Επαναφορά όλων", key="mdl_reset_all", width="stretch"):
+        st.session_state["mdl_ed"] = {}
+        st.session_state["mdl_gen"] += 1
+        st.rerun()
+    if st.session_state.get("mdl_err"):
+        st.error(st.session_state["mdl_err"])
+    gen = st.session_state["mdl_gen"]
+    for base in base_models:
+        if base["id"] not in show:
+            continue
+        mid = base["id"]
+        cur = st.session_state["mdl_ed"].setdefault(mid, copy.deepcopy(base))
+        with st.container(border=True):
+            badge = "✅ σε χρήση" if base["status"] == "used" else "💡 προτεινόμενο — δεν έχει υλοποιηθεί"
+            st.markdown(f"## {base['name']}")
+            st.markdown(f"**{badge}** · {'κβαντικό κύκλωμα' if base['kind'] == 'quantum' else 'κλασικό νευρωνικό'}")
+            st.write(base["desc_el"])
+            st.caption("Πηγές: " + " · ".join(f"`{s['path']}:{s['lines']}`" + (f" ({s['note']})" if s.get("note") else "") for s in base["sources"]))
+            slot = st.container()
+            hp = base["hyperparams"]
+            with st.expander("Hyper-parameters και πηγές τους", expanded=False):
+                st.dataframe(pd.DataFrame([{"παράμετρος": k, "τιμή": str(cur["hyperparams"][k]["value"]), "πηγή": v["src"],
+                                            "σχόλιο": v.get("note", "")} for k, v in hp.items()]), hide_index=True, width="stretch")
+            st.markdown("##### ✏️ Επεξεργασία (sandbox)")
+            bids = [b["id"] for b in cur["blocks"]]
+            skey = f"mdl_sel_{mid}"
+            if st.session_state.get(skey) not in bids:
+                st.session_state[skey] = bids[0]
+            sel = st.radio("Επίλεξε επίπεδο", bids, key=skey, horizontal=True,
+                           format_func=lambda i, cur=cur: next(b["label_el"] for b in cur["blocks"] if b["id"] == i))
+            blk = next(b for b in cur["blocks"] if b["id"] == sel)
+            k0 = f"mdl_{gen}_{mid}_{sel}"
+            cols = st.columns(4)
+            if base["kind"] == "classical":
+                if blk["type"] == "input":
+                    cols[0].number_input("Χαρακτηριστικά (είσοδος)", 1, 512, blk["units"], key=k0 + "_u", on_change=_mdl_field, args=(mid, sel, "units", k0 + "_u"))
+                    cols[1].number_input("Παράθυρο T", 1, 100, blk["window"], key=k0 + "_w", on_change=_mdl_field, args=(mid, sel, "window", k0 + "_w"))
+                else:
+                    cols[0].number_input("Νευρώνες / κρυφές μονάδες", 1, 4096, blk["units"], key=k0 + "_u", on_change=_mdl_field, args=(mid, sel, "units", k0 + "_u"))
+                if blk["type"] == "lstm":
+                    cols[1].number_input("Στρώματα LSTM", 1, 16, blk["num_layers"], key=k0 + "_l", on_change=_mdl_field, args=(mid, sel, "num_layers", k0 + "_l"))
+                    cols[2].caption("Ενεργοποίηση: σ/tanh (σταθερή στις πύλες LSTM)")
+                elif blk["type"] in ("dense", "output"):
+                    cols[2].selectbox("Συνάρτηση ενεργοποίησης", models_view.ACTIVATIONS, index=models_view.ACTIVATIONS.index(blk["activation"]),
+                                      key=k0 + "_a", on_change=_mdl_field, args=(mid, sel, "activation", k0 + "_a"))
+            else:
+                cols[0].number_input("Qubits (όλο το κύκλωμα)", 1, 16, models_view.n_qubits(cur), key=f"mdl_{gen}_{mid}_nq",
+                                     on_change=lambda mid=mid, k=f"mdl_{gen}_{mid}_nq": _mdl_apply(mid, models_view.edit_hyper, "n_qubits", st.session_state[k]))
+                if blk["type"] in ("encoding", "variational"):
+                    cols[1].multiselect("Πύλες", models_view.GATES, default=blk["gates"], key=k0 + "_g", on_change=_mdl_field, args=(mid, sel, "gates", k0 + "_g"))
+                if blk["type"] == "entangle":
+                    cols[1].selectbox("Εμπλοκή", models_view.PATTERNS, index=models_view.PATTERNS.index(blk["pattern"]), key=k0 + "_p",
+                                      on_change=_mdl_field, args=(mid, sel, "pattern", k0 + "_p"))
+                if blk["type"] == "measure":
+                    cols[1].selectbox("Μέτρηση", ("probs", "expval"), index=("probs", "expval").index(blk["mode"]), key=k0 + "_m",
+                                      on_change=_mdl_field, args=(mid, sel, "mode", k0 + "_m"))
+                    cols[2].number_input("Qubits ανάγνωσης", 1, 16, blk["readout"], key=k0 + "_r", on_change=_mdl_field, args=(mid, sel, "readout", k0 + "_r"))
+                if blk.get("group"):
+                    cols[2].number_input("Επαναλήψεις re-uploading", 1, 100, blk["repeat"], key=k0 + "_rep", on_change=_mdl_group_repeat, args=(mid, sel, k0 + "_rep"))
+            movable = blk["type"] not in models_view.FIXED_FIRST + models_view.FIXED_LAST
+            b1, b2, b3, b4 = st.columns(4)
+            b1.button("⬆ Πάνω / αριστερά", key=f"mdl_up_{gen}_{mid}", disabled=not movable, width="stretch", on_click=_mdl_apply, args=(mid, models_view.move_block, sel, -1))
+            b2.button("⬇ Κάτω / δεξιά", key=f"mdl_dn_{gen}_{mid}", disabled=not movable, width="stretch", on_click=_mdl_apply, args=(mid, models_view.move_block, sel, 1))
+            if base["kind"] == "classical":
+                b3.button("➕ Νέο dense μετά", key=f"mdl_add_{gen}_{mid}", disabled=blk["type"] == "output", width="stretch", on_click=_mdl_apply, args=(mid, models_view.add_block, sel, "dense"))
+            else:
+                b3.button("➕ Παραμετρικό μετά", key=f"mdl_addv_{gen}_{mid}", disabled=blk["type"] in models_view.FIXED_LAST, width="stretch", on_click=_mdl_apply, args=(mid, models_view.add_block, sel, "variational"))
+            b4.button("🗑 Διαγραφή επιπέδου", key=f"mdl_del_{gen}_{mid}", disabled=blk["type"] in models_view.FIXED_FIRST + models_view.FIXED_LAST + ("lstm", "encoding"), width="stretch", on_click=_mdl_apply, args=(mid, models_view.remove_block, sel))
+            if base["kind"] == "classical":
+                st.markdown("**Hyper-parameters εκπαίδευσης**")
+                hc = st.columns(5)
+                for col, (name, label, kw) in zip(hc, (("batch_size", "Batch size", dict(min_value=1, max_value=4096, step=1)),
+                                                      ("gamma", "γ (discount)", dict(min_value=0.0, max_value=1.0, step=0.01, format="%.3f")),
+                                                      ("replay_size", "Replay buffer", dict(min_value=1, max_value=10**7, step=100)),
+                                                      ("target_sync_every", "Sync target (replays)", dict(min_value=1, max_value=10**6, step=1)),
+                                                      ("lr", "Learning rate", dict(min_value=1e-7, max_value=1.0, step=1e-5, format="%.6f")))):
+                    kk = f"mdl_{gen}_{mid}_hp_{name}"
+                    col.number_input(label, value=type(base["hyperparams"][name]["value"])(cur["hyperparams"][name]["value"]), key=kk,
+                                     on_change=lambda mid=mid, name=name, kk=kk: _mdl_apply(mid, models_view.edit_hyper, name, st.session_state[kk]), **kw)
+                st.caption("Αλλαγές σε hyper-parameters αποθηκεύονται μόνο στην πρόταση JSON· ο κώδικας (agents) τα ορίζει ο ίδιος.")
+            diff = models_view.diff_models(base, cur)
+            stt = models_view.stats(cur)
+            st.caption(("Αλλαγές από το πραγματικό: " + "; ".join(diff)) if diff else "Καμία αλλαγή από το πραγματικό μοντέλο.")
+            with slot:
+                page, hgt = models_view.render_html(cur, sel)
+                components.html(page, height=hgt, scrolling=False)
+            sc1, sc2, sc3 = st.columns([3, 1, 1])
+            pname = sc1.text_input("Όνομα πρότασης", value=mid, key=f"mdl_{gen}_{mid}_pname")
+            if sc2.button("💾 Αποθήκευση πρότασης", key=f"mdl_save_{gen}_{mid}", width="stretch"):
+                path = models_view.save_proposal(base, cur, pname)
+                st.success(f"Αποθηκεύτηκε: `{os.path.relpath(path, ROOT)}` — {models_view.PROPOSAL_NOTE}")
+            if sc3.button("↺ Επαναφορά", key=f"mdl_reset_{gen}_{mid}", width="stretch"):
+                st.session_state["mdl_ed"][mid] = copy.deepcopy(base)
+                st.session_state["mdl_gen"] += 1
+                st.rerun()
+            st.caption(f"💡 {models_view.PROPOSAL_NOTE}")
+            if base["kind"] == "classical" and base.get("config_name"):
+                with st.expander("⚙️ Εφαρμογή στον κώδικα (~/qrl-lab/code)", expanded=False):
+                    st.caption("Γράφει το `models/configs/" + base["config_name"] + ".json` και κάνει commit στο branch που θα διαλέξεις, χωρίς να αλλάξει "
+                               "το checkout του code/ (git plumbing). Δεν συνδέεται ακόμα με τους agents (παγωμένα αρχεία), άρα δεν επηρεάζει τρέχοντα ή εγκεκριμένα πειράματα.")
+                    branches = models_view.list_branches()
+                    mode = st.radio("Προορισμός", ("Υπάρχον branch", "Νέο branch"), horizontal=True, key=f"mdl_{gen}_{mid}_mode")
+                    if mode == "Υπάρχον branch":
+                        tgt = st.selectbox("Branch", branches, key=f"mdl_{gen}_{mid}_br")
+                        nb, bb = None, None
+                    else:
+                        nb = st.text_input("Όνομα νέου branch", key=f"mdl_{gen}_{mid}_nb", placeholder="π.χ. model-edit-derp-64")
+                        bb = st.selectbox("Βασισμένο στο branch", branches, key=f"mdl_{gen}_{mid}_bb")
+                        tgt = None
+                    pk = f"mdl_plan_{mid}"
+                    if st.button("Εφαρμογή στον κώδικα", key=f"mdl_apply_{gen}_{mid}", type="primary"):
+                        _d = db()
+                        _rows = models_view.running_runs(_d.runs())
+                        _d.close()
+                        st.session_state[pk] = models_view.plan_apply(cur, branch=tgt, new_branch=(nb or "").strip() or None, base=bb, running=_rows) \
+                            if mode == "Υπάρχον branch" or (nb or "").strip() else {"errors": ["Γράψε όνομα νέου branch."], "warnings": [], "ok": False, "diff": ""}
+                    plan = st.session_state.get(pk)
+                    if plan:
+                        for e_ in plan["errors"]:
+                            st.error(e_)
+                        for w_ in plan["warnings"]:
+                            st.warning(w_)
+                        if plan.get("diff"):
+                            st.markdown(f"**Προεπισκόπηση αλλαγής** → branch `{plan['target']}`" + (" (νέο)" if plan.get("create") else ""))
+                            st.code(plan["diff"], language="diff")
+                            st.caption("Commit message: " + plan["message"].splitlines()[0])
+                        if plan.get("ok") and st.button("✅ Επιβεβαίωση και commit", key=f"mdl_confirm_{gen}_{mid}"):
+                            try:
+                                _d = db()
+                                _rows = models_view.running_runs(_d.runs())
+                                _d.close()
+                                fresh = models_view.plan_apply(cur, branch=plan["target"] if not plan["create"] else None,
+                                                               new_branch=plan["target"] if plan["create"] else None,
+                                                               base=plan["source"], running=_rows)
+                                sha = models_view.apply_commit(fresh if fresh["ok"] else plan)
+                                st.success(f"Commit `{sha[:10]}` στο branch `{plan['target']}`: {plan['rel']}")
+                                st.session_state.pop(pk, None)
+                            except models_view.ModelsError as ex:
+                                st.error(str(ex))
+            elif base["kind"] == "quantum":
+                st.caption("Τα κβαντικά κυκλώματα δεν έχουν αρχείο αρχιτεκτονικής στον κώδικα: μόνο πρόταση JSON.")
+
+
+if _tab_live(tab_models):  # lazy: hidden tabs do no work
+    with tab_models:
+        try:
+            _models_tab()
+        except (OSError, ValueError) as ex:
+            st.error(f"Δεν φορτώθηκε το docs/models.json: {ex}")
 
 # ================================================================ extensions (catalog only from .lab/extensions_catalog.json)
 if _tab_live(tab_ext):  # lazy: hidden tabs do no work
