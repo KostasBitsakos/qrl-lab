@@ -1539,6 +1539,55 @@ def test_modreload_and_installed():
     ok("modreload + installed_view")
 
 
+def test_access_control():
+    import access
+    os.makedirs(os.path.join(TMP, ".lab"), exist_ok=True)
+    for f in ("access.json", "access_state.json", "access_log.jsonl"):
+        if os.path.exists(os.path.join(TMP, ".lab", f)):
+            os.remove(os.path.join(TMP, ".lab", f))
+    # allowlist: created empty -> everyone denied; header missing -> denied; listed login allowed (case-insensitive)
+    h = {"Tailscale-User-Login": "Me@x.com", "User-Agent": "ua"}
+    info = access.client_info(h)
+    assert access.check_login(info) == (False, "login not in allowlist")
+    assert json.load(open(os.path.join(TMP, ".lab/access.json")))["allowed_logins"] == []
+    assert access.check_login(access.client_info({}))[0] is False
+    cfg = access.load_config()
+    cfg["allowed_logins"] = ["me@x.com"]
+    access._write("access.json", cfg)
+    assert access.check_login(info)[0] is True
+    assert access.check_login(access.client_info({"Tailscale-User-Login": "evil@x.com"}))[0] is False
+    # alert rate limit: 1 message per 10 minutes, every event logged
+    posted = []
+    bad = access.client_info({"Tailscale-User-Login": "evil@x.com"})
+    t0 = 1_000_000.0
+    assert access.alert(bad, "login not in allowlist", post=posted.append, now=t0) is True
+    assert access.alert(bad, "login not in allowlist", post=posted.append, now=t0 + 60) is False
+    assert access.alert(bad, "login not in allowlist", post=posted.append, now=t0 + 601) is True
+    assert len(posted) == 2 and len(access.recent(50)) == 3 and access.recent(1)[0]["login"] == "evil@x.com"
+    # PIN: salted scrypt hash, never plaintext
+    assert access.try_pin("123456", info, post=posted.append, now=t0)[1].startswith("Δεν έχει οριστεί")
+    access.set_pin("correct-pin")
+    raw = open(os.path.join(TMP, ".lab/access.json")).read()
+    assert "correct-pin" not in raw and "scrypt$" in raw
+    a, b = access.hash_pin("x" * 8), access.hash_pin("x" * 8)
+    assert a != b and access.verify_hash("x" * 8, a) and not access.verify_hash("y" * 8, a)
+    # lockout after 5 wrong PINs, correct PIN refused while locked, then allowed after 15 min
+    t1 = 2_000_000.0
+    for i in range(4):
+        assert access.try_pin("wrong", info, post=posted.append, now=t1 + i)[0] is False
+    ok_, msg = access.try_pin("wrong", info, post=posted.append, now=t1 + 5)
+    assert not ok_ and "κλειδώθηκε" in msg and access.locked(now=t1 + 6) > 800
+    assert access.try_pin("correct-pin", info, post=posted.append, now=t1 + 10)[0] is False
+    assert access.try_pin("correct-pin", info, post=posted.append, now=t1 + 5 + access.LOCK_SECONDS + 1)[0] is True
+    assert "λάθος PIN" in json.dumps(access.recent(50), ensure_ascii=False)
+    access._post_db("test alert")  # real DB path: author system, in the security thread
+    d_ = LabDB()
+    tid_ = d_.ensure_thread(access.THREAD_TITLE, "")
+    assert any(m["author"] == "system" and m["body"] == "test alert" for m in d_.thread(tid_))
+    d_.close()
+    ok("access: allowlist deny, scrypt PIN, lockout, alert rate limit")
+
+
 if __name__ == "__main__":
     print(f"QRL-Lab tests in {TMP}")
     try:
@@ -1570,6 +1619,7 @@ if __name__ == "__main__":
         test_paper_plots()
         test_paper_build()
         test_modreload_and_installed()
+        test_access_control()
         try:
             import streamlit  # noqa: F401
             test_dashboard()

@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 import modreload  # noqa: E402
 import importlib  # noqa: E402
 _LOCAL_MODS = ["labdb", "file_view", "replytext", "k8s_view", "prom_view", "web_terminal", "sudo_ui", "race_view",
-               "perm_store", "ext_catalog", "summarize_runs", "paper_plots", "paper_build", "uploads", "installed_view"]
+               "perm_store", "ext_catalog", "summarize_runs", "paper_plots", "paper_build", "uploads", "installed_view", "access"]
 for _n in _LOCAL_MODS:  # first import so they are in sys.modules, then reload those whose file changed
     importlib.import_module(_n)
 modreload.reload_changed(_LOCAL_MODS)
@@ -43,6 +43,7 @@ import race_view  # noqa: E402
 import perm_store  # noqa: E402
 import ext_catalog  # noqa: E402
 import installed_view  # noqa: E402
+import access  # noqa: E402
 import summarize_runs  # noqa: E402
 import paper_plots  # noqa: E402
 import paper_build  # noqa: E402
@@ -95,6 +96,39 @@ RUN_STATUS = {"starting": ("🔵", "ξεκινά"), "running": ("🟢", "τρέ�
               "failed": ("❌", "απέτυχε"), "stopped": ("⏹️", "διακόπηκε")}
 
 st.set_page_config(page_title="QRL-Lab", page_icon="🧪", layout="wide")
+
+# ---------------------------------------------------------------- access control over Tailscale Serve (tools/access.py)
+try:
+    _hdrs = st.context.headers
+    _req_host = _hdrs.get("Host", "")
+except Exception:  # noqa: BLE001 - no request context (tests)
+    _hdrs, _req_host = {}, ""
+_on_tailnet = bool(web_terminal.tailnet_host(_req_host))
+if _on_tailnet:
+    _cinfo = access.client_info(_hdrs)
+    _allowed, _why = access.check_login(_cinfo)
+    if not _allowed:
+        access.alert(_cinfo, _why)
+        st.error("Δεν επιτρέπεται η πρόσβαση.", icon="🚫")
+        st.stop()
+_unlocked = (not _on_tailnet) or st.session_state.get("pin_until", 0) > time.time()
+
+
+def pin_form(name):
+    """PIN prompt for the dangerous tabs (Terminal, Sudo/permission approvals) over the tailnet."""
+    st.warning("Η καρτέλα απαιτεί PIN όταν μπαίνεις από το tailnet.", icon="🔒")
+    left = access.locked()
+    if left:
+        st.error(f"Κλειδωμένο για ακόμη {left // 60 + 1} λεπτά μετά από λάθος PIN.")
+        return
+    with st.form(f"pin_{name}"):
+        pin = st.text_input("PIN", type="password")
+        if st.form_submit_button("Ξεκλείδωμα"):
+            ok_, msg = access.try_pin(pin, _cinfo)
+            if ok_:
+                st.session_state["pin_until"] = time.time() + access.UNLOCK_SECONDS
+                st.rerun()
+            st.error(msg)
 
 
 # ---------------------------------------------------------------- helpers
@@ -310,6 +344,10 @@ LOGO_SVG = (
     '</svg>')
 st.sidebar.markdown(f'<div style="width:100%;max-width:250px;margin:0 auto 6px">{LOGO_SVG}</div>', unsafe_allow_html=True)
 st.sidebar.markdown("### 🧪 QRL-Lab")
+_recent_denied = access.recent(1, max_age=3600)
+if _recent_denied:
+    st.sidebar.error(f"🛡️ Απορρίφθηκε πρόσβαση ({_recent_denied[0].get('reason')}) · login: "
+                     f"{_recent_denied[0].get('login') or '(κανένα)'} · δες Sudo → Πρόσβαση", icon="🚨")
 refresh = st.sidebar.select_slider("Ανανέωση κάθε (δευτ.)", options=[3, 5, 10, 30], value=5)
 
 
@@ -378,6 +416,11 @@ def decision_panel(d, select=lambda reqs: reqs, pre="", label="Αίτημα",
                    empty_msg="Δεν υπάρχει τίποτα που να περιμένει απόφασή σου."):
     """One open request at a time with options/proposals and approve/reject/changes + note. Same code path (d.decide,
     actor='researcher') for every tab; `pre` only prefixes widget keys so two tabs never clash."""
+    _sel0 = select
+
+    def select(reqs):  # sudo-scope approvals need the PIN over the tailnet
+        r_ = _sel0(reqs)
+        return r_ if _unlocked else [x for x in r_ if x["scope"] != "sudo"]
     # Live check, outside the form: only compares the set of open request ids with the one rendered; it never touches
     # the form widgets, so unsaved typing is never lost. A full rerun (button) keeps widget state by key.
     @st.fragment(run_every=5)
@@ -586,11 +629,7 @@ _open_files = "path" in st.query_params and not st.session_state.get("fb_tab_don
 st.session_state["fb_tab_done"] = True
 TAB_NAMES = ["💬 Συνομιλία", DEC_TAB, "🤖 Πράκτορες", "📈 Πειράματα", "⚖️ Council",
              "🖥️ Πόροι", "☸️ Kubernetes", "📡 Prometheus", "📊 Grafana", FILES_TAB, "📝 Paper", "🎓 Συνέδρια", "🧾 Ιστορικό", "🔐 Sudo", "🧩 Επεκτάσεις", "⌨️ Terminal"]
-try:
-    _req_host = st.context.headers.get("Host", "")
-except Exception:  # noqa: BLE001 - no request context (tests)
-    _req_host = ""
-_term_url = web_terminal.iframe_url(_req_host) if web_terminal.running() else ""
+_term_url = web_terminal.iframe_url(_req_host) if (web_terminal.running() and _unlocked) else ""
 _side = bool(_term_url) and st.sidebar.toggle("Terminal στα δεξιά", key="term_side")
 if _side:  # tabs in the left column, the terminal in a right-hand column
     _left, _right = st.columns([3, 2])
@@ -1451,109 +1490,120 @@ with tab_audit:
 
 # ================================================================ sudo grants (researcher approves here)
 with tab_sudo:
-    st.markdown("Αιτήματα με scope `sudo`. Η έγκριση ανοίγει χρονικά περιορισμένο grant μόνο για τα προγράμματα που "
-                "προκύπτουν από τις εντολές του αιτήματος (`tools/sudo_grant.py`, ίδια όρια: έως "
-                f"{sudo_ui.MAX_MINUTES} λεπτά, χωρίς shells/editors).")
-    st.warning("Το dashboard και οι πράκτορες τρέχουν με τον ίδιο χρήστη Unix. Το grant ελέγχεται από το hook "
-               "`sudo_gate.py` και το αρχείο ανήκει στον root, αλλά αυτό δεν είναι απομόνωση ασφαλείας (PLAN §7).", icon="⚠️")
-    st.subheader("Αιτήματα άδειας από το terminal")
+    if not _unlocked:
+        pin_form("sudo")
+    else:
+        st.markdown("Αιτήματα με scope `sudo`. Η έγκριση ανοίγει χρονικά περιορισμένο grant μόνο για τα προγράμματα που "
+                    "προκύπτουν από τις εντολές του αιτήματος (`tools/sudo_grant.py`, ίδια όρια: έως "
+                    f"{sudo_ui.MAX_MINUTES} λεπτά, χωρίς shells/editors).")
+        st.warning("Το dashboard και οι πράκτορες τρέχουν με τον ίδιο χρήστη Unix. Το grant ελέγχεται από το hook "
+                   "`sudo_gate.py` και το αρχείο ανήκει στον root, αλλά αυτό δεν είναι απομόνωση ασφαλείας (PLAN §7).", icon="⚠️")
+        st.subheader("Αιτήματα άδειας από το terminal")
 
-    @st.fragment(run_every=refresh)
-    def perm_requests():
-        pend = perm_store.pending()
-        if not pend:
-            st.caption("Κανένα αίτημα άδειας από το terminal αυτή τη στιγμή. Όταν ο συντονιστής ζητήσει άδεια, "
-                       "εμφανίζεται εδώ για ~90 δευτερόλεπτα· αν δεν απαντήσεις, ρωτάει κανονικά το terminal.")
-        for pr in pend:
-            with st.container(border=True):
-                left = max(0, int(90 - (time.time() - pr["ts"])))
-                st.markdown(f"**{pr['tool']}** · {pr['description']} · απομένουν ~{left} δευτ.")
-                st.code(pr["detail"] or "(κενό)", language="bash" if pr["tool"] == "Bash" else "text")
-                st.caption(f"φάκελος: `{pr['cwd']}` · {dt.datetime.fromtimestamp(pr['ts']).strftime('%H:%M:%S')}")
-                pc = st.columns(2)
-                if pc[0].button("Έγκριση", key=f"perm_ok_{pr['id']}", type="primary"):
-                    perm_store.decide(pr["id"], True)
-                    st.rerun()
-                if pc[1].button("Απόρριψη", key=f"perm_no_{pr['id']}"):
-                    perm_store.decide(pr["id"], False, "Απορρίφθηκε από τον ερευνητή στο dashboard.")
-                    st.rerun()
-        rec = perm_store.recent(limit=5)
-        if rec:
-            lab = {"approved": "εγκρίθηκε", "denied": "απορρίφθηκε", "timeout": "έληξε (ρώτησε το terminal)"}
-            st.caption("Πρόσφατα: " + " · ".join(
-                f"{dt.datetime.fromtimestamp(r['ts']).strftime('%H:%M')} {r['tool']} {lab.get(r['state'], r['state'])}"
-                for r in rec))
-
-    perm_requests()
-    _can_sudo = sudo_ui.sudo_available()
-    d = db()
-    sreqs = [r for r in d.requests(state="open") if r["scope"] == "sudo"]
-    st.subheader(f"Ανοιχτά αιτήματα ({len(sreqs)})")
-    if not sreqs:
-        st.success("Κανένα ανοιχτό αίτημα sudo.", icon="✅")
-    for r in sreqs:
-        info = sudo_ui.parse_request(r["body"])
-        with st.container(border=True):
-            st.markdown(f"**{r['id']}** · {r['title']}")
-            if r["body"]:
-                st.caption(r["body"][:600])
-            if info["commands"]:
-                st.markdown("Εντολές που ζητούνται:")
-                st.code("\n".join(info["commands"]), language="bash")
-            st.markdown("Προγράμματα: " + (", ".join(f"`{x}`" for x in info["programs"]) or "—"))
-            problems = []
-            if not info["commands"]:
-                problems.append("το αίτημα δεν περιέχει γραμμές `sudo …`")
-            if info["unparsed"]:
-                problems.append("εντολές που δεν αναλύονται με ασφάλεια: " + "; ".join(info["unparsed"]))
-            if info["refused"]:
-                problems.append("απαγορευμένα προγράμματα (θα επέτρεπαν τα πάντα): " + ", ".join(info["refused"]))
-            if "approve" not in json.loads(r["options"]):
-                problems.append("το αίτημα δεν έχει επιλογή έγκρισης")
-            for pmsg in problems:
-                st.error(pmsg)
-            mins = st.number_input("Λεπτά", min_value=1, max_value=sudo_ui.MAX_MINUTES, value=sudo_ui.DEFAULT_MINUTES,
-                                   step=5, key=f"sudo_min_{r['id']}")
-            cmd = sudo_ui.open_command(r["id"], info["programs"], mins)
-            cols = st.columns(2)
-            if _can_sudo:
-                if cols[0].button("Έγκριση και άνοιγμα grant", key=f"sudo_ok_{r['id']}", type="primary",
-                                  disabled=bool(problems)):
-                    ok_, msg = sudo_ui.open_grant(r["id"], info["programs"], mins)
-                    if ok_:
-                        d.decide(r["id"], "approve", msg)
+        @st.fragment(run_every=refresh)
+        def perm_requests():
+            pend = perm_store.pending()
+            if not pend:
+                st.caption("Κανένα αίτημα άδειας από το terminal αυτή τη στιγμή. Όταν ο συντονιστής ζητήσει άδεια, "
+                           "εμφανίζεται εδώ για ~90 δευτερόλεπτα· αν δεν απαντήσεις, ρωτάει κανονικά το terminal.")
+            for pr in pend:
+                with st.container(border=True):
+                    left = max(0, int(90 - (time.time() - pr["ts"])))
+                    st.markdown(f"**{pr['tool']}** · {pr['description']} · απομένουν ~{left} δευτ.")
+                    st.code(pr["detail"] or "(κενό)", language="bash" if pr["tool"] == "Bash" else "text")
+                    st.caption(f"φάκελος: `{pr['cwd']}` · {dt.datetime.fromtimestamp(pr['ts']).strftime('%H:%M:%S')}")
+                    pc = st.columns(2)
+                    if pc[0].button("Έγκριση", key=f"perm_ok_{pr['id']}", type="primary"):
+                        perm_store.decide(pr["id"], True)
                         st.rerun()
-                    else:
-                        st.error(f"Δεν άνοιξε: {msg}")
-            else:
-                st.info("Το `sudo -n` δεν είναι διαθέσιμο από το dashboard. Τρέξε στην καρτέλα ⌨️ Terminal:", icon="ℹ️")
-                st.code(" ".join(cmd), language="bash")
-                if cols[0].button("Το έτρεξα — σήμανση ως εγκεκριμένο", key=f"sudo_ok_{r['id']}", type="primary",
-                                  disabled=bool(problems)):
-                    d.decide(r["id"], "approve", f"grant ανοίχτηκε χειροκίνητα: {' '.join(cmd)}")
+                    if pc[1].button("Απόρριψη", key=f"perm_no_{pr['id']}"):
+                        perm_store.decide(pr["id"], False, "Απορρίφθηκε από τον ερευνητή στο dashboard.")
+                        st.rerun()
+            rec = perm_store.recent(limit=5)
+            if rec:
+                lab = {"approved": "εγκρίθηκε", "denied": "απορρίφθηκε", "timeout": "έληξε (ρώτησε το terminal)"}
+                st.caption("Πρόσφατα: " + " · ".join(
+                    f"{dt.datetime.fromtimestamp(r['ts']).strftime('%H:%M')} {r['tool']} {lab.get(r['state'], r['state'])}"
+                    for r in rec))
+
+        perm_requests()
+        _can_sudo = sudo_ui.sudo_available()
+        d = db()
+        sreqs = [r for r in d.requests(state="open") if r["scope"] == "sudo"]
+        st.subheader(f"Ανοιχτά αιτήματα ({len(sreqs)})")
+        if not sreqs:
+            st.success("Κανένα ανοιχτό αίτημα sudo.", icon="✅")
+        for r in sreqs:
+            info = sudo_ui.parse_request(r["body"])
+            with st.container(border=True):
+                st.markdown(f"**{r['id']}** · {r['title']}")
+                if r["body"]:
+                    st.caption(r["body"][:600])
+                if info["commands"]:
+                    st.markdown("Εντολές που ζητούνται:")
+                    st.code("\n".join(info["commands"]), language="bash")
+                st.markdown("Προγράμματα: " + (", ".join(f"`{x}`" for x in info["programs"]) or "—"))
+                problems = []
+                if not info["commands"]:
+                    problems.append("το αίτημα δεν περιέχει γραμμές `sudo …`")
+                if info["unparsed"]:
+                    problems.append("εντολές που δεν αναλύονται με ασφάλεια: " + "; ".join(info["unparsed"]))
+                if info["refused"]:
+                    problems.append("απαγορευμένα προγράμματα (θα επέτρεπαν τα πάντα): " + ", ".join(info["refused"]))
+                if "approve" not in json.loads(r["options"]):
+                    problems.append("το αίτημα δεν έχει επιλογή έγκρισης")
+                for pmsg in problems:
+                    st.error(pmsg)
+                mins = st.number_input("Λεπτά", min_value=1, max_value=sudo_ui.MAX_MINUTES, value=sudo_ui.DEFAULT_MINUTES,
+                                       step=5, key=f"sudo_min_{r['id']}")
+                cmd = sudo_ui.open_command(r["id"], info["programs"], mins)
+                cols = st.columns(2)
+                if _can_sudo:
+                    if cols[0].button("Έγκριση και άνοιγμα grant", key=f"sudo_ok_{r['id']}", type="primary",
+                                      disabled=bool(problems)):
+                        ok_, msg = sudo_ui.open_grant(r["id"], info["programs"], mins)
+                        if ok_:
+                            d.decide(r["id"], "approve", msg)
+                            st.rerun()
+                        else:
+                            st.error(f"Δεν άνοιξε: {msg}")
+                else:
+                    st.info("Το `sudo -n` δεν είναι διαθέσιμο από το dashboard. Τρέξε στην καρτέλα ⌨️ Terminal:", icon="ℹ️")
+                    st.code(" ".join(cmd), language="bash")
+                    if cols[0].button("Το έτρεξα — σήμανση ως εγκεκριμένο", key=f"sudo_ok_{r['id']}", type="primary",
+                                      disabled=bool(problems)):
+                        d.decide(r["id"], "approve", f"grant ανοίχτηκε χειροκίνητα: {' '.join(cmd)}")
+                        st.rerun()
+                if cols[1].button("Απόρριψη", key=f"sudo_no_{r['id']}"):
+                    d.decide(r["id"], "reject", "")
                     st.rerun()
-            if cols[1].button("Απόρριψη", key=f"sudo_no_{r['id']}"):
-                d.decide(r["id"], "reject", "")
-                st.rerun()
-    d.close()
-    st.subheader("Τρέχον grant")
-    st.code(sudo_ui.status(), language="text")
-    gcols = st.columns([1, 4])
-    if _can_sudo:
-        if gcols[0].button("Κλείσιμο", key="sudo_close"):
-            ok_, msg = sudo_ui.close_grant()
-            (st.success if ok_ else st.error)(msg)
-    else:
-        st.caption("Κλείσιμο από το ⌨️ Terminal: `python3 tools/sudo_grant.py close`")
-    st.subheader("Audit log (τελευταίες 50 χρήσεις)")
-    aud = sudo_ui.audit_tail(50)
-    if aud:
-        st.dataframe(pd.DataFrame([{"ώρα": dt.datetime.fromtimestamp(a.get("ts", 0)).strftime("%m-%d %H:%M:%S"),
-                                    "task": a.get("task"), "προγράμματα": ", ".join(a.get("programs") or []),
-                                    "agent": a.get("agent_type") or "", "εντολή": (a.get("command") or "")[:200]}
-                                   for a in aud]), hide_index=True, width="stretch")
-    else:
-        st.caption("Καμία χρήση ακόμη (`.lab/sudo_audit.jsonl`).")
+        d.close()
+        st.subheader("Τρέχον grant")
+        st.code(sudo_ui.status(), language="text")
+        gcols = st.columns([1, 4])
+        if _can_sudo:
+            if gcols[0].button("Κλείσιμο", key="sudo_close"):
+                ok_, msg = sudo_ui.close_grant()
+                (st.success if ok_ else st.error)(msg)
+        else:
+            st.caption("Κλείσιμο από το ⌨️ Terminal: `python3 tools/sudo_grant.py close`")
+        st.subheader("🛡️ Πρόσβαση")
+        _acc = access.recent(50)
+        if _acc:
+            st.dataframe(pd.DataFrame([{"ώρα": dt.datetime.fromtimestamp(a["ts"]).strftime("%m-%d %H:%M:%S"),
+                                        "login": a.get("login") or "(κανένα)", "λόγος": a.get("reason"),
+                                        "ip": a.get("ip") or ""} for a in _acc]), hide_index=True, width="stretch")
+        else:
+            st.caption("Καμία απορριφθείσα πρόσβαση (`.lab/access_log.jsonl`).")
+        st.subheader("Audit log (τελευταίες 50 χρήσεις)")
+        aud = sudo_ui.audit_tail(50)
+        if aud:
+            st.dataframe(pd.DataFrame([{"ώρα": dt.datetime.fromtimestamp(a.get("ts", 0)).strftime("%m-%d %H:%M:%S"),
+                                        "task": a.get("task"), "προγράμματα": ", ".join(a.get("programs") or []),
+                                        "agent": a.get("agent_type") or "", "εντολή": (a.get("command") or "")[:200]}
+                                       for a in aud]), hide_index=True, width="stretch")
+        else:
+            st.caption("Καμία χρήση ακόμη (`.lab/sudo_audit.jsonl`).")
 
 # ================================================================ extensions (catalog only from .lab/extensions_catalog.json)
 with tab_ext:
@@ -1607,21 +1657,24 @@ with tab_ext:
 
 # ================================================================ terminal (on demand, localhost only)
 with tab_term:
-    st.warning("Πλήρες shell της VM για όποιον έχει το SSH tunnel. Ανοίγει μόνο όταν το ζητήσεις, μόνο στο "
-               "127.0.0.1:8502, με τυχαίο token, και κλείνει μόνο του μετά από 30 λεπτά αδράνειας.", icon="⚠️")
-    if web_terminal.running():
-        if st.button("Κλείσιμο", key="term_close"):
-            web_terminal.stop()
-            st.rerun()
-        url = web_terminal.iframe_url(_req_host)
-        if url and not _side:
-            st.iframe(url, height=600)
-        elif _side:
-            st.caption("Το terminal εμφανίζεται στη δεξιά στήλη.")
-        st.caption("Αν δεν φορτώνει: στο VS Code → Ports → Forward 8502")
-    elif st.button("Άνοιγμα terminal", key="term_open"):
-        ok_, msg = web_terminal.start()
-        if ok_:
-            st.rerun()
-        else:
-            st.error(f"Δεν άνοιξε: {msg}")
+    if not _unlocked:
+        pin_form("term")
+    else:
+        st.warning("Πλήρες shell της VM για όποιον έχει το SSH tunnel. Ανοίγει μόνο όταν το ζητήσεις, μόνο στο "
+                   "127.0.0.1:8502, με τυχαίο token, και κλείνει μόνο του μετά από 30 λεπτά αδράνειας.", icon="⚠️")
+        if web_terminal.running():
+            if st.button("Κλείσιμο", key="term_close"):
+                web_terminal.stop()
+                st.rerun()
+            url = web_terminal.iframe_url(_req_host)
+            if url and not _side:
+                st.iframe(url, height=600)
+            elif _side:
+                st.caption("Το terminal εμφανίζεται στη δεξιά στήλη.")
+            st.caption("Αν δεν φορτώνει: στο VS Code → Ports → Forward 8502")
+        elif st.button("Άνοιγμα terminal", key="term_open"):
+            ok_, msg = web_terminal.start()
+            if ok_:
+                st.rerun()
+            else:
+                st.error(f"Δεν άνοιξε: {msg}")
