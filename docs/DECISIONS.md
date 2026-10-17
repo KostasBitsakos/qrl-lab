@@ -2,6 +2,18 @@
 
 Newest first. Each entry: date, who decided, source, decision.
 
+## 2026-10-17 — Mutual fallback and priorities (decided by: researcher; source: M-20261017-005/006/007)
+
+- **Fallback, both directions:** when Claude or Codex hits a usage limit, the other one takes over temporarily, and they communicate through the dashboard thread and `.lab/deputy_queue.jsonl`.
+  - When Codex leads, it hands tasks to its own cheaper models (luna/sol). Crucial work stays with the specialist agent that owns it.
+  - When Codex is limited, Codex roles fall back to Claude agents (reviewer → Claude Sonnet).
+- **Limit messages:** the dashboard shows exact limit messages for both Claude and Codex, with the reset time.
+- **Sudo tab:** sudo requests are approved from a dashboard tab.
+- **Priority:** simulation experiments first, real hardware (cluster calibration) after.
+  - First run the researcher's own input load (W0: sine + noise + spike) with the latest models plus the F2/F3 fixes.
+  - Then Poisson + noise + spikes (W1).
+- **Environment work:** improve the env per the researcher's description, and read literature on how input load affects the other metrics (latency, CPU, memory) in real systems.
+
 ## 2026-10-16 — Calibration setup (decided by: researcher; source: R-20261016-018, changes requested)
 
 The calibration uses a **stateless Deployment**, as in the original 2025 setup, not a StatefulSet. Pod start-up and removal must stay fast.
