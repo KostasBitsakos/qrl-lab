@@ -7,24 +7,26 @@
 Lorido-Botran et al.~\cite{lorido2014review} survey autoscaling techniques for elastic applications in the
 cloud. In Kubernetes the standard mechanism is the HPA. It compares a metric such as CPU utilization with a
 target, scales the replica count by their ratio, ignores changes within a tolerance, and holds back scale-down
-decisions for a stabilization window~\cite{k8sdocs_hpa}. CPU of pods that are still starting is ignored for an
-initialization period, so the controller sees a new pod's load only some time after the pod was
-requested~\cite{k8sdocs_hpa}. AHPA, an autoscaler used in Alibaba Cloud's Kubernetes service, models the response
+decisions for a stabilization window~\cite{k8sdocs_hpa}. During an initialization period after a pod starts, its CPU samples count only if the pod is ready and the
+sample was taken while it was ready~\cite{k8sdocs_hpa}. AHPA, an autoscaler used in Alibaba Cloud's Kubernetes service, models the response
 time of pods with M/M/1 and M/M/c queues and finds the M/M/c model more accurate when there are few
 pods~\cite{zhou2023ahpa}. The AHPA description is a preprint. We use a threshold policy in the spirit of the HPA
 as a baseline and a per-pod queueing model inside our simulator.
 
 \paragraph{Deep reinforcement learning for autoscaling.}
 DERP~\cite{bitsakos2018derp} applied deep reinforcement learning to elastic resource provisioning in the cloud.
-DInos~\cite{bitsakos2025dinos} builds on it. Its agent reads a window of recent metrics (load, CPU, memory,
-latency and the number of pods) through an LSTM~\cite{hochreiter1997lstm}, chooses every 15 seconds whether to
-add a pod, remove one or do nothing, and is pre-trained in a simulator before it is fine-tuned in the target
-environment, including a Kubernetes cluster serving Redis. Taylor and Stone~\cite{taylor2009transfer} survey
+DInos~\cite{bitsakos2025dinos} compares against an enhanced version of DERP. As published, the DInos agent
+observes a window of recent metrics (load, CPU, memory, latency and the number of pods), processes it with an
+LSTM~\cite{hochreiter1997lstm}, and chooses every 15 seconds whether to add a pod, remove one or do nothing. The
+paper pre-trains the agent in a simulator and reports fine-tuning it in the target environment, including a
+Kubernetes cluster serving Redis. Taylor and Stone~\cite{taylor2009transfer} survey
 transfer in reinforcement learning and frame the question DInos asks: whether starting from a trained policy
 beats training from scratch in the new task. Double Q-learning~\cite{vanhasselt2016ddqn} reduces the
 overestimation of action values in deep Q-networks. Sofia and the retrained DInos baseline use its target.\todo{D8: confirm wording on how the DInos baseline is retrained (Double DQN target, fixes) before
-Section~\ref{sec:agents} is written.} Sofia keeps the DInos state and action interface and changes the function
-approximator. This lets us compare the two agents on the same inputs, the same actions and the same reward.
+Section~\ref{sec:agents} is written.} Sofia keeps the DInos actions. For the state, we do not reuse the published DInos features or those of the
+legacy implementation, which also included the pod capacity. Sofia and the retrained DInos baseline observe the
+same six signals that can be measured on a real cluster (Section~\ref{sec:simv2}), so the two agents differ
+only in the function approximator.
 
 \paragraph{Performance and workload models for simulation.}
 Queueing theory gives the standard link between load, capacity and response time~\cite{harcholbalter2013performance},
@@ -40,14 +42,14 @@ traces such as the Azure Functions trace show daily and weekly patterns~\cite{sh
 stateful store also has a cost of its own. Redis Cluster moves hash slots between nodes online, and keys are
 locked briefly while they migrate~\cite{redisdocs_scaling,redisdocs_clusterspec}. Rocksteady shows that live
 migration in an in-memory store can keep latency low under load~\cite{kulkarni2017rocksteady}. We use these works
-to choose the structure of our simulator. Its parameters come from measurements on our own cluster, because we
-found no published queueing model validated against Redis latency.\todo{Calibration pilot on the real cluster is
-pending (D11); adjust this sentence if parameters stay provisional.}
+to choose the structure of our simulator. We found no published queueing model validated against Redis latency, so the simulator's parameters have to be
+measured on a Redis cluster. That calibration is pending, and every parameter value in the current simulator is
+provisional.\todo{Update after the calibration pilot (D11).}
 
 \paragraph{Quantum reinforcement learning and hybrid models.}
 Jerbi et al.~\cite{jerbi2021parametrized} train parametrized quantum policies with few qubits on benchmark
 environments and prove a separation from classical learners on tasks constructed around the hardness of the
-discrete logarithm. That separation concerns those constructed tasks and does not carry over to autoscaling.
+discrete logarithm. The separation holds for those constructed tasks and says nothing about autoscaling.
 Skolik et al.~\cite{skolik2022quantum} use VQCs as Q-functions in deep Q-learning. Their ablations show that
 architectural and hyperparameter choices matter more than the parameter count, which is why we compare Sofia with
 a classical control of the same size. Mari et al.~\cite{mari2020transfer} attach a variational circuit to a
@@ -55,7 +57,8 @@ pre-trained classical network, a form of transfer learning, and run it on quantu
 classification. Chen et al.~\cite{chen2020qlstm} place VQCs inside
 the gates of an LSTM and report faster convergence in some of their tests. The work is a preprint, and the reported gains are specific
 to those test cases. Bitsakos et al.~\cite{bitsakos2025quantuml} ran machine
-learning algorithms, among them $k$-means, on a quantum cloud offering. None of these studies addresses
-autoscaling, where the effect of an action is delayed, the reward trades cost against latency, and the policy must eventually run against a real
+learning algorithms, among them $k$-means, on a quantum cloud offering.\todo{Description follows the title only;
+check the methods section of bitsakos2025quantuml.} None of the five quantum studies cited in this paragraph
+addresses autoscaling, where the effect of an action is delayed, the reward trades cost against latency, and the policy must eventually run against a real
 cluster within the control interval.\todo{Scholar: search for quantum RL applied to cloud or resource management
 before any novelty statement is added here.}

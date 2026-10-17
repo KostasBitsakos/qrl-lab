@@ -1,12 +1,11 @@
 # Claims -> evidence
-
 | ID | Claim | Evidence (run ids / macro / file:line) | Control | Status |
 |---|---|---|---|---|
 | I1 | HPA sets replicas from current/target metric ratio, default 15 s loop, tolerance, scale-down stabilization, CPU initialization period | `k8sdocs_hpa`; notes/load_metrics_literature.md 2.4 | n/a (citation) | cited, grade A |
 | I2 | A new pod serves only after scheduling, image pull and readiness; image pull is a large part of container start-up | `k8sslos`, `harter2016slacker`; notes 4.6 | n/a | cited |
 | I3 | Redis Cluster moves hash slots online; keys locked briefly during MIGRATE | `redisdocs_scaling`, `redisdocs_clusterspec`; notes 4.1 | n/a | cited, grade A |
-| I4 | DInos: LSTM over metric window, 3 actions every 15 s, pre-trained in sim, fine-tuned incl. real K8s/Redis; DERP: deep RL for elastic provisioning | `bitsakos2025dinos`, `bitsakos2018derp`; docs/papers/dinos_claims.md C1, C2, C7 | n/a | cited; no DInos numbers repeated |
-| I5 | DInos implementation has `\resParamsDInos` parameters, almost all in the LSTM encoder; fine-tuning updates all | PLAN §2 F5 (334,211 total, LSTM 333,824); macro to be filled by script | n/a | code fact; macro [TBD] |
+| I4 | Published DInos: state load/CPU/memory/latency/pods over a window, LSTM, 3 actions every 15 s, pre-trained in sim; paper *reports* fine-tuning incl. real K8s/Redis. DERP: deep RL for elastic provisioning; DInos compares against enhanced DERP | `bitsakos2025dinos`, `bitsakos2018derp`; docs/papers/dinos_claims.md C1, C2, C7 | n/a | cited; no DInos numbers repeated; text does not claim all models fine-tuned correctly (PLAN F2: in the sim code only model_1 was fine-tuned) |
+| I5 | DInos implementation we audited: `\resParamsDInos` trainable params, almost all in the LSTM encoder; fine-tuning updates the entire network; legacy input = load, capacity, cpu, memory, latency, num_vms | GitHub KostasBitsakos/K8s_Redis_DeepRL, branch `evaluation`, commit `9a32518`, `lstm_transfer/networks.py` (PLAN §2 F5: 334,211 total, LSTM 333,824); F5 still [TO VERIFY] against VM code / `bf98cac` (docs/INVENTORY.md §4) | n/a | code fact; macro [TBD]; anonymized artifact pointer pending |
 | I6 | VQCs used as RL policies / Q-functions; hybrid transfer with pre-trained classical net + circuit; QLSTM preprint | `jerbi2021parametrized`, `skolik2022quantum`, `mari2020transfer`, `chen2020qlstm`; notes/related_work.md | n/a | cited (abstract level) |
 | I7 | Architecture/hyperparameters matter more than parameter count in VQC Q-learning | `skolik2022quantum`; notes/related_work.md | motivates parameter-matched control | cited (abstract level; verify in full text) |
 | I8 | Sim v2: queueing latency, start-up delay, rebalance dip; trivial policies must lose to tuned threshold; oracle bound | code/sim_v2/README.md, gates.py; PLAN §8.1 | tuned threshold, oracle | design; gate results pending |
@@ -17,4 +16,7 @@
 | R3 | Workload refs: Memcached traces, spike model, MMPP, Azure daily/weekly patterns, Rocksteady low-latency migration | `atikoglu2012workload`, `bodik2010spikes`, `fischer1993mmpp`, `shahrad2020serverless`, `kulkarni2017rocksteady`; notes 4.4, 5.1-5.4 | n/a | cited; fischer metadata only |
 | R4 | No published queueing model validated against Redis latency was found | notes/load_metrics_literature.md "Not found" | n/a | search result, not proof of absence |
 | R5 | Queueing theory links load/capacity/response time; Little's law | `harcholbalter2013performance`, `little1961proof` | n/a | cited |
-| R6 | QuantuML ran ML algorithms incl. k-means on a quantum cloud offering | `bitsakos2025quantuml` (title) | n/a | cited |
+| R6 | QuantuML ran ML algorithms incl. k-means on a quantum cloud offering | `bitsakos2025quantuml` (title only) | n/a | \todo: verify against the paper's methods |
+| I11 | Common interface proposed here: every learning agent observes completed ops/s, CPU %, p95 latency, failed/s, ready pods, pending pods; memory excluded (in Sim v2 it would only mirror backlog) | code/sim_v2/env.py:26 `OBS_NAMES`; code/sim_v2/README.md (Observations) | same inputs for Sofia and DInos-retrained | design; agents not yet built |
+| I12 | If the only action-dependent reward term is pod cost and latency/CPU ignore pod count, always-one-pod is optimal and any tiny model learns it | PLAN §2 F1 (audit, `tools/sanity_trivial_policies.py`) | trivial-policy gates | stated without attribution to DInos pending D8 |
+| I13 | Evaluation protocol: W0-W3, >=5 seeds, bootstrap 95% CIs, equal HP search budget, parameter-matched and frozen-encoder controls, RAM/time/adaptation metrics; real-cluster ranking check (G6) | PLAN §8.3, §8.5-8.7, §9 | parameter-matched; frozen-encoder (if QC4) | planned; D3, D5, D6 pending |
