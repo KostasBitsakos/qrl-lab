@@ -342,6 +342,17 @@ class LabDB:
             " FROM messages m GROUP BY thread_id ORDER BY last DESC, MAX(rowid) DESC LIMIT ?", (limit,)).fetchall()
         return [dict(r) for r in rows]
 
+    def search_threads(self, text):
+        """Thread ids whose title or any message body contains `text`, ignoring case and Greek accents."""
+        import unicodedata
+
+        def norm(s):
+            return "".join(c for c in unicodedata.normalize("NFD", (s or "").casefold())
+                           if unicodedata.category(c) != "Mn")
+        q = norm(text.strip())
+        return {r[0] for r in self.conn.execute("SELECT thread_id, title, body FROM messages")
+                if q in norm(r[1]) or q in norm(r[2])}
+
     def thread(self, thread_id):
         return [dict(r) for r in self.conn.execute(
             "SELECT * FROM messages WHERE thread_id=? ORDER BY ts, id", (thread_id,))]

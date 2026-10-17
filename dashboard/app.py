@@ -619,11 +619,22 @@ with tab_chat:
     with top_l:
         with st.expander(f"📚 Θέματα ({len(ids)})"):
             if ids:
-                st.html("<style>.st-key-thread_list button{justify-content:flex-start;text-align:left}"
+                st.html("<style>.st-key-thread_list button{justify-content:flex-start;text-align:left;"
+                        "min-height:0;padding:1px 8px;line-height:1.2}"
                         ".st-key-thread_list button div,.st-key-thread_list button p{justify-content:flex-start;"
-                        "text-align:left;width:100%}</style>")
+                        "text-align:left;width:100%;font-size:0.85rem;margin:0}"
+                        ".st-key-thread_list [data-testid=stVerticalBlock]{gap:2px}</style>")
+                _q = st.text_input("🔎 Αναζήτηση θέματος (τίτλος ή περιεχόμενο)", key="thread_search",
+                                   placeholder="π.χ. preflight, logo, Tailscale")
+                _shown = ids
+                if _q.strip():
+                    _d = db()
+                    _hits = _d.search_threads(_q)
+                    _d.close()
+                    _shown = [t for t in ids if t in _hits or _q.strip().lower() in thread_label(t).lower()]
+                    st.caption(f"{len(_shown)} από {len(ids)} θέματα")
                 with st.container(height=260, key="thread_list"):
-                    for tid_ in ids:
+                    for tid_ in _shown:
                         if rename_widget(tid_, by_id[tid_]["title"] or thread_label(tid_), "list"):
                             continue
                         lc1, lc2 = st.columns([12, 1])
