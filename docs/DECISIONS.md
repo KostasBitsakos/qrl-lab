@@ -96,3 +96,7 @@ classical model), about one week; keep the better one for the paper. Final choic
 The paper does not mention the old simulator's issue (F1) at all, and the DInos claims are not changed. Sim v2 is
 presented simply as the simulator used here. Consequence kept in force: the paper does not restate DInos
 simulation numbers as comparison points (claims discipline); comparisons use our own runs only.
+
+## 2026-10-17 — D3 workloads (R-20261017-008, researcher chose option 1)
+W0 + W1 for training, W2 (public production trace, scaled) for testing only, W3 (regime shift) for adaptation,
+as in PLAN §8.2. W0 runs first (sim-first priority, 2026-10-17).
