@@ -86,3 +86,8 @@ models are ready, and each job still needs per-job approval with estimated QPU s
 ## 2026-10-16 — D12 (decided by: researcher)
 
 ChatGPT handoff adopted: codex mcp-server dropped, approvals enforced in the launcher, acceptance tests A1–A8.
+
+## 2026-10-17 — D5 quantum candidates (R-20261017-006, approved by the researcher)
+Screen QC4 (quantum fine-tuning head on a frozen sim-pretrained classical encoder; control: classical frozen-encoder
+head with matched parameters) and QC1 (full VQC Q-function with data re-uploading; control: parameter-matched
+classical model), about one week; keep the better one for the paper. Final choice after screening (PLAN §8.4–§8.5).
