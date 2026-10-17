@@ -1,0 +1,203 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage[utf8]{inputenc}
+\usepackage[LGR,T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{textalpha}
+\usepackage{substitutefont}
+\substitutefont{LGR}{\rmdefault}{cmr}
+\substitutefont{LGR}{\sfdefault}{cmss}
+\substitutefont{LGR}{\ttdefault}{cmtt}
+\usepackage{textcomp}
+\sloppy\emergencystretch=3em
+\usepackage{graphicx,booktabs,xcolor,enumitem,array,microtype}
+\usepackage[hidelinks]{hyperref}
+\graphicspath{{../}}
+\setlength{\parskip}{0.5em}\setlength{\parindent}{0pt}
+\setlist{itemsep=0.2em,topsep=0.3em}
+\newcommand{\fig}[2]{\begin{figure}[htbp]\centering
+ \includegraphics[width=\linewidth,height=0.30\textheight,keepaspectratio]{#1}\par
+ \small #2\end{figure}}
+\newcommand{\kode}[1]{\texttt{#1}}
+\newenvironment{warn}{\par\medskip\noindent\begin{minipage}{\linewidth}\color{red!50!black}\rule{\linewidth}{0.6pt}\par\small\sffamily}{\par\rule{\linewidth}{0.6pt}\end{minipage}\par\medskip}
+\title{\sffamily Αναφορά προόδου: προσομοιωτής Sim v2.1\\\large Πειράματα της 17ης Οκτωβρίου 2026}
+\author{QRL-Lab}
+\date{}
+\begin{document}
+\maketitle
+
+Κώστα, εδώ είναι η αναφορά με όσα έγιναν σήμερα, βήμα βήμα και με απλά λόγια. Ακολουθεί τη δομή του Evaluation του DInos paper σου.
+
+\begin{warn}
+\textbf{Διερευνητικά αποτελέσματα.} Τα gates (preflight και rev-1) απέτυχαν και ο προσομοιωτής δεν είναι βαθμονομημένος. Τα νούμερα δεν είναι αποτέλεσμα για paper. Κανένας RL agent δεν έχει εκπαιδευτεί σε αυτά τα runs.
+\end{warn}
+
+\section{Τι θέλαμε να ελέγξουμε}
+
+Θέλουμε να συγκρίνουμε, σε έναν προσομοιωτή, έναν κβαντικό RL agent με τους κλασικούς agents (DERP, DInos). Πριν από αυτό χρειαζόμαστε μια απλή απόδειξη ότι ο προσομοιωτής είναι λογικός. Αν ένας απλός ελεγκτής με κατώφλι (threshold) δεν κερδίζει ούτε έναν ελεγκτή που κρατά σταθερό αριθμό pods, κάτι δεν πάει καλά με το περιβάλλον. Τότε οι συγκρίσεις agents δεν θα έλεγαν τίποτα. Αυτή είναι η ερώτηση της αναφοράς: περνά ο προσομοιωτής τους ελέγχους λογικής, ώστε να χτίσουμε πάνω του;
+
+\section{Τι αλλάξαμε}
+
+\begin{itemize}
+\item \textbf{Sim v2 $\to$ v2.1.} Προσθέσαμε ρυθμιστικά «κουμπιά» (knobs) για να δούμε πόσο εξαρτώνται τα αποτελέσματα από παραμέτρους που δεν έχουμε μετρήσει: \kode{latency\_add}, \kode{tail\_scale}, \kode{cpu\_offset}, rebalance k/delta και theta. Οι τιμές τους είναι παγωμένες στο \kode{code/sim\_v2/sensitivity\_v21.json}. Με τις default τιμές το v2.1 δίνει bit-identical αποτελέσματα με το v2, δηλαδή ίδια ως το τελευταίο ψηφίο.
+\item \textbf{Παγωμένες ρυθμίσεις (freeze).} Πριν τρέξει ένα πείραμα, καταγράφουμε τον κώδικα (git) και τις ρυθμίσεις (hash, δηλαδή ένα «δακτυλικό αποτύπωμα» αρχείου). Έτσι δεν μπορούμε να τις αλλάξουμε αφού δούμε τα αποτελέσματα.
+\item \textbf{Χωρισμός seeds.} Seed είναι ο αριθμός που καθορίζει την τυχαιότητα ενός επεισοδίου. Χρησιμοποιούμε χωριστά σύνολα. Τα 1000--1004 είναι για ρύθμιση (tuning). Τα 1200--1209 είναι φρέσκα, για το rev-1 gate. Τα 20000+ μένουν ανέγγιχτα για την τελική αξιολόγηση. Τα 1100--1109 «κάηκαν» από ένα smoke test και δεν χρησιμοποιούνται.
+\item \textbf{Πιστός K8s HPA.} Το HPA είναι ο αυτόματος scaler του Kubernetes. Γράψαμε τον baseline μας από τον πραγματικό κώδικα του Kubernetes v1.34.0 (\kode{docs/hpa\_spec.md}): υπολογίζει τα pods ως το (τωρινά pods $\times$ CPU $/$ στόχος) στρογγυλεμένο προς τα πάνω, αγνοεί αλλαγές μέσα σε ανοχή 10\%, ανεβαίνει γρήγορα (έως 100\% ή 4 pods ανά 15\,s) και κατεβαίνει αργά (παράθυρο σταθεροποίησης 300\,s, δηλαδή 20 βήματα).
+\item \textbf{Ένα συγκεκριμένο όριο του HPA.} Στον προσομοιωτή δεν έχουμε πραγματική μέτρηση CPU ως προς το request του pod. Χρησιμοποιούμε ως υποκατάστατο το ποσοστό «απασχόλησης» (served/capacity, μέγιστο 100\%) και υποθέτουμε request = limit. Αυτό είναι υπόθεση. Το υποκατάστατο δεν ξεχωρίζει μέτρια από ακραία υπερφόρτωση.
+\end{itemize}
+
+\section{Πειραματική διάταξη}
+
+\paragraph{Περιβάλλον.} Όπως στο DInos, ένα βήμα ελέγχου είναι 15 δευτερόλεπτα και ένα επεισόδιο έχει 5000 βήματα. Ο προσομοιωτής παίρνει φορτίο (αιτήματα ανά δευτερόλεπτο), έχει χωρητικότητα ανάλογη με τον αριθμό των Redis pods, και υπολογίζει CPU και latency. Ένα νέο pod χρειάζεται μερικά βήματα για να ξεκινήσει. Το φορτίο που χρησιμοποιούμε λέγεται W0: ημίτονο, θόρυβος και ένα spike διάρκειας 100 βημάτων σε τυχαία θέση. Μνήμη δεν μοντελοποιείται. Όλες οι παράμετροι είναι προσωρινές.
+
+\paragraph{Μετρική.} Το κύριο μέτρο είναι το συνολικό reward ανά επεισόδιο (άθροισμα στα 5000 βήματα). Εδώ το reward είναι κόστος, άρα είναι αρνητικό: ποινή για κάθε pod, ποινή όταν παραβιάζεται το SLA (το όριο latency) και ποινή για αλλαγές στον αριθμό pods. Πιο κοντά στο μηδέν σημαίνει καλύτερα. Αναφέρουμε επίσης μέσο CPU, μέσο p95 latency (η τιμή κάτω από την οποία πέφτει το 95\% των αιτημάτων) και μέσο αριθμό pods.
+
+\paragraph{Baselines} (απλοί ελεγκτές για σύγκριση):
+\begin{itemize}
+\item \textbf{threshold 40/25/0}: αντιδραστικός κανόνας. Όταν το φορτίο περάσει ένα πάνω κατώφλι προσθέτει pods, όταν πέσει κάτω από ένα κάτω κατώφλι αφαιρεί. Οι τιμές 40/25/0 επιλέχθηκαν στο preflight.
+\item \textbf{fixed(22)} (στα σχήματα και \kode{fixed\_best}): σταθερά 22 pods, προ-παρασχεμένα, δηλαδή έτοιμα από την αρχή. Το 22 ήταν το καλύτερο σταθερό νούμερο στα seeds 1000--1004.
+\item \textbf{static\_ramp(22)}: ξεκινά από 6 pods όπως όλοι οι άλλοι, ανεβαίνει ένα pod ανά βήμα μέχρι το 22 και μένει εκεί. Είναι το δίκαιο αντίστοιχο του fixed, γιατί δεν έχει προβάδισμα εκκίνησης.
+\item \textbf{always\_min / always\_max}: πάντα το ελάχιστο ή το μέγιστο των pods. Είναι έλεγχοι λογικής.
+\item \textbf{K8sHPA}: ο scaler του Kubernetes όπως περιγράφηκε πιο πάνω, με στόχο CPU 40\%.
+\item \textbf{oracle} (clairvoyant): «ξέρει το μέλλον». Λύνει το πρόβλημα γνωρίζοντας το φορτίο των επόμενων βημάτων και δίνει ένα όριο για το πόσο καλά μπορεί να γίνει με κινήσεις ±1 pod. Δεν μπορεί να εφαρμοστεί σε πραγματικό σύστημα και δεν είναι άνω όριο για πολυ-pod ελεγκτές όπως το HPA.
+\end{itemize}
+
+\section{Βήμα-βήμα τα πειράματα}
+
+\subsection{Βήμα 1. Preflight (R-20261017-004)}
+\textbf{Ερώτηση:} κερδίζει ο tuned threshold έναν σταθερό αριθμό pods;
+\textbf{Τρέξαμε:} threshold εναντίον fixed(22), 5 seeds (1000--1004).
+\textbf{Βγήκε:} threshold $-140.9$k, fixed(22) $-123.3$k, νίκες του threshold 0/5. Το gate \textbf{απέτυχε}.
+\textbf{Τι σημαίνει:} ο threshold έχασε από έναν ελεγκτή που δεν κάνει τίποτα έξυπνο. Αυτό είναι ύποπτο. Δύο εξηγήσεις: ο προσομοιωτής δεν είναι ρεαλιστικός, ή η σύγκριση είναι άδικη επειδή το fixed ξεκινά με 22 έτοιμα pods και ο threshold με 6.
+
+\subsection{Βήμα 2. Διάγνωση (R-20261017-010)}
+\textbf{Ερώτηση:} από πού προέρχεται η διαφορά;
+\textbf{Τρέξαμε:} traces ανά βήμα στα ίδια 5 seeds, χωρίς re-tuning, με χωριστή λογιστική για την εκκίνηση (πρώτα 150 βήματα) και τα υπόλοιπα, και δοκιμές ευαισθησίας σε 10 configs.
+\textbf{Βγήκε:} στην εκκίνηση ο threshold χάνει $-18.4$k και το fixed $-3.5$k. Άρα ένα μέρος της διαφοράς είναι το προβάδισμα εκκίνησης. Στις δοκιμές ευαισθησίας η κατάταξη αλλάζει: με θ=0.9 threshold $-219.5$k και fixed $-332.7$k, ενώ με rebalance\_asm\_delta\_0.05 threshold $-119.4$k και fixed $-123.3$k (το θ=0.8 βγήκε εκτός κλίμακας και κόπηκε στο $-4\mathrm{e}5$).
+\textbf{Τι σημαίνει:} η κατάταξη εξαρτάται από παραμέτρους που δεν έχουμε μετρήσει, και αυτό δείχνει ότι χρειάζεται βαθμονόμηση.
+
+\fig{extra_sensitivity.png}{Σχήμα Α. Ευαισθησία του προσομοιωτή: μέσο return ανά config, ένα knob τη φορά. Πηγή: \kode{20261017-145935-R-20261017-010-e0-a1/diagnose.json}.}
+
+\subsection{Βήμα 3. Rev-1 gate (R-20261017-013)}
+\textbf{Ερώτηση:} αν όλοι ξεκινούν από τα ίδια 6 pods, κερδίζει ο threshold;
+\textbf{Τρέξαμε:} c0=6, 10 φρέσκα seeds (1200--1209), threshold εναντίον static\_ramp(22), μαζί με fixed\_best, always\_min/max και oracle. Οι κανόνες γράφτηκαν πριν το run (\kode{PREREG\_rev1.md}) και ο έλεγχος περνά μόνο αν το 95\% CI της ζευγαρωτής διαφοράς είναι πάνω από το 0.
+\textbf{Βγήκε:} threshold $-133.1$k, static\_ramp $-126.2$k, διαφορά $-6.9$k, 95\% CI $[-8.5\mathrm{k},\,-5.2\mathrm{k}]$, νίκες 0/10. Επίσης oracle $-101.6$k, fixed\_best $-120.8$k, always\_max $-157.2$k, always\_min $-3.55$M. Το gate \textbf{απέτυχε}.
+\textbf{Τι σημαίνει:} ακόμα και με ίδια εκκίνηση ο threshold χάνει, σε κάθε seed. Το πρόβλημα δεν εξηγείται μόνο από την εκκίνηση. Το πρώτο FAIL παραμένει καταγεγραμμένο μαζί με το δεύτερο.
+
+\fig{extra_rev1_gate.png}{Σχήμα Β. Rev-1 gate: return(threshold) μείον return(static\_ramp) ανά seed. Όλες οι μπάρες είναι αρνητικές. Πηγή: \kode{20261017-152657-R-20261017-013-e0-a1/preflight\_rev1.json}.}
+
+\subsection{Βήμα 4. Ρύθμιση του K8sHPA}
+\textbf{Ερώτηση:} ποιος στόχος CPU δίνει το καλύτερο HPA;
+\textbf{Τρέξαμε:} \kode{select\_hpa\_dev.py}, στόχοι 10\% έως 95\% ανά 5, στα seeds ανάπτυξης 1000--1004 με default config. Δεν είναι ξεχωριστό run με id στη βάση.
+\textbf{Βγήκε:} καλύτερος στόχος 40\% με $-127.9$k (ακριβώς $-127{,}860$). Στα ίδια seeds threshold $-140.9$k και fixed(22) $-123.3$k. Το 40\% είναι εσωτερικό σημείο του grid, άρα η καμπύλη έχει πραγματικό ελάχιστο και όχι άκρη.
+\textbf{Τι σημαίνει:} το HPA είναι καλύτερο από τον threshold και λίγο χειρότερο από το fixed(22). Όμως ρυθμίστηκε και μετρήθηκε στα ίδια seeds (in-sample), άρα δεν είναι αποτέλεσμα αξιολόγησης.
+
+\fig{extra_hpa_tuning.png}{Σχήμα Γ. Mean return του K8sHPA ανά στόχο CPU\%. Μόνο seeds ανάπτυξης. Πηγή: \kode{code/experiments/dinos\_simv2/hpa\_selection\_dev.json}.}
+
+\section{Αντιστοιχία με τα σχήματα του DInos}
+
+Κάθε ενότητα δείχνει πρώτα το σχήμα του DInos και μετά το δικό μας. Τα Fig 1--3 του DInos είναι αρχιτεκτονικά διαγράμματα και δεν αναπαράγονται. Όπου γράφει «αναλογία», το δικό μας σχήμα δείχνει άλλο πράγμα από το αρχικό (π.χ. baseline αντί για agent). Οι agents (DERP, DInos, LSTM) δεν έχουν εκπαιδευτεί ακόμη. Το run W0 (R-20261017-015) τρέχει αυτή τη στιγμή.
+
+\begin{center}\small
+\begin{tabular}{@{}llp{6.2cm}@{}}
+\toprule
+DInos & Δικό μας & Κατάσταση\\
+\midrule
+Fig 4 & fig4 & Αναλογία (η μνήμη λείπει, δείχνουμε backlog)\\
+Fig 5 & fig5 & ΔΕΝ ΥΠΑΡΧΕΙ ακόμη (χωρίς agents), δείχνουμε baselines\\
+Fig 6 αριστερά & fig6\_left & Αναλογία: threshold αντί για DERP\\
+Fig 6 δεξιά & fig6\_right & Αναλογία: oracle αντί για DInos\\
+Fig 7 αριστερά & fig7\_left & Μερική αναλογία, χωρίς real cluster\\
+Fig 7 δεξιά & fig7\_right & Μερική αναλογία, trace προσομοιωτή\\
+Fig 8 & fig8 & Μερικός πίνακας, μόνο baselines\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Fig 4: μεγέθη εισόδου (φορτίο, CPU, μνήμη, latency, 5000 βήματα)}
+\fig{dinos_fig4.png}{DInos, Fig 4: είσοδοι της προσομοίωσης σε 5000 βήματα.}
+\fig{fig4_input_metrics.png}{Δικό μας (αναλογία): offered load, CPU, backlog και p95 latency με 22 σταθερά pods, seed 1000.}
+Βλέπουμε τα μεγέθη εισόδου του προσομοιωτή σε ένα επεισόδιο. Το φορτίο είναι ημίτονο με spike, όπως στο DInos. Στο DInos το spike είναι στα βήματα 1500--1600. Στο δικό μας W0 διαρκεί 100 βήματα σε τυχαία θέση ανά seed, και η φάση του ημιτόνου είναι επίσης τυχαία (\kode{code/sim\_v2/workloads.py}). Οι κλίμακες διαφέρουν (ops/s, ms) και δεν υπάρχει μνήμη. Η σύγκριση είναι μόνο ποιοτική.
+
+\subsection{Fig 5: reward ανά checkpoint εκπαίδευσης (1k--20k)}
+\fig{dinos_fig5.png}{DInos, Fig 5: συνολικό reward των DERP (αριστερά) και DInos (δεξιά) στα 1k, 2k, 5k, 10k, 20k βήματα εκπαίδευσης.}
+\fig{fig5_checkpoints_analogue.png}{Δικό μας: ΔΕΝ ΥΠΑΡΧΕΙ ακόμη για agents. Δεξιά, το reward των baselines σε 10 επεισόδια (seeds 1200--1209).}
+Το αριστερό πάνελ είναι κενό επειδή δεν έχουμε εκπαιδευμένους agents. Θα γεμίσει μετά το R-20261017-015. Δεξιά βλέπουμε το συνολικό reward των baselines: threshold $-133.1$k, static\_ramp $-126.2$k, fixed\_best $-120.8$k, always\_max $-157.2$k, oracle $-101.6$k. Το δικό μας reward είναι αρνητικό (κόστος) ενώ στο DInos είναι θετικό, άρα οι τιμές δεν συγκρίνονται άμεσα.
+
+\subsection{Fig 6 αριστερά: αντιδραστικός ελεγκτής, μετρικές και pods}
+\fig{dinos_fig6_left.png}{DInos, Fig 6 αριστερά: ο DERP αντιδρά μετά το γεγονός και κάνει υπερ- ή υπο-παροχή.}
+\fig{fig6_left_threshold.png}{Δικό μας (αναλογία): ο threshold baseline, όχι DERP.}
+Ο threshold παίζει εδώ τον ρόλο του αντιδραστικού ελεγκτή. Ανεβαίνει στο μέγιστο των 30 pods στην εκκίνηση και μετά ταλαντεύεται γύρω από το φορτίο. Η αρχική φάση κοστίζει λόγω της ποινής SLA. Το σχήμα δεν είναι αποτέλεσμα DERP.
+
+\subsection{Fig 6 δεξιά: ελεγκτής που προβλέπει}
+\fig{dinos_fig6_right.png}{DInos, Fig 6 δεξιά: ο DInos προβλέπει το φορτίο.}
+\fig{fig6_right_oracle.png}{Δικό μας (αναλογία): ο oracle, που ξέρει το μέλλον, όχι DInos.}
+Ο oracle χρησιμοποιεί λιγότερα pods (μέσος όρος 15.9 έναντι 22.2 του threshold) και έχει return $-108.4$k (seeds 1000--1004) έναντι $-140.9$k. Δείχνει πόσο περιθώριο υπάρχει. Δεν δείχνει ότι το DInos θα το πετύχει.
+
+\subsection{Fig 7 αριστερά: αθροιστικό reward}
+\fig{dinos_fig7_left.png}{DInos, Fig 7 αριστερά: πραγματικό cluster, αθροιστικό reward σε 2000 βήματα, DInos 308,000 έναντι LSTM-only 56,000.}
+\fig{fig7_left_cumulative_reward.png}{Δικό μας (μερική αναλογία): αθροιστικό reward baselines στον προσομοιωτή, μέσος όρος seeds 1000--1004, 5000 βήματα.}
+Real-cluster run αυτού του τύπου δεν έχουμε. Τελικές τιμές: threshold $-140{,}927$, fixed(22) $-123{,}345$, oracle $-108{,}446$. Ο threshold ξεκινά από 5--6 pods και το fixed(22) είναι προ-παρασχεμένο. Έτσι τα πρώτα 150 βήματα εξηγούν ένα μέρος της διαφοράς (startup: threshold $-18.4$k, fixed $-3.5$k).
+
+\subsection{Fig 7 δεξιά: μετρικές και pods στον χρόνο}
+\fig{dinos_fig7_right.png}{DInos, Fig 7 δεξιά: πραγματικό cluster, φορτίο, CPU, μνήμη, latency και αριθμός Redis pods σε 2000 βήματα.}
+\fig{fig7_right_sim_timeseries.png}{Δικό μας (μερική αναλογία): τα πρώτα 2000 βήματα ενός trace του προσομοιωτή (threshold), μπλε γραμμή και κόκκινα διακεκομμένα pods.}
+Δεν είναι πραγματική μέτρηση και δεν υπάρχει agent. Το σχήμα δείχνει μόνο ότι μπορούμε να παράγουμε διάγραμμα στο ίδιο στυλ. Οι calibration runs του Οκτωβρίου μετρούν το cluster, δεν τρέχουν autoscaler.
+
+\subsection{Fig 8: πίνακας σύνοψης}
+\fig{dinos_fig8.png}{DInos, Fig 8: πίνακας DERP εναντίον DInos σε προσομοίωση και πραγματικό κόσμο (reward 220k έναντι 3.8M, 56k έναντι 308k).}
+\fig{fig8_summary_table.png}{Δικό μας: μερικός πίνακας, μόνο baselines στον προσομοιωτή (seeds 1000--1004, μέσος όρος).}
+Οι γραμμές DERP, DInos και real cluster είναι κενές (not available). Η μνήμη δεν υπάρχει στον προσομοιωτή. Το CPU είναι το παρατηρούμενο, με θόρυβο. Το p95 του threshold κυριαρχείται από την εκκίνηση (αρχικό backlog). Τα threshold και fixed(22) επιλέχθηκαν στα ίδια seeds, άρα είναι in-sample.
+
+\begin{center}\small
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+Μέθοδος (sim v2.1) & Reward & CPU \% & p95 ms & Pods\\
+\midrule
+DERP & \multicolumn{4}{c}{όχι ακόμη διαθέσιμο}\\
+DInos (με transfer) & \multicolumn{4}{c}{όχι ακόμη διαθέσιμο}\\
+threshold & $-140{,}927$ & 34.9 & 126.1 & 22.2\\
+fixed\_best & $-123{,}345$ & 32.3 & 4.8 & 22.0\\
+oracle & $-108{,}446$ & 45.2 & 79.7 & 15.9\\
+Agent σε real cluster & \multicolumn{4}{c}{δεν υπάρχει}\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Τι σημαίνουν όλα αυτά και τι ακολουθεί}
+
+\paragraph{Τι έχουμε.} Δύο gates απέτυχαν. Ο threshold χάνει από απλούς σταθερούς ελεγκτές, τόσο με άδικη όσο και με δίκαιη εκκίνηση. Η κατάταξη αλλάζει όταν αλλάζουμε παραμέτρους που δεν έχουμε μετρήσει. Ο oracle δείχνει ότι υπάρχει περιθώριο βελτίωσης ($-101.6$k έναντι $-126.2$k για το static\_ramp).
+
+\paragraph{Τι ακολουθεί.}
+\begin{itemize}
+\item \textbf{W0 (R-20261017-015).} Το εξερευνητικό run με τους agents (\kode{dinos\_t}, \kode{lstm\_scratch}, \kode{derp}, 3 training seeds, 100,000 βήματα, τελευταίο checkpoint) τρέχει τώρα. Ό,τι βγει θα είναι διερευνητικό. Θα γεμίσει το Fig 5 και τον πίνακα του Fig 8.
+\item \textbf{Βαθμονόμηση.} Θα μετρήσουμε στο πραγματικό cluster τις παραμέτρους δ, k, θ και d (startup delay), ώστε ο προσομοιωτής να μη στηρίζεται σε εικασίες. Μόνο μετά μπορούμε να ισχυριστούμε κάτι επιβεβαιωτικό, με νέο παγωμένο πείραμα στα seeds 20000+.
+\end{itemize}
+
+\paragraph{Ειλικρινή όρια.}
+\begin{itemize}
+\item Όλα είναι \textbf{exploratory}. Το W0 επιτράπηκε ως διερεύνηση ΜΕΤΑ τα FAIL, και δεν τα διορθώνει.
+\item Οι gates \textbf{απέτυχαν} και δεν ξανατρέχουν με άλλους κανόνες.
+\item Ο προσομοιωτής \textbf{δεν είναι βαθμονομημένος}.
+\item Τα traces των seeds 1000--1004 είναι \textbf{in-sample}: τα threshold, fixed(22) και HPA ρυθμίστηκαν εκεί.
+\item Το HPA είναι post-hoc baseline (προστέθηκε μετά τα FAIL) και στηρίζεται στην υπόθεση request = limit. Μέρη της προδιαγραφής του (\kode{docs/hpa\_spec.md}) είναι παράφραση του κώδικα και δεν έχουν ξαναελεγχθεί στο raw αρχείο.
+\item Τα σχήματα φτιάχτηκαν από αποθηκευμένα traces και returns (\kode{make\_report\_figs.py}). Δεν έτρεξε προσομοιωτής ή εκπαίδευση. Το static\_ramp έχει μόνο returns, όχι traces ανά βήμα.
+\end{itemize}
+
+\section*{Γλωσσάρι}
+\begin{description}[style=nextline,leftmargin=1em,itemsep=0.2em]
+\item[Seed] Αριθμός που καθορίζει την τυχαιότητα ενός επεισοδίου. Ίδιο seed, ίδιο φορτίο.
+\item[Επεισόδιο] Μία πλήρης εκτέλεση 5000 βημάτων των 15 δευτερολέπτων.
+\item[Gate] Έλεγχος που πρέπει να περάσει ο προσομοιωτής πριν εμπιστευτούμε συγκρίσεις agents.
+\item[CI (διάστημα εμπιστοσύνης)] Περιοχή τιμών μέσα στην οποία πέφτει πιθανότατα η πραγματική μέση διαφορά. Εδώ 95\%, υπολογισμένο με bootstrap (επαναληπτική δειγματοληψία των δεδομένων).
+\item[Baseline] Απλός ελεγκτής για σύγκριση.
+\item[Oracle] Ελεγκτής που ξέρει το μέλλον. Δεν εφαρμόζεται στην πράξη και δείχνει το όριο.
+\item[p95 latency] Χρόνος απόκρισης που το 95\% των αιτημάτων τον ξεπερνά μόνο σε 5\% των περιπτώσεων.
+\item[SLA] Συμφωνημένο όριο ποιότητας, εδώ όριο στο latency.
+\item[In-sample] Μετρημένο στα ίδια δεδομένα όπου ρυθμίστηκε η μέθοδος. Δείχνει υπερβολικά καλά.
+\item[Exploratory] Διερευνητικό: δεν είναι αποδεικτικό αποτέλεσμα.
+\item[Βαθμονόμηση] Ρύθμιση παραμέτρων του προσομοιωτή από μετρήσεις του πραγματικού cluster.
+\item[HPA] Horizontal Pod Autoscaler, ο ενσωματωμένος αυτόματος scaler του Kubernetes.
+\item[Preflight] Ο πρώτος έλεγχος (gate) πριν από όλα τα άλλα.
+\end{description}
+\end{document}
