@@ -232,6 +232,27 @@ def wait_status(db, run_id, want, timeout=40):
     raise AssertionError(f"{run_id} did not reach {want}: {db.run(run_id)}")
 
 
+def test_core_pinning():
+    import launch_run as L
+    assert L.parse_cpus("8-39") == list(range(8, 40)) and L.parse_cpus("0,2-3") == [0, 2, 3] and L.parse_cpus([1, 0]) == [0, 1]
+    avail = set(range(40))
+    cores, upd = L.pin_plan("sim", environ={}, available=avail)
+    assert cores == list(range(8, 40)) and upd["OMP_NUM_THREADS"] == "1" and upd["MKL_NUM_THREADS"] == "1"
+    assert L.pin_plan("sim", "2-3", {"OMP_NUM_THREADS": 4}, environ={}, available=avail) == (
+        [2, 3], {"OMP_NUM_THREADS": "4", "MKL_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1"})
+    assert L.pin_plan("sim", environ={"QRL_SIM_CPUS": "10-11"}, available=avail)[0] == [10, 11]
+    assert L.pin_plan("real", environ={}, available=avail) == (None, {})       # never pin real runs
+    assert L.pin_plan("sim", environ={}, available=set(range(4)))[0] is None   # fewer cores: skip gracefully
+    # a real child gets the affinity and the thread env
+    if len(os.sched_getaffinity(0)) >= 2:
+        first = sorted(os.sched_getaffinity(0))[0]
+        cores, upd = L.pin_plan("sim", [first])
+        out = subprocess.run([sys.executable, "-c", "import os;print(sorted(os.sched_getaffinity(0)),os.environ['OMP_NUM_THREADS'])"],
+                             capture_output=True, text=True, env=dict(os.environ, **upd),
+                             preexec_fn=lambda: os.sched_setaffinity(0, cores))
+        assert out.stdout.strip() == f"[{first}] 1", out
+
+
 def test_launcher():
     db = LabDB()
     spec = make_spec("toy", 5, 0.05)
@@ -1862,6 +1883,7 @@ if __name__ == "__main__":
         test_decisions()
         test_hook()
         test_launcher()
+        test_core_pinning()
         test_agent_log()
         test_uploads()
         test_health_watch()

@@ -28,6 +28,43 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from labdb import LabDB, LabError, canonical_hash, lab_dir, lab_root, now, validate_spec  # noqa: E402
 
 POLL = 5
+# Core pinning for scope 'sim' runs (R-20261017-017). One place for the default: env QRL_SIM_CPUS (e.g. "8-39" or
+# "8-15,20") overrides the constant; the spec key "cpu_affinity" (same syntax, or a list of ints) overrides both.
+# Cores 0-7 stay free for the system (dashboard, kube-apiserver, kubelet, ...). Scope 'real' is never pinned.
+DEFAULT_SIM_CPUS = "8-39"
+THREAD_ENV = ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS")
+
+
+def parse_cpus(v):
+    """'8-39', '0,2-3' or [0, 1] -> sorted list of ints."""
+    if isinstance(v, (list, tuple)):
+        return sorted({int(x) for x in v})
+    out = set()
+    for part in str(v).split(","):
+        part = part.strip()
+        if not part:
+            continue
+        a, _, b = part.partition("-")
+        out.update(range(int(a), int(b or a) + 1))
+    return sorted(out)
+
+
+def pin_plan(scope, spec_affinity=None, spec_env=None, environ=None, available=None):
+    """(cores or None, env_updates). Pinning only for scope 'sim'; cores are intersected with the machine's
+    allowed set and skipped (None) if that leaves nothing or all of them (fewer cores than the request).
+    Threads default to 1 (spec 'env_threads' dict may override)."""
+    environ = os.environ if environ is None else environ
+    if scope != "sim":
+        return None, {}
+    want = parse_cpus(spec_affinity if spec_affinity is not None else environ.get("QRL_SIM_CPUS", DEFAULT_SIM_CPUS))
+    if available is None:
+        available = os.sched_getaffinity(0) if hasattr(os, "sched_getaffinity") else set()
+    cores = sorted(set(want) & set(available))
+    if not cores or len(cores) == len(available):
+        cores = None
+    upd = {k: "1" for k in THREAD_ENV}
+    upd.update({k: str(v) for k, v in (spec_env or {}).items()})
+    return cores, upd
 
 
 def git_sha(path):
@@ -106,7 +143,8 @@ def start_entry(db, rid, entry):
     with open(os.path.join(run_dir, "spec_entry.json"), "w", encoding="utf-8") as f:
         json.dump({"request_id": rid, "spec_hash": r["spec_hash"], "spec_name": spec["name"], "scope": spec["scope"],
                    "entry": entry, "attempt": attempt, "entry_spec": e, "limits": spec["limits"],
-                   "real": spec.get("real"), "code_sha": sha, "cwd": cwd}, f, indent=2, ensure_ascii=False)
+                   "real": spec.get("real"), "cpu_affinity": spec.get("cpu_affinity"),
+                   "env_threads": spec.get("env_threads"), "code_sha": sha, "cwd": cwd}, f, indent=2, ensure_ascii=False)
     subprocess.Popen([sys.executable, os.path.abspath(__file__), "_supervise", run_id],
                      cwd=root, start_new_session=True, stdin=subprocess.DEVNULL,
                      stdout=subprocess.DEVNULL, stderr=open(os.path.join(run_dir, "supervisor.log"), "a"))
@@ -122,10 +160,15 @@ def supervise(run_id):
     env = dict(os.environ, QRL_RUN_ID=run_id, QRL_RUN_DIR=run["run_dir"], QRL_LAB_DIR=lab_root(),
                QRL_RUN_SEED=str(meta["entry_spec"].get("seed", "")))
     log = open(os.path.join(run["run_dir"], "output.log"), "ab")
+    cores, upd = pin_plan(meta.get("scope"), meta.get("cpu_affinity"), meta.get("env_threads"))
+    env.update(upd)
+    if cores:
+        log.write(f"[launcher] cpu affinity {cores[0]}-{cores[-1]} ({len(cores)} cores), threads={upd.get('OMP_NUM_THREADS')}\n".encode())
     t0 = time.time()
     try:
         proc = subprocess.Popen(json.loads(run["cmd"]), cwd=run["cwd"], env=env, stdout=log,
-                                stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
+                                stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True,
+                                preexec_fn=(lambda: os.sched_setaffinity(0, cores)) if cores else None)
     except OSError as e:
         with db.tx() as c:
             c.execute("UPDATE runs SET status='failed', ended=?, exit_code=-1 WHERE run_id=?", (now(), run_id))
