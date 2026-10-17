@@ -5,13 +5,14 @@ only the pixel font comes from Google Fonts, with a monospace fallback, and ther
 (swerving and obstacle dodging are pure CSS keyframes; activity and trouble are derived in Python from the logs).
 """
 import html
+import re
 import json
 import os
 import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from agent_log import clean_label, task_word  # noqa: E402
+from agent_log import PREFIX as PREFIX_RE, STOPWORDS, clean_label, task_word  # noqa: E402
 
 KIT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 # Typical duration (seconds) per role, used only to place a car; roles not listed run a looping animation.
@@ -101,6 +102,7 @@ LABEL_FALLBACK = 14
 RECENT = 120          # seconds: tool events newer than this count as "recent activity"
 SLOW_FACTOR = 2.0     # a task this much longer than its role's median finished duration counts as slow
 SLOW_MIN_SAMPLES = 3
+RETRY_WINDOW = 1800   # seconds
 HEALTH_GREEK = {"limit": "όριο χρήσης", "down": "ο συντονιστής δεν τρέχει", "permission": "περιμένει άδεια",
                 "api_error": "σφάλμα API"}
 
@@ -149,9 +151,20 @@ def derive(runs, events, now, health=None):
             durs.setdefault(r["role"], []).append(r["end"] - r["start"])
     seen = {}
     for aid, r in sorted(runs.items(), key=lambda kv: kv[1]["start"]):
-        key = (r["role"], r.get("label") or "")
-        r["_retry"] = seen.get(key, 0)
-        seen[key] = seen.get(key, 0) + 1
+        # a retry = same role re-started with the same task text, or the same label right after a failed run
+        # with that label, within RETRY_WINDOW; distinct tasks that merely share a role are not retries
+        prev = seen.get(r["role"], [])
+        n = 0
+        for p in reversed(prev):
+            if r["start"] - p["start"] > RETRY_WINDOW:
+                break
+            same_task = bool(r.get("task")) and r.get("task") == p.get("task")
+            same_fail = bool(r.get("label")) and r.get("label") == p.get("label") and p["status"] == "failed"
+            if same_task or same_fail:
+                n = p["_retry"] + 1
+                break
+        r["_retry"] = n
+        seen.setdefault(r["role"], []).append(r)
     for aid, r in runs.items():
         running = r["end"] is None
         reasons = []
@@ -178,6 +191,27 @@ def derive(runs, events, now, health=None):
         r.pop("_retry", None)
 
 
+DESC_MAX = 24
+
+
+def two_words(label, task="", role=""):
+    """Short two-word description (verb + object): the explicit label if it has two words, else the first two
+    meaningful words of the task text, else label + role."""
+    lab = " ".join(str(label or "").split())
+    if len(lab.split()) >= 2:
+        return lab[:DESC_MAX]
+    t = PREFIX_RE.sub("", str(task or ""), count=1)
+    ws = [w for w in re.findall(r"[^\W\d_][\w\-]*", t) if len(w) > 1 and w.lower() not in STOPWORDS]
+    if lab:
+        ws = [w for w in ws if w.lower() != lab.lower()]
+        ws = [lab] + ws[:1]
+    words = ws[:2]
+    if len(words) < 2:
+        r = str(role or "").split(":")[-1].split("-")[-1]
+        words = words + ([r] if r and r.lower() not in [w.lower() for w in words] else [])
+    return " ".join(words)[:DESC_MAX]
+
+
 def lanes(events, now=None, roles=None, window=6 * 3600, max_lanes=16, health=None):
     """Race lanes: one per subagent run (plus the coordinator when it acted in the last 2 minutes).
 
@@ -194,7 +228,8 @@ def lanes(events, now=None, roles=None, window=6 * 3600, max_lanes=16, health=No
             continue
         if e.get("hook_event_name") == "SubagentStart":
             runs[aid] = {"role": _atype(e), "model": e.get("model") or "", "label": lab, "start": float(e["ts"]),
-                         "end": None, "status": "running"}
+                         "end": None, "status": "running",
+                         "task": str(e.get("task") or e.get("summary") or "").strip()}
             order.append(aid)
         elif e.get("hook_event_name") == "SubagentStop" and aid in runs:
             runs[aid]["end"] = float(e["ts"])
@@ -210,19 +245,24 @@ def lanes(events, now=None, roles=None, window=6 * 3600, max_lanes=16, health=No
         out.append(dict(r))
     out.sort(key=lambda r: (r["status"] != "running", -(r["end"] or r["start"])))
     out = out[:max_lanes]
-    coord = [(e, a) for e, a in zip(events, ann) if not e.get("agent_id") and e.get("hook_event_name") == "PreToolUse"]
-    if coord and now - float(coord[-1][0]["ts"]) < 120 and len(out) < max_lanes:
-        out.insert(0, {"role": "coordinator", "model": "", "label": coord[-1][1][0],
-                       "start": float(coord[-1][0]["ts"]), "end": None, "status": "running", "coord": True,
-                       "activity": min(1.0, 0.25 + 0.5 * min(1.0, sum(1 for e, _ in coord if now - float(e["ts"]) <= RECENT) / 20.0)),
-                       "reasons": ["Claude: " + HEALTH_GREEK.get((health or {}).get("claude", {}).get("state"), "")]
-                       if (health or {}).get("claude", {}).get("state") in HEALTH_GREEK else [], "final": False})
-        out[0]["obstacles"] = len(out[0]["reasons"])
+    coord = [(e, a) for e, a in zip(events, ann) if not e.get("agent_id") and e.get("hook_event_name") in ("PreToolUse", "PostToolUse")]
+    n_rec = sum(1 for e, _ in coord if now - float(e["ts"]) <= RECENT)
+    last = float(coord[-1][0]["ts"]) if coord else now
+    busy = n_rec > 0
+    cstate = (health or {}).get("claude", {}).get("state")
+    out.insert(0, {"role": "coordinator", "model": "", "label": coord[-1][1][0] if coord else "", "start": last,
+                   "end": None if busy else last, "status": "running" if busy else "idle", "coord": True,
+                   "activity": min(1.0, 0.25 + 0.75 * min(1.0, n_rec / 20.0)) if busy else 0.0,
+                   "reasons": ["Claude: " + HEALTH_GREEK[cstate]] if busy and cstate in HEALTH_GREEK else [], "final": False})
+    out[0]["obstacles"] = len(out[0]["reasons"])
     for r in out:
         name, color = (roles.get(r["role"]) or (r["role"] or "agent", DEFAULT_COLOR))[:2]
+        if r.get("coord"):
+            name, color = "Συντονιστής (Πάρις)", (roles.get("coordinator") or ("", "#ff2a6d"))[1]
         r["name"], r["color"] = name, color
+        r["desc"] = two_words(r.get("label"), r.get("task"), "" if r.get("coord") else r["role"])
         end = r["end"] or now
-        r["elapsed"] = max(0.0, end - r["start"])
+        r["elapsed"] = max(0.0, end - r["start"]) if not (r.get("coord") and r["status"] == "idle") else 0.0
         typ = TYPICAL_SECONDS.get(r["role"])
         r["progress"] = None if (typ is None or r.get("coord")) else (
             1.0 if r["end"] else min(0.9, r["elapsed"] / typ))
@@ -255,16 +295,23 @@ body{font-family:'Press Start 2P',ui-monospace,'Courier New',monospace;color:#05
 h1{margin:0 0 8px;font-size:12px;color:#fffb96;text-shadow:0 0 6px #ff2a6d,2px 2px 0 #ff2a6d;letter-spacing:1px}
 .sub{color:#d1f7ff;margin-bottom:8px;font-size:9px}
 .road{display:flex;width:100%;overflow-x:auto;border:2px solid #05d9e8;background:#14082e}
-.lane{flex:1 1 0;min-width:56px;border-right:2px dashed #fffb96aa;display:flex;flex-direction:column}
+.lane{container-type:inline-size;overflow:hidden;flex:1 1 0;min-width:56px;border-right:2px dashed #fffb96aa;display:flex;flex-direction:column}
 .lane:last-child{border-right:0}
 .hd{padding:4px 3px;text-align:center;min-height:46px;font-size:8px;overflow-wrap:anywhere}
 .why{display:block;color:#ffb347;font-size:7px;margin-top:2px;line-height:1.3}
 .role{display:block;color:#d1f7ff}.st{display:block;white-space:nowrap;margin-top:2px}
 .track{position:relative;height:var(--h,300px);margin:0 auto;width:100%;overflow:hidden}
+.dim{opacity:.5;filter:grayscale(.6)}
+.track.moving{background:repeating-linear-gradient(180deg,transparent 0,transparent 24px,#fffb9655 24px,#fffb9655 40px) 50% 0/4px 40px repeat-y;
+ animation:scroll var(--sp,1.2s) linear infinite}
+@keyframes scroll{from{background-position:50% 0}to{background-position:50% 40px}}
 .finish{position:absolute;left:0;right:0;top:0;height:18px;
  background:repeating-conic-gradient(#fff 0 25%,#000 0 50%) 0 0/10px 10px;border-bottom:2px solid #fff}
 .runner{position:absolute;left:0;right:0;display:flex;flex-direction:column;align-items:center;gap:2px}
-.runner .w{color:#fff;text-shadow:0 0 4px currentColor;font-size:8px;text-align:center;max-width:100%;overflow-wrap:anywhere}
+.runner .w{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden;
+ width:100%;max-width:100%;padding:1px 2px;text-align:center;color:#fff;background:rgba(11,2,33,.78);
+ border-radius:2px;font-size:clamp(5px,12cqw,8px);line-height:1.25;overflow-wrap:anywhere;word-break:break-word;
+ text-overflow:ellipsis}
 .car{transform:rotate(-90deg);margin:12px 0}
 .run{animation:bob .35s steps(2) infinite}
 .loop{animation:loop var(--lp,5s) linear infinite,bob .35s steps(2) infinite}
@@ -282,7 +329,7 @@ h1{margin:0 0 8px;font-size:12px;color:#fffb96;text-shadow:0 0 6px #ff2a6d,2px 2
 @keyframes bob{50%{margin-left:1px}}
 @keyframes loop{from{bottom:0}to{bottom:calc(100% - 100px)}}
 .ok{color:#39ff14}.bad{color:#ff3860}.go{color:#fffb96}
-@media (prefers-reduced-motion:reduce){.run,.loop,.swerve,.dodgeL,.dodgeR,.ob{animation:none}}
+@media (prefers-reduced-motion:reduce){.run,.loop,.swerve,.track.moving,.dodgeL,.dodgeR,.ob{animation:none}}
 """
 
 
@@ -299,10 +346,11 @@ def render(lane_list, now=None):
     """
     esc = html.escape
     active = sum(1 for r in lane_list if r["status"] == "running")
+    cap = "" if active else '<div class="sub">Κανένας πράκτορας δεν δουλεύει αυτή τη στιγμή</div>'
     parts = [f'<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
              f'<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap">'
              f'<style>{CSS}</style></head><body><div class="screen" id="race">'
-             f'<h1>🏁 QRL GRAND PRIX</h1><div class="sub">{active} στην πίστα · {len(lane_list) - active} τερμάτισαν</div>']
+             f'<h1>🏁 QRL GRAND PRIX</h1><div class="sub">{active} στην πίστα · {len(lane_list) - active} τερμάτισαν</div>{cap}']
     if not lane_list:
         parts.append('<div class="sub">Η πίστα είναι άδεια. Κανένας πράκτορας δεν τρέχει.</div>')
     else:
@@ -310,19 +358,19 @@ def render(lane_list, now=None):
     for idx, r in enumerate(lane_list):
         color = r["color"] if str(r.get("color", "")).startswith("#") and len(r["color"]) in (4, 7) else DEFAULT_COLOR
         who = esc(r["name"] if not r["model"] else f'{r["name"].split(" · ")[0]} · {r["model"]}')
-        word = esc(r.get("label") or "")
+        word = esc(r.get("desc") or r.get("label") or "")
         reasons = r.get("reasons") or []
         why = esc(" · ".join(reasons))
         n_ob = int(r.get("obstacles") or 0)
         act = float(r.get("activity") or 0.0)
+        road_cls, road_sty, dim = "", "", ""
         if r["status"] == "running":
             st_html = f'<span class="go">▶ {_clock(r["elapsed"])}</span>'
             inner = f'{CAR.format(c=color)}<span class="w">{word}</span>'
             dg = f'<div class="dg {"dodgeL" if idx % 2 == 0 else "dodgeR"}">{inner}</div>' if n_ob else f'<div class="dg">{inner}</div>'
-            if act > 0.3:  # idle / lightly busy agents drive straight, busy ones weave
-                sw = f'<div class="sw swerve" style="--a:{4 + 24 * act:.1f};--d:{2.6 - 1.8 * act:.2f}s">{dg}</div>'
-            else:
-                sw = f'<div class="sw">{dg}</div>'
+            sw = f'<div class="sw swerve" style="--a:{3 + 25 * act:.1f};--d:{2.6 - 1.8 * act:.2f}s">{dg}</div>'
+            road_cls = " moving"
+            road_sty = f' style="--sp:{1.6 - 1.1 * act:.2f}s"'
             obs = "".join(f'<div class="ob" style="bottom:calc(100% + {14 * i}px)">{ROCK if (idx + i) % 2 else CONE}</div>'
                           for i in range(n_ob))
             if r["progress"] is None:
@@ -331,7 +379,12 @@ def render(lane_list, now=None):
             else:
                 run = (f'<div class="runner run" style="bottom:calc((100% - 100px) * {r["progress"]:.3f})">'
                        f'{obs}{sw}</div>')
+        elif r["status"] == "idle":
+            dim = " dim"
+            st_html = '<span>zzz</span>'
+            run = f'<div class="runner parked">{CAR.format(c=color)}<span class="w">{word}</span></div>'
         else:
+            dim = " dim"
             good = r["status"] == "done"
             mark = '<span class="ok">✓</span>' if good else '<span class="bad">✗</span>'
             st_html = f'{mark} {_clock(r["elapsed"])}'
@@ -341,8 +394,8 @@ def render(lane_list, now=None):
             else:
                 run = f'<div class="runner parked">{CAR.format(c=color)}<span class="w">{word} {mark}</span></div>'
         why_html = f'<span class="why">⚠ {why}</span>' if why else ""
-        parts.append(f'<div class="lane" title="{why}"><div class="hd"><span class="role" style="color:{color}">{who}</span>'
-                     f'<span class="st">{st_html}</span>{why_html}</div><div class="track">'
+        parts.append(f'<div class="lane{dim}" title="{why}"><div class="hd"><span class="role" style="color:{color}">{who}</span>'
+                     f'<span class="st">{st_html}</span>{why_html}</div><div class="track{road_cls}"{road_sty}>'
                      f'<div class="finish"></div>{run}</div></div>')
     if lane_list:
         parts.append('</div>')

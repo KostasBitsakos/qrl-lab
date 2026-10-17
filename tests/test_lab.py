@@ -381,9 +381,9 @@ def test_race_activity_obstacles():
            {"hook_event_name": "SubagentStart", "agent_id": "calm", "agent_type": "writer", "label": "txt", "ts": now - 60},
            {"hook_event_name": "SubagentStart", "agent_id": "f1", "agent_type": "runner", "label": "go", "ts": now - 400},
            {"hook_event_name": "SubagentStop", "agent_id": "f1", "agent_type": "runner", "status": "failed", "ts": now - 300},
-           {"hook_event_name": "SubagentStart", "agent_id": "r1", "agent_type": "codex-reviewer", "label": "rev", "ts": now - 200},
+           {"hook_event_name": "SubagentStart", "agent_id": "r1", "agent_type": "codex-reviewer", "label": "rev", "task": "review sim", "ts": now - 200},
            {"hook_event_name": "SubagentStop", "agent_id": "r1", "agent_type": "codex-reviewer", "status": "done", "ts": now - 150},
-           {"hook_event_name": "SubagentStart", "agent_id": "r2", "agent_type": "codex-reviewer", "label": "rev", "ts": now - 100}]
+           {"hook_event_name": "SubagentStart", "agent_id": "r2", "agent_type": "codex-reviewer", "label": "rev", "task": "review sim", "ts": now - 100}]
     ev += [{"hook_event_name": "PreToolUse", "agent_id": "busy", "agent_type": "scholar", "summary": "x", "ts": now - 30 + i} for i in range(20)]
     health = {"claude": {"state": "ok"}, "codex": {"state": "limit"}}
     by = {r["role"] + ":" + r["label"]: r for r in race_view.lanes(ev, now=now, health=health) if r["status"] != "done" or r["role"] == "engineer"}
@@ -401,6 +401,55 @@ def test_race_activity_obstacles():
     b2 = {r["role"] + ":" + r["label"]: r for r in race_view.lanes(ev, now=now, health={"claude": {"state": "limit"}})}
     assert "Claude: όριο χρήσης" in b2["writer:txt"]["reasons"] and "Claude: όριο χρήσης" not in b2["codex-reviewer:rev"]["reasons"]
     ok("race view: activity and obstacle derivation from synthetic logs (failed, retry, slow, health) and render")
+
+
+def test_race_coordinator_and_retries():
+    import race_view
+    now = 3_000_000.0
+    ev = []
+    # real pattern: many different tasks, same role and same label
+    for i in range(6):
+        ev += [{"hook_event_name": "SubagentStart", "agent_id": f"x{i}", "agent_type": "codex:codex-rescue", "label": "codex",
+                "task": f"different task {i}", "ts": now - 3000 + 100 * i},
+               {"hook_event_name": "SubagentStop", "agent_id": f"x{i}", "agent_type": "codex:codex-rescue", "status": "done", "ts": now - 2950 + 100 * i}]
+    ev += [{"hook_event_name": "SubagentStart", "agent_id": "y1", "agent_type": "engineer", "label": "fix", "task": "a", "ts": now - 900},
+           {"hook_event_name": "SubagentStop", "agent_id": "y1", "agent_type": "engineer", "status": "failed", "ts": now - 800},
+           {"hook_event_name": "SubagentStart", "agent_id": "y2", "agent_type": "engineer", "label": "fix", "task": "b", "ts": now - 700},
+           {"hook_event_name": "SubagentStart", "agent_id": "y3", "agent_type": "engineer", "label": "other", "task": "b", "ts": now - 600}]
+    ln = race_view.lanes(ev, now=now)
+    by = {r["start"]: r for r in ln if r["role"] != "coordinator"}
+    assert all(not r["reasons"] for r in ln if r["role"] == "codex:codex-rescue"), "distinct tasks are not retries"
+    assert by[now - 700]["reasons"] == ["επανάληψη ×1"], "same label after a failure = retry"
+    assert by[now - 600]["reasons"] == ["επανάληψη ×2"], "same task text = retry"
+    # coordinator: idle without events (static, caption), running with recent main-session tool events
+    assert ln[0]["role"] == "coordinator" and ln[0]["status"] == "idle" and ln[0]["name"] == "Συντονιστής (Πάρις)"
+    cap = "Κανένας πράκτορας δεν δουλεύει"
+    ev0 = [e for e in ev if e["agent_id"].startswith("x")]
+    h = race_view.render(race_view.lanes(ev0, now=now), now)
+    assert cap in h and "track moving" not in h and "dim" in h
+    ev1 = ev0 + [{"hook_event_name": "PreToolUse", "tool_name": "Bash", "summary": "Run tests", "ts": now - 5 - i} for i in range(10)]
+    l1 = race_view.lanes(ev1, now=now)
+    assert l1[0]["status"] == "running" and l1[0]["activity"] > 0.25
+    h1 = race_view.render(l1, now)
+    assert cap not in h1 and "track moving" in h1 and "swerve" in h1
+    # two-word descriptions and clamp (56px lanes: container-query font, 2-line clamp, own strip below the track)
+    tw = race_view.two_words
+    assert tw("fix paper") == "fix paper" and tw("review", "review prereg for sim") == "review prereg"
+    assert tw("", "Search extensions catalog") == "Search extensions" and tw("", "", "engineer") == "engineer"
+    assert len(tw("", "supercalifragilisticexpialidocious pneumonoultramicroscopic")) <= race_view.DESC_MAX
+    hh = race_view.render(race_view.lanes(ev0 + [{"hook_event_name": "SubagentStart", "agent_id": "z", "agent_type": "engineer",
+                          "task": "engineer: fix paper figures", "ts": now - 5}], now=now), now)
+    assert "fix paper" in hh and "min-width:56px" in hh and "-webkit-line-clamp:2" in hh and "clamp(5px,12cqw,8px)" in hh
+    w_css = hh.split(".runner .w{")[1].split("}")[0]
+    assert "overflow:hidden" in w_css and "max-width:100%" in w_css and 'class="desc"' not in hh
+    # label sits in the same runner as its car (moves with it), after the car svg, for every state
+    import re as _re
+    for blk in _re.findall(r'<div class="runner[^"]*".*?</span></div>', hh):
+        assert blk.index("<svg class=\"car\"") < blk.index('class="w"'), blk
+    # the runner (car + 2 label lines, about 90px) fits the 300px track in every state:
+    # running progress<=0.9 -> bottom<=180px; loop bottom<=200px; parked top 22px; crash top 48px
+    assert race_view.TRACK_H >= 200 + 90 and 48 + 90 < race_view.TRACK_H
+    ok("race view: coordinator lane (idle/running), retry rules, moving road and idle caption")
 
 
 def test_agents_tab_roles():
@@ -1645,6 +1694,7 @@ if __name__ == "__main__":
         test_json_reply_and_inline_edit()
         test_labels_and_race()
         test_race_activity_obstacles()
+        test_race_coordinator_and_retries()
         test_deputy()
         test_voice()
         test_k8s_view()
