@@ -104,3 +104,9 @@ as in PLAN §8.2. W0 runs first (sim-first priority, 2026-10-17).
 ## 2026-10-17 — IBM Quantum in this paper (R-20261017-011, researcher chose option 1)
 Yes, inference only: the final trained model is evaluated on IBM hardware with a few QPU-seconds; training stays in
 simulation; no speed-up claims. Each job still needs its own approval (D9).
+
+## 2026-10-17 — W0 exploratory study (R-20261017-014, researcher chose option 1)
+Both Sim v2.1 gates failed and remain failed; PLAN §8.1 amended (see there) to allow a bounded exploratory W0 study
+with unchanged provisional parameters, a disclosed Kubernetes-HPA comparator, development-range evaluation seeds,
+final test seeds untouched; calibration prepared in parallel. Researcher also asked (M-20261017-068) that the HPA be
+reverse-engineered from the official Kubernetes docs/source.

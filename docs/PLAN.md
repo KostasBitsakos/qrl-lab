@@ -400,6 +400,17 @@ Sanity gates before any comparison: "always min", "always max" and "static best 
 threshold policy; an oracle that knows `λ(t+h)` gives the upper bound. `tools/sanity_trivial_policies.py`
 is extended to Sim v2.
 
+**Amendment 2026-10-17 (R-20261017-014, approved by the researcher; wording from the Codex review).**
+Gate results: original preflight FAIL (R-20261017-004), rev-1 common-start gate FAIL (R-20261017-013; threshold vs
+static_ramp −6.9k, 95% CI [−8.5k, −5.2k], 0/10). "The original and rev-1 gates failed and remain failed. After
+observing these failures, we authorize a bounded exploratory W0 study under unchanged, uncalibrated parameters. This
+waives §8.1's threshold-superiority prerequisite; it does not establish simulator validity. Static-ramp and
+preprovisioned fixed_best remain primary deployable comparators; oracle replay is a clairvoyant reference. No
+parameter, workload, or acceptance-rule changes will follow these results. Confirmatory claims require calibration
+and separately frozen evaluation." A Kubernetes-HPA baseline (docs/hpa_spec.md) is a disclosed post-hoc comparator,
+frozen before the run. Final test seeds (20000+) stay untouched until the calibrated study. Calibration (δ, k, θ, d)
+is prepared in parallel.
+
 ### 8.2 Workloads `[DECISION PENDING]`
 - **W0** sine + noise + spikes: continuity with previous work.
 - **W1** non-homogeneous Poisson with a daily `λ(t)` + MMPP bursts (normal/burst regimes). Plain Poisson with a
