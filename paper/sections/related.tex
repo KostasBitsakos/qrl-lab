@@ -1,7 +1,7 @@
 \section{Related Work}\label{sec:related}
 % Draft 2026-10-17 (writer). Every statement about a cited work is checked against paper/notes/related_work.md,
 % paper/notes/load_metrics_literature.md or docs/papers/dinos_claims.md. Self-citations in the third person
-% (double-blind venues).
+% (double-blind venues). Revised to the researcher's style (notes/style_guide.md).
 
 \paragraph{Autoscaling of cloud applications.}
 Lorido-Botran et al.~\cite{lorido2014review} survey autoscaling techniques for elastic applications in the
@@ -14,7 +14,7 @@ pods~\cite{zhou2023ahpa}. The AHPA description is a preprint. We use a threshold
 as a baseline and a per-pod queueing model inside our simulator.
 
 \paragraph{Deep reinforcement learning for autoscaling.}
-DERP~\cite{bitsakos2018derp} applied deep reinforcement learning to elastic resource provisioning in the cloud.
+DERP~\cite{bitsakos2018derp} applied Deep RL to elastic resource provisioning in the cloud.
 DInos~\cite{bitsakos2025dinos} compares against an enhanced version of DERP. As published, the DInos agent
 observes a window of recent metrics (load, CPU, memory, latency and the number of pods), processes it with an
 LSTM~\cite{hochreiter1997lstm}, and chooses every 15 seconds whether to add a pod, remove one or do nothing. The
@@ -35,7 +35,7 @@ time in the system. For latency-critical services the tail matters more than the
 Measured tails of servers such as Memcached are worse than queueing models predict, because of interference from the
 hardware, the operating system and the application~\cite{li2014tales}, and queueing and scheduling delays cause
 violations of sub-millisecond targets at high utilization~\cite{leverich2014reconciling}. On the workload side,
-Atikoglu et al.~\cite{atikoglu2012workload} analyse traces of a large Memcached deployment, Bodik et
+Atikoglu et al.~\cite{atikoglu2012workload} analyze traces of a large Memcached deployment, Bodik et
 al.~\cite{bodik2010spikes} characterize and generate workload spikes for stateful services, and Markov-modulated
 Poisson processes~\cite{fischer1993mmpp} are a standard way to add bursts to a Poisson arrival stream. Production
 traces such as the Azure Functions trace show daily and weekly patterns~\cite{shahrad2020serverless}. Scaling a
@@ -62,3 +62,7 @@ check the methods section of bitsakos2025quantuml.} None of the five quantum stu
 addresses autoscaling, where the effect of an action is delayed, the reward trades cost against latency, and the policy must eventually run against a real
 cluster within the control interval.\todo{Scholar: search for quantum RL applied to cloud or resource management
 before any novelty statement is added here.}
+
+In summary, each of these lines of work supplies one part of our study: the threshold baseline, the DInos agent
+that Sofia extends, the structure of the simulator, and the variational circuit that replaces part of the
+Q-network.

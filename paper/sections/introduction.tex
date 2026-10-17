@@ -1,5 +1,6 @@
 \section{Introduction}\label{sec:intro}
-% Draft 2026-10-17 (writer). Claims are listed in paper/claims.md (rows I1-I9). No results are stated as facts.
+% Draft 2026-10-17 (writer), revised to the researcher's style (notes/style_guide.md). Claims are listed in
+% paper/claims.md (rows I1-I13). No results are stated as facts.
 
 An in-memory key--value store such as Redis is often the first component to feel a change in load. When it runs
 on Kubernetes, the operator chooses how many pods serve the cluster. Too few pods and requests queue up, so tail
@@ -11,8 +12,8 @@ threshold baseline we use, the rule responds to load that has already arrived. A
 is pulled and it becomes ready~\cite{k8sslos,harter2016slacker}, and in Redis Cluster hash slots must then be
 moved to it before it takes its share of the keys~\cite{redisdocs_scaling,redisdocs_clusterspec}.
 
-Learning-based autoscalers try to act before the load arrives. DERP~\cite{bitsakos2018derp} applied deep
-reinforcement learning to elastic resource provisioning. DInos~\cite{bitsakos2025dinos} targets autoscaling
+Learning-based autoscalers aim to be proactive: they try to act before the load arrives.
+DERP~\cite{bitsakos2018derp} applied Deep Reinforcement Learning (Deep RL) to elastic resource provisioning. DInos~\cite{bitsakos2025dinos} targets autoscaling
 that generalizes across stateless cloud applications. As published, its agent observes load, CPU, memory,
 latency and the number of pods over a window of recent steps, processes the window with a Long Short-Term Memory
 (LSTM) network~\cite{hochreiter1997lstm}, and chooses every 15 seconds whether to add a pod, remove one or do
@@ -42,8 +43,7 @@ knows future arrivals gives an upper bound on the reward. Its parameters are pro
 pilot on a real cluster.\todo{D8: the researcher decides whether the paper says that the DInos simulator had
 this property (PLAN F1). Until then the condition is stated without attribution.}
 
-This paper presents Sofia, a hybrid quantum--classical deep reinforcement learning agent for Kubernetes
-autoscaling. Sofia keeps the three DInos actions and replaces part of the Q-network with a VQC of \resQubits{}
+In this paper, we introduce Sofia, a hybrid quantum--classical Deep RL agent for Kubernetes autoscaling. Sofia keeps the three DInos actions and replaces part of the Q-network with a VQC of \resQubits{}
 qubits.\todo{Which part (D5): full Q-function, head after a small encoder, or the fine-tuned adaptation layer.
 Rewrite this sentence and the second contribution once decided.} Its input differs from both the published
 DInos state and the legacy implementation, which also fed the pod capacity to the network. We propose a common
@@ -52,13 +52,13 @@ cluster: completed operations per second, CPU utilization, p95 latency, failed r
 numbers of ready and pending pods. Memory is left out because, in our simulator, it would only mirror the
 request backlog.
 
-The paper makes four contributions. First, we describe a simulator for Redis on Kubernetes in which the reward
+Building on these observations, we make four contributions. First, we describe a simulator for Redis on Kubernetes in which the reward
 depends on the scaling action through queueing, start-up delay and rebalancing, together with the sanity gates and
 the oracle bound that every agent comparison has to pass (Section~\ref{sec:simv2}). Second, we design Sofia and
 specify its circuit, its encoding of the metric window and its training procedure (Section~\ref{sec:quantum}).
-Third, we define an evaluation protocol and apply it (Section~\ref{sec:eval}). Sofia is compared with DInos
-retrained in the same simulator, a threshold policy modelled on the HPA, trivial fixed policies, the oracle bound,
-a parameter-matched classical control and, where only a small part of the network is adapted, a classical
+Third, we define an evaluation protocol and apply it (Section~\ref{sec:eval}). We compare Sofia with DInos
+retrained in the same simulator, a threshold policy modeled on the HPA, trivial fixed policies, the oracle bound and
+a parameter-matched classical control. Where only a small part of the network is adapted, we add a classical
 control that fine-tunes the same number of parameters on a frozen encoder. Every learning agent gets the same
 hyperparameter search budget. The workloads range from a periodic load with noise and spikes, as in DInos, to a
 bursty Poisson-based load, a replayed production trace and a load whose pattern shifts mid-run\todo{Workload list
@@ -70,7 +70,7 @@ runs are not done, the paper cannot claim this contribution.} Our circuits run o
 simulator\todo{Add IBM hardware agreement (\resHWAgreement) only if D9 runs are done.}, and none of our results
 is a claim about quantum speed-up.
 
-Section~\ref{sec:bg} gives background on Kubernetes autoscaling, Redis and variational circuits.
+The rest of the paper is structured as follows. Section~\ref{sec:bg} gives background on Kubernetes autoscaling, Redis and variational circuits.
 Section~\ref{sec:related} reviews related work. Section~\ref{sec:system} describes the system and
 Section~\ref{sec:simv2} the simulator. Sections~\ref{sec:agents} and~\ref{sec:quantum} present the agents,
 the baselines and the quantum component. Section~\ref{sec:eval} reports the evaluation,

@@ -1,18 +1,19 @@
-% Draft 2026-10-17 (writer), revised after Codex review. No results yet: the evaluation is described as a
-% protocol. Once results are frozen, add one sentence with \resSLAViolQuantum, \resSLAViolDInos,
-% \resParamsQuantum, \resParamsDInos, \resParamsControl and \resNumSeeds.
+% Draft 2026-10-17 (writer), revised after Codex review and to the researcher's style (notes/style_guide.md).
+% No results yet: the evaluation is described as a protocol. Once results are frozen, add one sentence with
+% \resSLAViolQuantum, \resSLAViolDInos, \resParamsQuantum, \resParamsDInos, \resParamsControl and \resNumSeeds.
 Autoscaling a Redis cluster on Kubernetes is a control problem with delays. A new pod helps only after it has
-started and joined the cluster, so a rule that reacts to the current CPU level tends to add capacity after the
-load has already risen. Deep reinforcement learning agents such as DInos learn proactive policies from a window
-of recent metrics and adapt them to a new environment by fine-tuning. In the DInos implementation, almost all of
-the Q-network's parameters sit in a recurrent encoder, and fine-tuning updates all of them.
-We present Sofia, a hybrid agent in which a variational quantum circuit replaces part of the DInos
-Q-network.\todo{Name the quantum component once D5 (candidate selection) is decided.}
-To evaluate it, we build a simulator in which latency follows from a queueing model of the Redis pods and pod
+started and joined the cluster. A threshold rule that reacts to the current CPU level, such as the Horizontal
+Pod Autoscaler (HPA) scaling on CPU, therefore tends to add capacity after the load has already risen. Deep
+Reinforcement Learning (Deep RL) agents such as DInos learn proactive policies from a window of recent metrics
+and adapt them to a new environment by fine-tuning. In the DInos implementation, almost all of the Q-network's
+parameters sit in a recurrent encoder, and fine-tuning updates all of them.
+In this paper, we introduce Sofia, a hybrid quantum--classical Deep RL agent in which a variational quantum
+circuit replaces part of the DInos Q-network.\todo{Name the quantum component once D5 (candidate selection) is decided.}
+To evaluate it, we build a simulator in which latency follows from a queueing model of the Redis pods, and pod
 start-up and data rebalancing take time. Before any agent is compared, the simulator must pass sanity gates:
 trivial fixed policies have to lose to a tuned threshold autoscaler.
-The protocol compares Sofia with DInos retrained in the same simulator, a threshold policy modelled on the
-Kubernetes Horizontal Pod Autoscaler, and a classical network with as many trainable parameters as Sofia. It
-measures SLA violations, tail latency, sample efficiency, adaptation and model size, and checks whether the
-ranking holds on a real cluster.\todo{Results sentence with macros once results are frozen.}
+Our protocol compares Sofia with DInos retrained in the same simulator, a threshold policy modeled on the HPA,
+and a classical network with as many trainable parameters as Sofia. It measures SLA violations, tail latency,
+sample efficiency, adaptation and model size, and checks whether the ranking holds on a real
+cluster.\todo{Results sentence with macros once results are frozen.}
 All circuits run on a classical simulator, and we make no claim about quantum speed-up.
