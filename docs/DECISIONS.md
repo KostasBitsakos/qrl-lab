@@ -115,3 +115,13 @@ reverse-engineered from the official Kubernetes docs/source.
 Every venue in `docs/deadlines.json` / `docs/VENUES.md`, now and in future updates, includes the CORE tier (source and
 year) and the acceptance rate of the last 3 editions from official sources (proceedings front matter in IEEE Xplore /
 ACM DL, conference or steering-committee pages). Rates that cannot be found are marked as not found, never estimated.
+
+## 2026-10-17 — Reward = researcher's DInos reward on Sim v2; classical scope; calibration in parallel (R-20261017-017, council C-20261017-02)
+- Training reward: r = 3·L − 5·D − 10·N − 0.5·U − 0.5·M (coefficients from ~/simulations/.../Quantum/environment.py:90-94),
+  through a documented adapter frozen before any training: L = 10·λ/μ_ref, D = p95 over ALL requests (timed-out/dropped
+  counted at the 60 s timeout) / SLO, N = ready+pending pods, U = CPU % points, M = memory % (constant per pod until
+  measured in calibration stage B; disclosed). Sim v2 cost/SLA quantities are reported metrics only.
+- Methods: K8s HPA, DERP, DInos (no transfer), DInos+T. Quantum work paused (D5 deferred).
+- Realism: literature review + calibration stage B (multi-pod sweeps; separate approval) before any final result.
+- Isolation: sim runs pinned to dedicated cores + one busy/quiet determinism check; real-cluster runs in a quiet window.
+- Exploratory W0 R-20261017-015 (old reward) finishes as a pipeline test only; its numbers are not used for claims.
