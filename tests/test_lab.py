@@ -421,6 +421,8 @@ def test_health_watch():
     r = d("5-hour limit reached ∙ resets at 11pm (UTC) │\n", True, "node")
     assert r["state"] == "limit" and r["detail"] == "11pm (UTC)", r
     assert d("Your usage limit has been reached", True)["state"] == "limit"
+    r = d("You've hit your session limit · resets 3:20am (UTC)", True, "claude")  # seen live 2026-10-17
+    assert r["state"] == "limit" and r["detail"] == "3:20am (UTC)", r
     assert d("Do you want to proceed?\n❯ 1. Yes\n  2. No", True)["state"] == "permission"
     assert d("Claude needs your permission to use Bash", True)["state"] == "permission"
     assert d("│ ❯ 1. Yes, and don't ask again", True)["state"] == "permission"
