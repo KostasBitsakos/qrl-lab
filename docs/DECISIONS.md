@@ -125,3 +125,7 @@ ACM DL, conference or steering-committee pages). Rates that cannot be found are 
 - Realism: literature review + calibration stage B (multi-pod sweeps; separate approval) before any final result.
 - Isolation: sim runs pinned to dedicated cores + one busy/quiet determinism check; real-cluster runs in a quiet window.
 - Exploratory W0 R-20261017-015 (old reward) finishes as a pipeline test only; its numbers are not used for claims.
+
+## 2026-10-17 — SLO for the DInos reward from calibration (R-20261017-018)
+SLO = 2 × measured single-pod p95 latency at 50 % offered load (calibration stage B), frozen before any training. Agent
+training under reward=dinos waits for that measurement; 11.98 ms (params.py, model-derived) is not used for results.
