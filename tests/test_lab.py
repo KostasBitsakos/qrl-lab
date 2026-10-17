@@ -368,6 +368,41 @@ def test_labels_and_race():
     ok("task labels (--label, derivation, Agent-call lookup) and race HTML (fixture events, escaping, no JS)")
 
 
+def test_race_activity_obstacles():
+    import race_view
+    now = 2_000_000.0
+    ev = []
+    # three finished engineer runs of 100 s (median 100 s), one failed scholar, a retried codex-reviewer, a slow engineer
+    for i in range(3):
+        ev += [{"hook_event_name": "SubagentStart", "agent_id": f"d{i}", "agent_type": "engineer", "label": f"t{i}", "ts": now - 5000 + i},
+               {"hook_event_name": "SubagentStop", "agent_id": f"d{i}", "agent_type": "engineer", "status": "done", "ts": now - 4900 + i}]
+    ev += [{"hook_event_name": "SubagentStart", "agent_id": "slow", "agent_type": "engineer", "label": "big", "ts": now - 900},
+           {"hook_event_name": "SubagentStart", "agent_id": "busy", "agent_type": "scholar", "label": "lit", "ts": now - 60},
+           {"hook_event_name": "SubagentStart", "agent_id": "calm", "agent_type": "writer", "label": "txt", "ts": now - 60},
+           {"hook_event_name": "SubagentStart", "agent_id": "f1", "agent_type": "runner", "label": "go", "ts": now - 400},
+           {"hook_event_name": "SubagentStop", "agent_id": "f1", "agent_type": "runner", "status": "failed", "ts": now - 300},
+           {"hook_event_name": "SubagentStart", "agent_id": "r1", "agent_type": "codex-reviewer", "label": "rev", "ts": now - 200},
+           {"hook_event_name": "SubagentStop", "agent_id": "r1", "agent_type": "codex-reviewer", "status": "done", "ts": now - 150},
+           {"hook_event_name": "SubagentStart", "agent_id": "r2", "agent_type": "codex-reviewer", "label": "rev", "ts": now - 100}]
+    ev += [{"hook_event_name": "PreToolUse", "agent_id": "busy", "agent_type": "scholar", "summary": "x", "ts": now - 30 + i} for i in range(20)]
+    health = {"claude": {"state": "ok"}, "codex": {"state": "limit"}}
+    by = {r["role"] + ":" + r["label"]: r for r in race_view.lanes(ev, now=now, health=health) if r["status"] != "done" or r["role"] == "engineer"}
+    assert by["scholar:lit"]["activity"] > by["writer:txt"]["activity"] > 0, "more tool events = more activity"
+    assert by["writer:txt"]["activity"] <= 0.3 and by["writer:txt"]["obstacles"] == 0 and not by["writer:txt"]["reasons"]
+    assert by["engineer:big"]["reasons"] == ["πολύ πιο αργός από το κανονικό"] and by["engineer:big"]["obstacles"] == 1
+    assert by["runner:go"]["final"] and by["runner:go"]["reasons"] == ["απέτυχε"]
+    rr = by["codex-reviewer:rev"]
+    assert rr["status"] == "running" and rr["reasons"] == ["επανάληψη ×1", "Codex: όριο χρήσης"] and rr["obstacles"] == 2, rr
+    assert by["engineer:t0"]["activity"] == 0 and by["engineer:t0"]["obstacles"] == 0
+    h = race_view.render(race_view.lanes(ev, now=now, health=health), now)
+    assert "<script" not in h and "swerve" in h and "dodge" in h and "💥" in h and "απέτυχε" in h and "όριο χρήσης" in h
+    assert "min-width:56px" in h
+    # claude health reaches non-codex running lanes only
+    b2 = {r["role"] + ":" + r["label"]: r for r in race_view.lanes(ev, now=now, health={"claude": {"state": "limit"}})}
+    assert "Claude: όριο χρήσης" in b2["writer:txt"]["reasons"] and "Claude: όριο χρήσης" not in b2["codex-reviewer:rev"]["reasons"]
+    ok("race view: activity and obstacle derivation from synthetic logs (failed, retry, slow, health) and render")
+
+
 def test_agents_tab_roles():
     from streamlit.testing.v1 import AppTest
     now = time.time()
@@ -1609,6 +1644,7 @@ if __name__ == "__main__":
         test_edit_messages()
         test_json_reply_and_inline_edit()
         test_labels_and_race()
+        test_race_activity_obstacles()
         test_deputy()
         test_voice()
         test_k8s_view()

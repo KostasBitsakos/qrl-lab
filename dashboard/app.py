@@ -834,7 +834,8 @@ with tab_agents:
             return
         now_ = dt.datetime.now()
         if race_on:
-            ln = race_view.lanes(race_view.load_events(EVENTS), roles={k: (v[0], v[1]) for k, v in AGENTS.items()})
+            ln = race_view.lanes(race_view.load_events(EVENTS), roles={k: (v[0], v[1]) for k, v in AGENTS.items()},
+                            health=race_view.load_health(HEALTH))
             page, hgt = race_view.render(ln), race_view.height_for(len(ln))
             try:  # st.components.v1.html is deprecated in newer Streamlit; st.iframe takes the same HTML string
                 components.html(page, height=hgt, scrolling=True)
