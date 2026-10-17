@@ -903,6 +903,72 @@ def test_perm_section_in_sudo_tab():
     ok("dashboard: terminal permission request shown in Sudo tab and approved by click")
 
 
+def test_perm_banner_end_to_end():
+    """Pending request -> global banner on every tab (tailnet off and on) -> approve -> hook returns allow."""
+    from streamlit.testing.v1 import AppTest
+    from unittest import mock
+    import perm_store, perm_hook, access, web_terminal, json as _j
+    import streamlit as _st
+    app = os.path.join(TMP, "dashboard", "app.py")
+    ev = _j.dumps({"hook_event_name": "PermissionRequest", "tool_name": "Bash", "cwd": "/w",
+                   "tool_input": {"command": "echo e2e-banner", "description": "e2e"}})
+
+    # tailnet off: banner with approve button, click approves, hook allows
+    def click_ok(_):
+        pass
+    rid = perm_store.create("Bash", {"command": "echo e2e-banner", "description": "e2e"}, "/w", TMP)
+    at = AppTest.from_file(app, default_timeout=60).run()
+    assert not at.exception, at.exception
+    assert any("Ο συντονιστής ζητά άδεια" in e.value and "απομένουν" in e.value for e in at.error), [e.value for e in at.error]
+    [b for b in at.button if b.key == f"banner_ok_{rid}"][0].click(); at.run()
+    assert not at.exception, at.exception
+    assert perm_store.read(rid, TMP)["state"] == "approved"
+
+    def approve_pending(_):
+        for r in perm_store.pending(TMP):
+            perm_store.decide(r["id"], True, root=TMP)
+    # the hook itself: a record approved by the dashboard click yields allow
+    rid2 = perm_store.create("Bash", {"command": "echo hook"}, "/w", TMP)
+    assert perm_store.decide(rid2, True, root=TMP)
+    assert perm_hook.handle(ev, root=TMP, wait=5, poll=0, sleep=approve_pending) == perm_hook.out("allow")
+
+    # tailnet on: PIN form inside the banner, wrong PIN refused, right PIN reveals the approve button
+    access.set_pin("e2e-pin-123")
+    cfg = access.load_config(); cfg["allowed_logins"] = ["me@example.org"]; access._write("access.json", cfg)
+    rid3 = perm_store.create("Bash", {"command": "echo tailnet"}, "/w", TMP)
+    hdrs = {"Host": "box.tail1234.ts.net", "Tailscale-User-Login": "me@example.org"}
+    cookies = {}
+    ctx = type(_st.context)
+    with mock.patch.object(ctx, "headers", new=property(lambda self: hdrs)), \
+            mock.patch.object(ctx, "cookies", new=property(lambda self: cookies)), \
+            mock.patch.object(web_terminal, "tailnet_host", lambda h: "box.tail1234.ts.net"):
+        at = AppTest.from_file(app, default_timeout=60).run()
+        assert not at.exception, at.exception
+        assert any("Ο συντονιστής ζητά άδεια" in e.value for e in at.error)
+        assert not [b for b in at.button if b.key == f"banner_ok_{rid3}"], "approve must be hidden before PIN"
+        ti = [t for t in at.text_input if t.label == "PIN"]
+        assert ti, "PIN form missing in banner"
+        ti[0].set_value("e2e-pin-123")
+        [b for b in at.button if b.label == "Ξεκλείδωμα"][0].click(); at.run()
+        assert not at.exception, at.exception
+        assert at.session_state["pin_until"] > time.time()
+        tok = at.session_state["_set_cookie"] if "_set_cookie" in at.session_state else None
+        [b for b in at.button if b.key == f"banner_ok_{rid3}"][0].click(); at.run()
+        assert perm_store.read(rid3, TMP)["state"] == "approved"
+        # F5 / new session with the cookie: unlocked without PIN; wrong cookie or other login: locked
+        tok, exp = access.issue_unlock("me@example.org")
+        assert access.check_unlock("me@example.org", tok) == exp
+        assert not access.check_unlock("other@example.org", tok) and not access.check_unlock("me@example.org", "bad")
+        rid4 = perm_store.create("Bash", {"command": "echo f5"}, "/w", TMP)
+        cookies[access.COOKIE] = tok
+        at = AppTest.from_file(app, default_timeout=60).run()
+        assert [b for b in at.button if b.key == f"banner_ok_{rid4}"], "cookie should unlock after F5"
+        cookies[access.COOKIE] = "bad"
+        at = AppTest.from_file(app, default_timeout=60).run()
+        assert not [b for b in at.button if b.key == f"banner_ok_{rid4}"]
+    ok("perm banner: shown on all tabs, inline PIN, approve -> hook allow, unlock survives F5 via server-side cookie token")
+
+
 def test_k8s_view():
     import k8s_view as kv
     from unittest import mock
@@ -2096,6 +2162,7 @@ if __name__ == "__main__":
     print(f"QRL-Lab tests in {TMP}")
     try:
         test_message_round_trip()
+        test_perm_banner_end_to_end()
         test_models_view()
         test_models_arch_config_equivalence()
         test_models_apply_to_code()

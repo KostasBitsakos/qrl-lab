@@ -188,6 +188,35 @@ def try_pin(pin, info, post=None, now=None):
     return False, f"Λάθος PIN ({MAX_FAILS - len(st['fails'])} προσπάθειες ακόμη)."
 
 
+# ---- PIN unlock that survives F5: server-side store keyed by Tailscale login + random per-browser cookie token.
+# The store keeps only sha256(token); the token cookie is set from JS (not HttpOnly), so it is bound to the login too.
+COOKIE = "qrl_unlock"
+
+
+def _sessions():
+    return _read("pin_sessions.json", {})
+
+
+def issue_unlock(login, now=None):
+    """Returns (token, expiry). Call only after a successful try_pin."""
+    now = now or time.time()
+    token = secrets.token_urlsafe(32)
+    sess = {k: v for k, v in _sessions().items() if v.get("exp", 0) > now}
+    sess[hashlib.sha256(token.encode()).hexdigest()] = {"login": login, "exp": now + UNLOCK_SECONDS}
+    _write("pin_sessions.json", sess)
+    return token, now + UNLOCK_SECONDS
+
+
+def check_unlock(login, token, now=None):
+    """-> expiry timestamp if token is valid for this login, else 0."""
+    if not token or not login:
+        return 0
+    rec = _sessions().get(hashlib.sha256(str(token).encode()).hexdigest())
+    if rec and rec.get("login") == login and rec.get("exp", 0) > (now or time.time()):
+        return rec["exp"]
+    return 0
+
+
 def main(argv):
     if len(argv) > 1 and argv[1] == "set-pin":
         import getpass

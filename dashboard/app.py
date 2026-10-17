@@ -116,7 +116,18 @@ if _on_tailnet:
         access.alert(_cinfo, _why)
         st.error("Δεν επιτρέπεται η πρόσβαση.", icon="🚫")
         st.stop()
+if _on_tailnet and st.session_state.get("pin_until", 0) <= time.time():
+    try:  # unlock survives F5 / new session: server-side token store keyed by Tailscale login + per-browser cookie
+        _exp = access.check_unlock(_cinfo["login"], st.context.cookies.get(access.COOKIE))
+    except Exception:  # noqa: BLE001
+        _exp = 0
+    if _exp:
+        st.session_state["pin_until"] = _exp
 _unlocked = (not _on_tailnet) or st.session_state.get("pin_until", 0) > time.time()
+if st.session_state.get("_set_cookie"):  # one-shot after a successful PIN: store the token in this browser
+    _tok = st.session_state.pop("_set_cookie")
+    components.html(f"<script>try{{window.parent.document.cookie='{access.COOKIE}={_tok}; max-age={access.UNLOCK_SECONDS}; "
+                    f"path=/; SameSite=Strict; Secure';}}catch(e){{}}</script>", height=0)
 
 
 def pin_form(name):
@@ -131,7 +142,9 @@ def pin_form(name):
         if st.form_submit_button("Ξεκλείδωμα"):
             ok_, msg = access.try_pin(pin, _cinfo)
             if ok_:
-                st.session_state["pin_until"] = time.time() + access.UNLOCK_SECONDS
+                tok_, exp_ = access.issue_unlock(_cinfo["login"])
+                st.session_state["pin_until"] = exp_
+                st.session_state["_set_cookie"] = tok_
                 st.rerun()
             st.error(msg)
 
@@ -692,6 +705,39 @@ def show_thread(tid, key="chat", title=None):
             break
 
 
+# ---------------------------------------------------------------- global banner: pending terminal permission requests
+SUDO_TAB = "🔐 Sudo"
+
+
+def _go_sudo():
+    st.session_state["tab"] = SUDO_TAB
+
+
+@st.fragment(run_every=3)
+def perm_banner():
+    pend = perm_store.pending()
+    if not pend:
+        return
+    unlocked = (not _on_tailnet) or st.session_state.get("pin_until", 0) > time.time()
+    with st.container(border=True):
+        for pr in pend:
+            left = max(0, int(90 - (time.time() - pr["ts"])))
+            st.error(f"🔐 Ο συντονιστής ζητά άδεια: {pr['description']} — απομένουν ~{left} δευτ.", icon="🔐")
+            if unlocked:
+                st.code(pr["detail"] or "(κενό)", language="bash" if pr["tool"] == "Bash" else "text")
+                c = st.columns(3)
+                if c[0].button("Έγκριση", key=f"banner_ok_{pr['id']}", type="primary"):
+                    perm_store.decide(pr["id"], True)
+                    st.rerun()
+                if c[1].button("Απόρριψη", key=f"banner_no_{pr['id']}"):
+                    perm_store.decide(pr["id"], False, "Απορρίφθηκε από τον ερευνητή στο dashboard.")
+                    st.rerun()
+                c[2].button("Άνοιγμα καρτέλας Sudo", key=f"banner_go_{pr['id']}", on_click=_go_sudo)
+        if not unlocked:
+            pin_form("banner")
+
+
+perm_banner()
 # ---------------------------------------------------------------- tabs
 d0 = db()
 n_open = len(d0.requests(state="open"))
