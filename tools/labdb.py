@@ -268,6 +268,13 @@ class LabDB:
         body = (body or "").strip()
         if not body:
             raise LabError("Empty body.")
+        raw_body = None
+        import sys
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from replytext import readable  # agents sometimes pass codex/claude JSON output verbatim
+        text, was_json = readable(body)
+        if was_json:
+            raw_body, body = body, text.strip()
         if author == "researcher":
             raise LabError("Agents cannot post as the researcher.")
         if kind not in MESSAGE_KINDS:
@@ -289,6 +296,11 @@ class LabDB:
                 c.execute("UPDATE messages SET status=?, updated_at=? WHERE id=? AND author='researcher'",
                           (set_status, t, target))
             self._audit(c, author, "post", mid, f"reply_to={reply_to} status={set_status}")
+        if raw_body is not None:
+            rawdir = os.path.join(lab_dir(), "raw")
+            os.makedirs(rawdir, exist_ok=True)
+            with open(os.path.join(rawdir, f"{mid}.json"), "w", encoding="utf-8") as f:
+                f.write(raw_body)
         return mid
 
     def take(self, mid, actor="coordinator"):

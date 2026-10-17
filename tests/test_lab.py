@@ -1373,6 +1373,53 @@ def test_paper_plots():
     ok("paper plots: aggregation over seeds, request ids, result images, comparison figure")
 
 
+def test_json_reply_and_inline_edit():
+    import replytext
+    codex = "\n".join(json.dumps(e) for e in [
+        {"type": "thread.started", "thread_id": "x"},
+        {"type": "item.completed", "item": {"type": "reasoning", "text": "hidden thoughts"}},
+        {"type": "item.completed", "item": {"type": "agent_message", "text": "Κώστα, το review τελείωσε."}},
+        {"type": "turn.completed", "usage": {"input_tokens": 1}}])
+    t, j = replytext.readable(codex)
+    assert j and t == "Κώστα, το review τελείωσε.", t
+    t, j = replytext.readable(json.dumps({"type": "result", "result": "**Έτοιμο**", "usage": {"a": 1}}))
+    assert j and t == "**Έτοιμο**"
+    t, j = replytext.readable(json.dumps([{"type": "text", "text": "α"}, {"type": "text", "text": "β"}]))
+    assert j and t == "α\n\nβ"
+    assert replytext.readable("Απλό κείμενο {όχι json}") == ("Απλό κείμενο {όχι json}", False)
+    assert replytext.readable('{"broken": ')[1] is False
+    db = LabDB()
+    root = db.researcher_send("ερώτηση")
+    rid = db.post("codex", json.dumps({"type": "result", "result": "Καθαρή απάντηση"}), root, model="gpt-6.1-sol")
+    assert db.message(rid)["body"] == "Καθαρή απάντηση"
+    raw = os.path.join(TMP, ".lab", "raw", f"{rid}.json")
+    assert json.loads(open(raw, encoding="utf-8").read())["result"] == "Καθαρή απάντηση"
+    db.close()
+    ok("JSON-shaped agent replies become readable text; raw kept in .lab/raw")
+
+
+def test_inline_edit_ui():
+    from streamlit.testing.v1 import AppTest
+    db = LabDB()
+    mid = db.researcher_send("λάθος κείμενο")
+    db.close()
+    at = AppTest.from_file(os.path.join(TMP, "dashboard", "app.py"), default_timeout=60).run()
+    assert not at.exception, at.exception
+    assert not [e for e in at.expander if "Επεξεργασία μηνύματός" in str(e.label)]
+    btn = [b for b in at.button if b.key and b.key.endswith(f"_{mid}") and b.key.startswith("edit_btn_")]
+    assert btn, "no inline edit button"
+    btn[0].click().run()
+    ta = [t for t in at.text_area if t.key and t.key.endswith(f"_{mid}") and t.key.startswith("edit_txt_")]
+    assert ta, "no in-place text area"
+    ta[0].set_value("σωστό κείμενο").run()  # a refresh/rerun keeps the typed text
+    assert [t for t in at.text_area if t.key and t.key.startswith("edit_txt_")][0].value == "σωστό κείμενο"
+    [b for b in at.button if b.key and b.key.startswith("edit_save_")][0].click().run()
+    db = LabDB()
+    assert db.message(mid)["body"] == "σωστό κείμενο" and db.message(mid)["edit_count"] == 1
+    db.close()
+    ok("inline edit: button on the message, in-place text area, save")
+
+
 if __name__ == "__main__":
     print(f"QRL-Lab tests in {TMP}")
     try:
@@ -1392,6 +1439,7 @@ if __name__ == "__main__":
         test_sudo_ui()
         test_perm_hook()
         test_edit_messages()
+        test_json_reply_and_inline_edit()
         test_labels_and_race()
         test_deputy()
         test_voice()
@@ -1404,6 +1452,7 @@ if __name__ == "__main__":
         try:
             import streamlit  # noqa: F401
             test_dashboard()
+            test_inline_edit_ui()
             test_agents_tab_roles()
             test_paper_tab()
             test_prom_tab()

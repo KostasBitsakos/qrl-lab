@@ -27,6 +27,7 @@ os.environ["QRL_LAB_DIR"] = ROOT
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 from labdb import DECISIONS, PAPER_REVIEWERS, PAPER_THREAD_TITLE, PAPER_WRITERS, LabDB, LabError, map_choice  # noqa: E402
 import file_view  # noqa: E402
+import replytext  # noqa: E402
 import k8s_view  # noqa: E402
 import prom_view  # noqa: E402
 import web_terminal  # noqa: E402
@@ -366,7 +367,7 @@ health_banner()
 
 # ---------------------------------------------------------------- shared chat rendering
 @st.fragment(run_every=refresh)
-def show_thread(tid, key="chat"):
+def show_thread(tid, key="chat", title=None):
     dd = db()
     msgs = dd.thread(tid)
     dd.close()
@@ -375,7 +376,7 @@ def show_thread(tid, key="chat"):
     root = msgs[0]
     icon, label = MSG_STATUS.get(root["status"] or "", ("", ""))
     first = (root["title"] or (root["body"] or "").strip().splitlines()[0])[:80] if root["body"] else tid
-    st.markdown(f"**Κύρια συζήτηση** · {first} · `{tid}` · {icon} {label}")
+    st.markdown(f"**{title or 'Κύρια συζήτηση'}** · {first} · `{tid}` · {icon} {label}")
     with st.container(height=480):  # oldest first, newest at the bottom
         for m in msgs:
             name, avatar = author_info(m["author"])
@@ -389,7 +390,36 @@ def show_thread(tid, key="chat"):
                 label = f"{name} · {m['model']}" if m.get("model") else name
                 st.caption(f"**{label}** · {fmt_ts(m['ts'])} · {KIND_LABEL.get(m['kind'], m['kind'])}"
                            f"{extra} · `{m['id']}`")
-                st.markdown(file_view.linkify(m["body"]))  # render-time only; stored text unchanged
+                ekey = f"editing_{key}_{m['id']}"
+                if m["author"] == "researcher" and st.session_state.get(ekey):
+                    # editing in place: keyed widgets keep their text across the fragment's auto-refresh
+                    new_txt = st.text_area("Νέο κείμενο", value=m["body"], key=f"edit_txt_{key}_{m['id']}",
+                                           height=140, label_visibility="collapsed")
+                    if m["body"].find("docs/uploads/") >= 0:
+                        st.caption("Κράτα τις γραμμές με τις διαδρομές των συνημμένων στο κείμενο.")
+                    b1, b2, _b3 = st.columns([1, 1, 6])
+                    if b1.button("Αποθήκευση", key=f"edit_save_{key}_{m['id']}", type="primary"):
+                        try:
+                            de = db()
+                            changed = de.edit_message(m["id"], new_txt)
+                            de.close()
+                            st.session_state[ekey] = False
+                            st.toast("Αποθηκεύτηκε· ο συντονιστής ειδοποιείται" if changed else "Καμία αλλαγή",
+                                     icon="✏️")
+                            st.rerun()
+                        except LabError as e:
+                            st.error(str(e))
+                    if b2.button("Άκυρο", key=f"edit_cancel_{key}_{m['id']}"):
+                        st.session_state[ekey] = False
+                        st.session_state.pop(f"edit_txt_{key}_{m['id']}", None)
+                        st.rerun()
+                else:
+                    shown = replytext.readable(m["body"])[0] if m["author"] != "researcher" else m["body"]
+                    st.markdown(file_view.linkify(shown))  # render-time only; stored text unchanged
+                    if m["author"] == "researcher" and st.button("✏️", key=f"edit_btn_{key}_{m['id']}",
+                                                                 help="Επεξεργασία του μηνύματος"):
+                        st.session_state[ekey] = True
+                        st.rerun()
                 if m.get("edit_count"):
                     st.caption(f"(επεξεργάστηκε) · {fmt_ts(m['edited_at'])}")
                 for ap in attachment_paths(m["body"]):
@@ -406,31 +436,6 @@ def show_thread(tid, key="chat"):
             st.info(f"Το {m['id']} παραδόθηκε αλλά ο συντονιστής δεν το έχει αναλάβει ακόμη "
                     "(απασχολημένος, offline ή σε όριο χρήσης).", icon="⏳")
             break
-
-
-def edit_box(tid, key):
-    """✏️ Edit of the researcher's own messages. Deliberately NOT inside the auto-refreshing fragment."""
-    dd = db()
-    mine = [m for m in dd.thread(tid) if m["author"] == "researcher"]
-    dd.close()
-    if not mine:
-        return
-    with st.expander("✏️ Επεξεργασία μηνύματός μου"):
-        ids = [m["id"] for m in mine]
-        mid = st.selectbox("Μήνυμα", ids[::-1], key=f"edit_sel_{key}",
-                           format_func=lambda i: f"{i} · {next(x for x in mine if x['id'] == i)['body'][:50]}")
-        cur = next(x for x in mine if x["id"] == mid)
-        st.caption("Αν το μήνυμα έχει συνημμένα, κράτα τις γραμμές με τις διαδρομές τους στο κείμενο.")
-        txt = st.text_area("Νέο κείμενο", value=cur["body"], key=f"edit_txt_{key}_{mid}", height=140)
-        if st.button("Αποθήκευση", key=f"edit_save_{key}"):
-            try:
-                dd = db()
-                changed = dd.edit_message(mid, txt)
-                dd.close()
-                st.toast("Αποθηκεύτηκε· ο συντονιστής ειδοποιείται" if changed else "Καμία αλλαγή", icon="✏️")
-                st.rerun()
-            except LabError as e:
-                st.error(str(e))
 
 
 # ---------------------------------------------------------------- tabs
@@ -518,7 +523,6 @@ with tab_chat:
             st.info("⏳ ο συντονιστής δουλεύει…" + (" · ενεργοί τώρα: " + ", ".join(names) if names else ""))
 
         show_thread(cur)
-        edit_box(cur, 'chat')
         working_indicator(cur)
 
     kind = st.segmented_control("Τύπος μηνύματος", ["message", "proposal", "code_question"],
@@ -1231,14 +1235,15 @@ with tab_paper:
     _d = db()
     paper_tid = _d.ensure_thread(PAPER_THREAD_TITLE, "Νήμα για τη συγγραφή και το review του paper.")
     _d.close()
-    show_thread(paper_tid, key="paper")
-    edit_box(paper_tid, "paper")
+    show_thread(paper_tid, key="paper", title="Συζήτηση paper")
     pw_col, pr_col = st.columns(2)
     p_writers = pw_col.multiselect("Συγγραφή", list(PAPER_WRITERS), default=["writer-sonnet"],
-                                   format_func=PAPER_WRITERS.get, key="paper_writers",
+                                   format_func=PAPER_WRITERS.get, key="paper_writers", placeholder="✍️ Συγγραφή: ποιος γράφει",
+                                   label_visibility="collapsed",
                                    help="Ποιοι συντάσσουν το κείμενο σε αυτό το μήνυμα.")
     p_reviewers = pr_col.multiselect("Review", list(PAPER_REVIEWERS), default=["codex-reviewer"],
-                                     format_func=PAPER_REVIEWERS.get, key="paper_reviewers",
+                                     format_func=PAPER_REVIEWERS.get, key="paper_reviewers", placeholder="🔍 Review: ποιος ελέγχει",
+                                     label_visibility="collapsed",
                                      help="Ποιοι κάνουν review μετά τη σύνταξη.")
     # Not inside a fragment, so typing is never refreshed away.
     psub = st.chat_input("Γράψε στον συγγραφέα… (Enter = αποστολή)", accept_file="multiple", key="paper_composer")
@@ -1495,7 +1500,6 @@ with tab_ext:
     ext_tid = _dx.ensure_thread(ext_catalog.EXT_THREAD_TITLE, "Αιτήματα αναζήτησης επεκτάσεων και οι απαντήσεις τους.")
     _dx.close()
     show_thread(ext_tid, key="ext_chat")
-    edit_box(ext_tid, "ext")
     ext_in = st.chat_input("Περίγραψε ποιο skill/επέκταση θέλεις… (Enter = αποστολή)", key="ext_composer")
     if ext_in:
         try:
