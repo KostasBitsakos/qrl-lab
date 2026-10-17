@@ -360,6 +360,20 @@ sidebar counters and toasts while the tab is open. The stored request state in t
 **Security.** Bound to localhost; reached only through the SSH tunnel. Exposing it beyond the VM needs a
 security review and the researcher's approval.
 
+**Sudo tab (🔐, `tools/sudo_ui.py`).** Requests with scope `sudo` (the `sudo ...` lines of the body are the commands; programs are
+derived from them with `sudo_gate.sudo_programs`, never typed in the UI). «Έγκριση» runs `sudo_grant.py open <R-id> --programs … --minutes N`
+(default 30, max 240) from the dashboard process, which needs `sudo -n`; without it the exact command is shown for the ⌨️ Terminal tab.
+The tab also shows `sudo_grant.py status`, a «Κλείσιμο» button and the last 50 entries of `.lab/sudo_audit.jsonl`. **Residual risk:**
+the dashboard and the agents run as the same Unix user, so an agent that can reach the dashboard port (or run `sudo -n`
+itself where sudoers allows it) is not isolated from the approval path; the protections are the root-owned grant file, the
+`NEVER` program list, the PreToolUse hook, the audit log and the localhost-only binding, not a privilege boundary.
+
+**Health watchdog.** `health_watch.py` logs its own exceptions and start/exit to `.lab/health_watch.log` and writes
+`.lab/health_watch.heartbeat` each cycle; `tools/watchdog.sh` (user crontab, every minute) recreates the tmux windows
+`health` (also when the heartbeat is older than 180 s) and `dashboard` if missing; it never starts the coordinator.
+Codex usage limits (`tools/codex_health.py`, pattern table; called by `deputy.py`, or by the coordinator for failures seen
+through the plugin) are stored under the `codex` key of `.lab/health.json` and shown as a separate banner.
+
 **Terminal tab (⌨️, `tools/web_terminal.py`).** A full bash login shell in `~/qrl-lab`, i.e. full control of the VM for
 whoever can reach the port, which means whoever holds the SSH tunnel / VS Code port forward. Mitigations: on demand only
 (started by «Άνοιγμα terminal» in tmux window `terminal`, stopped by «Κλείσιμο»); listens on 127.0.0.1:8502 only; every

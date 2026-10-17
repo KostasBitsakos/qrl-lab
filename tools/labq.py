@@ -10,7 +10,7 @@ Conversation (researcher <-> agents):
 
 Requests (agents -> researcher):
   labq.py ask --kind approval|question|proposal|info --title "..." --body-file f.md
-              [--scope sim|real|qpu|research|external|other] [--options approve,reject,changes]
+              [--scope sim|real|qpu|research|external|sudo|other] [--options approve,reject,changes]
               [--blocking] [--proposal "text" (repeat, max 3) [--recommended N]] [--cost "..."] [--link path] [--thread M-...] [--spec spec.json]
   labq.py request R-...                      show a request and its decision
   labq.py withdraw R-... "reason"
@@ -150,7 +150,7 @@ def main():
     s.add_argument("--title", required=True)
     g = s.add_mutually_exclusive_group(required=True)
     g.add_argument("--body-file"); g.add_argument("--body")
-    s.add_argument("--scope", default="other", choices=["sim", "real", "qpu", "research", "external", "other"])
+    s.add_argument("--scope", default="other", choices=["sim", "real", "qpu", "research", "external", "sudo", "other"])
     s.add_argument("--options", default="")
     s.add_argument("--blocking", action="store_true")
     s.add_argument("--cost", default=None)

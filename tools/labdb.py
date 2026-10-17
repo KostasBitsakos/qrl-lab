@@ -29,7 +29,7 @@ PAPER_REVIEWERS = {"codex-reviewer": "codex-reviewer · gpt-6.1-sol", "codex-arc
                    "scholar": "scholar (citations)", "writer-opus": "writer · Opus"}
 MESSAGE_KINDS = ("message", "proposal", "code_question", "reply", "contribution", "status")
 REQUEST_KINDS = ("approval", "question", "proposal", "info")
-REQUEST_SCOPES = ("sim", "real", "qpu", "research", "external", "other")
+REQUEST_SCOPES = ("sim", "real", "qpu", "research", "external", "sudo", "other")
 RUN_STATUSES = ("starting", "running", "done", "failed", "stopped")
 
 # Allowed researcher decisions per request kind, and the state each one leads to.

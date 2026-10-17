@@ -499,6 +499,65 @@ def test_watchdog():
     ok("watchdog.sh: starts missing window, idempotent, recreates on stale heartbeat")
 
 
+def test_sudo_ui():
+    import sudo_ui
+    import labdb
+    assert "sudo" in labdb.REQUEST_SCOPES
+    body = "Χρειάζομαι:\n$ sudo systemctl restart kubelet\n- `sudo crictl ps`\nsudo bash -c 'x'\nsudo journalctl -u kubelet | tail\nσκέτο κείμενο"
+    info = sudo_ui.parse_request(body)
+    assert info["programs"] == ["bash", "crictl", "journalctl", "systemctl"] and info["refused"] == ["bash"], info
+    assert len(info["commands"]) == 4
+    assert sudo_ui.parse_request("no commands")["commands"] == []
+    assert sudo_ui.clamp_minutes(999) == 240 and sudo_ui.clamp_minutes("x") == 30 and sudo_ui.clamp_minutes(0) == 1
+    assert sudo_ui.open_command("R-1", ["ls", "ss"], 45) == ["python3", "tools/sudo_grant.py", "open", "R-1",
+                                                             "--programs", "ls,ss", "--minutes", "45"]
+    calls = []
+    def fake(cmd, **kw):
+        calls.append(cmd)
+        out = {"status": "R-1: ls (10 min left)"}.get(cmd[-1], "grant open")
+        rc = 1 if cmd[:3] == ["sudo", "-n", "true"] and FAKE_NO_SUDO else 0
+        return subprocess.CompletedProcess(cmd, rc, out, "")
+    FAKE_NO_SUDO = False
+    assert sudo_ui.sudo_available(fake)
+    FAKE_NO_SUDO = True
+    assert not sudo_ui.sudo_available(fake)
+    ok_, msg = sudo_ui.open_grant("R-1", ["ls", "ss"], 999, run=fake)
+    assert ok_ and calls[-1][2:] == ["open", "R-1", "--programs", "ls,ss", "--minutes", "240"], calls[-1]
+    assert sudo_ui.open_grant("R-1", ["bash"], 30, run=fake)[0] is False and sudo_ui.open_grant("R-1", [], 30, run=fake)[0] is False
+    assert sudo_ui.status(fake) == "R-1: ls (10 min left)"
+    assert sudo_ui.close_grant(fake)[0] and calls[-1][-1] == "close"
+    p = os.path.join(TMP, "sa.jsonl")
+    with open(p, "w") as f:
+        for i in range(60): f.write(json.dumps({"ts": i, "programs": ["ls"]}) + "\n")
+        f.write("garbage\n")
+    a = sudo_ui.audit_tail(50, p)
+    assert len(a) == 49 and a[0]["ts"] == 59 and sudo_ui.audit_tail(5, "/nonexistent") == []
+    ok("sudo_ui: request parsing, minute cap, mocked grant open/close/status, audit tail")
+
+
+def test_sudo_tab():
+    from streamlit.testing.v1 import AppTest
+    import sudo_ui
+    db = LabDB()
+    rid = db.ask("approval", "restart kubelet", "$ sudo systemctl restart kubelet\n$ sudo journalctl -u kubelet",
+                 scope="sudo", options=["approve", "reject"])
+    seen = []
+    sudo_ui.sudo_available = lambda run=None: True
+    sudo_ui.open_grant = lambda r, progs, mins, run=None: (seen.append((r, progs, mins)) or (True, "grant open"))
+    sudo_ui.status = lambda run=None: "no grant"
+    at = AppTest.from_file(os.path.join(TMP, "dashboard", "app.py"), default_timeout=60)
+    at.run()
+    assert not at.exception, at.exception
+    assert any("Sudo" in tb.label for tb in at.tabs)
+    assert any("sudo systemctl restart kubelet" in c.value for c in at.code), [c.value for c in at.code]
+    btn = [b for b in at.button if b.key == f"sudo_ok_{rid}"][0]
+    btn.click(); at.run()
+    assert not at.exception, at.exception
+    assert seen == [(rid, ["journalctl", "systemctl"], 30)], seen
+    assert LabDB().request(rid)["state"] == "approved"
+    ok("dashboard: Sudo tab lists the request, approves through a mocked sudo_grant")
+
+
 def test_k8s_view():
     import k8s_view as kv
     from unittest import mock
@@ -1174,6 +1233,7 @@ if __name__ == "__main__":
         test_health_watch()
         test_codex_health()
         test_watchdog()
+        test_sudo_ui()
         test_deputy()
         test_voice()
         test_k8s_view()
@@ -1190,6 +1250,7 @@ if __name__ == "__main__":
             test_prom_tab()
             test_grafana_tab()
             test_decisions_live_and_tab()
+            test_sudo_tab()
         except ImportError:
             print("  --  dashboard test skipped (streamlit not installed in this interpreter)")
         print(f"ALL PASSED ({len(PASSED)})")
