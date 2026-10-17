@@ -6,6 +6,7 @@
 # Usage:
 #   tools/start-coordinator.sh          start, or attach if already running (adds a missing dashboard window)
 #   tools/start-coordinator.sh resume   start the coordinator continuing the most recent conversation
+#   tools/start-coordinator.sh [resume] --detached   same, but never attach (used by tools/boot_recover.sh)
 # Detach without stopping anything: Ctrl+b then d.
 set -euo pipefail
 
@@ -25,6 +26,15 @@ fi
 
 mkdir -p "$LAB/.lab"
 
+RESUME=0; DETACHED=0
+for arg in "$@"; do
+  case "$arg" in
+    resume) RESUME=1 ;;
+    --detached) DETACHED=1 ;;
+  esac
+done
+finish() { if [ "$DETACHED" = 1 ]; then exit 0; else exec tmux attach -t "$TMUX_SESSION"; fi; }
+
 start_dashboard_window() {
   if [ -x "$LAB/.venv/bin/streamlit" ] && ! tmux list-windows -t "$TMUX_SESSION" -F '#W' | grep -qx dashboard; then
     tmux new-window -d -t "$TMUX_SESSION" -n dashboard -c "$LAB" \
@@ -42,14 +52,14 @@ start_health_window() {
 if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
   start_dashboard_window
   start_health_window
-  exec tmux attach -t "$TMUX_SESSION"
+  finish
 fi
 
 CONT=""
-[ "${1:-}" = "resume" ] && CONT="--continue"
+[ "$RESUME" = 1 ] && CONT="--continue"
 
 tmux new-session -d -s "$TMUX_SESSION" -n coordinator -c "$LAB" \
   "claude $CONT --remote-control $RC_NAME --plugin-dir ./tools/lab-bridge; exec bash"
 start_dashboard_window
 start_health_window
-exec tmux attach -t "$TMUX_SESSION"
+finish

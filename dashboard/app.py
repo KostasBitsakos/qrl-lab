@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 import modreload  # noqa: E402
 import importlib  # noqa: E402
 _LOCAL_MODS = ["labdb", "file_view", "replytext", "k8s_view", "prom_view", "web_terminal", "sudo_ui", "race_view", "brain_view",
-               "perm_store", "ext_catalog", "summarize_runs", "paper_plots", "paper_build", "uploads", "installed_view", "access"]
+               "perm_store", "ext_catalog", "summarize_runs", "paper_plots", "paper_build", "uploads", "installed_view", "access", "outage"]
 for _n in _LOCAL_MODS:  # first import so they are in sys.modules, then reload those whose file changed
     importlib.import_module(_n)
 modreload.reload_changed(_LOCAL_MODS)
@@ -45,6 +45,7 @@ import perm_store  # noqa: E402
 import ext_catalog  # noqa: E402
 import installed_view  # noqa: E402
 import access  # noqa: E402
+import outage  # noqa: E402
 import summarize_runs  # noqa: E402
 import paper_plots  # noqa: E402
 import paper_build  # noqa: E402
@@ -472,6 +473,16 @@ def health_banner():
 
 health_banner()
 
+
+@st.fragment(run_every=refresh)
+def recovery_banner():
+    txt = outage.banner_text()
+    if txt:
+        st.warning(txt)
+
+
+recovery_banner()
+
 # ---------------------------------------------------------------- shared decision widget (Decisions + Paper tabs)
 def decision_panel(d, select=lambda reqs: reqs, pre="", label="Αίτημα",
                    empty_msg="Δεν υπάρχει τίποτα που να περιμένει απόφασή σου."):
@@ -689,7 +700,7 @@ DEC_TAB = "✅ Αποφάσεις"
 _open_files = "path" in st.query_params and not st.session_state.get("fb_tab_done")
 st.session_state["fb_tab_done"] = True
 TAB_NAMES = [HOME_TAB, DEC_TAB, "🤖 Πράκτορες", "📈 Πειράματα", "⚖️ Council",
-             "🖥️ Πόροι", "☸️ Kubernetes", "📡 Prometheus", "📊 Grafana", FILES_TAB, "📝 Paper", "🎓 Συνέδρια", "🧾 Ιστορικό", "🔐 Sudo", "🧩 Επεκτάσεις", "⌨️ Terminal"]
+             "🖥️ Πόροι", "☸️ Kubernetes", "📡 Prometheus", "📊 Grafana", FILES_TAB, "📝 Paper", "🎓 Συνέδρια", "🧾 Ιστορικό", "🔐 Sudo", "🧩 Επεκτάσεις", "🔌 Διακοπές", "⌨️ Terminal"]
 # Tab persistence (F5 / shared link): st.tabs(key="tab", bind="query-params") in Streamlit 1.66 keeps the active
 # label in ?tab=... and restores it on load; ?path=... (file deep link) only picks the default when ?tab is absent.
 # The default is part of the tabs widget identity: it must stay the same on every rerun of the session, otherwise the first
@@ -705,10 +716,10 @@ if _side:  # tabs in the left column, the terminal in a right-hand column
         st.iframe(_term_url, height=700)
     with _left:
         (tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_prom, tab_grafana, tab_files, tab_paper, tab_venues,
-         tab_audit, tab_sudo, tab_ext, tab_term) = st.tabs(TAB_NAMES, default=_tab_default, key="tab", bind="query-params")
+         tab_audit, tab_sudo, tab_ext, tab_outage, tab_term) = st.tabs(TAB_NAMES, default=_tab_default, key="tab", bind="query-params")
 else:
     (tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_prom, tab_grafana, tab_files, tab_paper, tab_venues,
-     tab_audit, tab_sudo, tab_ext, tab_term) = st.tabs(TAB_NAMES, default=_tab_default, key="tab", bind="query-params")
+     tab_audit, tab_sudo, tab_ext, tab_outage, tab_term) = st.tabs(TAB_NAMES, default=_tab_default, key="tab", bind="query-params")
 
 # ================================================================ conversation
 with tab_chat:
@@ -1715,6 +1726,29 @@ with tab_sudo:
                                        for a in aud]), hide_index=True, width="stretch")
         else:
             st.caption("Καμία χρήση ακόμη (`.lab/sudo_audit.jsonl`).")
+
+# ================================================================ VM outages (.lab/outages.jsonl, written by tools/boot_recover.sh)
+if _tab_live(tab_outage):  # lazy: hidden tabs do no work
+    with tab_outage:
+        _orows = outage.load()
+        _osum = outage.summary(_orows)
+        _c1, _c2, _c3 = st.columns(3)
+        _c1.metric("Διακοπές συνολικά", _osum["count"])
+        _c2.metric("Τελευταία", outage.fmt_ts(_osum["last"]["boot_at"]) if _osum["last"] else "—")
+        _c3.metric("Συνολικός χρόνος διακοπής", outage.fmt_dur(_osum["total_downtime_s"]) if _orows else "—")
+        _boot = outage.boot_time()
+        _hb = outage.read_epoch(os.path.join(LAB, "heartbeat"))
+        st.caption(f"Uptime τώρα: {outage.fmt_dur(time.time() - _boot) if _boot else 'άγνωστο'} · "
+                   f"ηλικία heartbeat: {outage.fmt_dur(time.time() - _hb) if _hb else 'δεν υπάρχει (cron watchdog)'}")
+        if _orows:
+            st.dataframe(pd.DataFrame([{"Έπεσε": outage.fmt_ts(r.get("down_at")), "Ανέβηκε": outage.fmt_ts(r.get("boot_at")),
+                                        "Αποκατάσταση": outage.fmt_ts(r.get("recovered_at")),
+                                        "Διάρκεια": outage.fmt_dur(r.get("downtime_s")), "Είδος": r.get("kind", "unknown")}
+                                       for r in reversed(_orows)]), hide_index=True, width="stretch")
+        else:
+            st.info("Καμία καταγεγραμμένη διακοπή. Η καταγραφή γίνεται από το `tools/boot_recover.sh` (cron @reboot).")
+        st.caption("Ο χρόνος «Έπεσε» είναι το τελευταίο heartbeat (ανά λεπτό), άρα ±1 λεπτό. Το είδος προκύπτει από το `last -x` "
+                   "(καθαρή επανεκκίνηση ή κατάρρευση/ρεύμα· «unknown» αν δεν είναι σαφές).")
 
 # ================================================================ extensions (catalog only from .lab/extensions_catalog.json)
 if _tab_live(tab_ext):  # lazy: hidden tabs do no work

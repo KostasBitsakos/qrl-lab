@@ -785,6 +785,68 @@ def test_ext_catalog_and_tab():
     ok("extensions: catalog only from file (empty state, validation), add -> approval/external, chat -> EXT-SEARCH")
 
 
+def test_outage_logic_and_dry_run():
+    import outage
+    lab = os.path.join(TMP, ".lab"); os.makedirs(lab, exist_ok=True)
+    boot = 1_800_000_000
+    # heartbeat parsing and the pre-boot copy
+    for n, v in (("heartbeat", boot + 20), ("heartbeat_pre_boot", boot - 90)):
+        open(os.path.join(lab, n), "w").write(f"{v}\n")
+    assert outage.last_heartbeat(lab, boot) == boot - 90      # a beat written after boot cannot hide the outage
+    open(os.path.join(lab, "heartbeat_pre_boot"), "w").write("junk")
+    assert outage.last_heartbeat(lab, boot) is None and outage.read_epoch(os.path.join(lab, "nope")) is None
+    # kinds
+    sd = outage.shutdown_times("shutdown system down  5.4.0 Fri Jan 15 08:00:10 2027 - Fri Jan 15 08:01:30 2027  (00:01)\n"
+                               "reboot   system boot  5.4.0 Fri Jan 15 08:01:30 2027   still running\nwtmp begins x\n")
+    assert len(sd) == 2, sd
+    assert outage.classify(sd, sd[0] - 50, sd[1]) == "reboot"
+    assert outage.classify([sd[0] - 99999], sd[0] - 50, sd[1]) == "crash/power"
+    assert outage.classify(None, sd[0] - 50, sd[1]) == "unknown" and outage.classify(sd, None, sd[1]) == "unknown"
+    row = outage.compute(boot - 90, boot, boot + 60, [])
+    assert row["downtime_s"] == 150 and row["kind"] == "crash/power"
+    assert outage.fmt_dur(3725) == "1ω 2λ 5δ" and outage.fmt_dur(None) == "άγνωστη"
+    # banner TTL
+    fl = os.path.join(TMP, "flag.json")
+    json.dump(dict(row, recovered_at=1000), open(fl, "w"))
+    assert outage.banner_text(now=1000 + 3600, path=fl).startswith("⚡") and outage.banner_text(now=1000 + 90000, path=fl) == ""
+    # dry run of the boot script: real btime, fake old heartbeat, temp outputs, no tmux, no db post
+    import time as _t
+    open(os.path.join(lab, "heartbeat_pre_boot"), "w").write(str(int(_t.time()) - 10**7))
+    open(os.path.join(lab, "heartbeat"), "w").write(str(int(_t.time())))
+    d = os.path.join(TMP, "dry"); os.makedirs(d, exist_ok=True)
+    env = dict(os.environ, QRL_BOOT_DRYRUN="1", QRL_BOOT_DRYRUN_DIR=d, QRL_LAB_DIR=TMP)
+    r = subprocess.run(["bash", os.path.join(TMP, "tools", "boot_recover.sh")], capture_output=True, text=True, env=env, timeout=60)
+    assert r.returncode == 0 and "Κώστα, το VM έπεσε" in r.stdout, (r.stdout, r.stderr)
+    rows = outage.load(os.path.join(d, "outages.jsonl"))
+    assert len(rows) == 1 and rows[0]["downtime_s"] > 10**6, rows
+    assert not os.path.exists(os.path.join(lab, "outages.jsonl")) and os.path.exists(os.path.join(d, "recovery_flag.json"))
+    ok("outage: heartbeat parsing, kinds, banner TTL, boot_recover.sh dry run (temp files only)")
+
+
+def test_outage_tab():
+    from streamlit.testing.v1 import AppTest
+    import outage
+    lab = os.path.join(TMP, ".lab")
+    os.environ["QRL_OUTAGES_FILE"] = os.path.join(TMP, "o.jsonl")
+    os.environ["QRL_RECOVERY_FLAG"] = os.path.join(TMP, "f.json")
+    try:
+        at = AppTest.from_file(os.path.join(TMP, "dashboard", "app.py"), default_timeout=60).run()
+        assert not at.exception, at.exception
+        assert any("Καμία καταγεγραμμένη διακοπή" in i.value for i in at.info)
+        assert any("Διακοπές" in tb.label for tb in at.tabs)
+        import time as _t
+        row = outage.compute(int(_t.time()) - 300, int(_t.time()) - 200, int(_t.time()) - 100, [])
+        open(os.environ["QRL_OUTAGES_FILE"], "w").write(json.dumps(row) + "\n")
+        json.dump(row, open(os.environ["QRL_RECOVERY_FLAG"], "w"))
+        at = AppTest.from_file(os.path.join(TMP, "dashboard", "app.py"), default_timeout=60).run()
+        assert not at.exception, at.exception
+        assert any("επανεκκινήθηκε" in w.value for w in at.warning), [w.value for w in at.warning]
+        assert any(m.label == "Διακοπές συνολικά" and m.value == "1" for m in at.metric)
+    finally:
+        os.environ.pop("QRL_OUTAGES_FILE"); os.environ.pop("QRL_RECOVERY_FLAG")
+    ok("dashboard: outages tab (empty and filled) and 24h recovery banner")
+
+
 def test_perm_section_in_sudo_tab():
     from streamlit.testing.v1 import AppTest
     import perm_store
@@ -1800,6 +1862,7 @@ if __name__ == "__main__":
         test_file_view()
         test_tailnet_urls()
         test_web_terminal()
+        test_outage_logic_and_dry_run()
         test_paper_plots()
         test_paper_build()
         test_modreload_and_installed()
@@ -1823,6 +1886,7 @@ if __name__ == "__main__":
             test_sudo_tab()
             test_perm_section_in_sudo_tab()
             test_ext_catalog_and_tab()
+            test_outage_tab()
         except ImportError:
             print("  --  dashboard test skipped (streamlit not installed in this interpreter)")
         print(f"ALL PASSED ({len(PASSED)})")
