@@ -68,9 +68,41 @@ def read_token():
         return ""
 
 
-def iframe_url():
+TAILNET_SUFFIX = ".ts.net"
+TS_PORTS = {"terminal": 8443, "grafana": 8444, "prometheus": 8445}  # `tailscale serve --https` ports, see docs/MOBILE.md
+
+
+def tailnet_host(host):
+    """Hostname (no port) when `host` is a *.ts.net name, else None."""
+    h = (host or "").split(":")[0].strip().lower().rstrip(".")
+    return h if h.endswith(TAILNET_SUFFIX) and len(h) > len(TAILNET_SUFFIX) and h.replace("-", "").replace(".", "").isalnum() else None
+
+
+def service_url(host, service, local_url):
+    """https://<host>:<port><path> (query kept) for a *.ts.net request host, otherwise `local_url` unchanged."""
+    th = tailnet_host(host)
+    if not th:
+        return local_url
+    from urllib.parse import urlsplit
+    u = urlsplit(local_url)
+    path = u.path or "/"
+    return f"https://{th}:{TS_PORTS[service]}{path}" + (f"?{u.query}" if u.query else "")
+
+
+def origin_allowed(origin):
+    from urllib.parse import urlparse
+    try:
+        pu = urlparse(origin)
+    except ValueError:
+        return False
+    if pu.hostname in ("127.0.0.1", "localhost"):
+        return True
+    return pu.scheme == "https" and tailnet_host(pu.hostname) is not None
+
+
+def iframe_url(host=None):
     tok = read_token()
-    return f"http://{HOST}:{PORT}/?token={tok}" if tok else ""
+    return service_url(host, "terminal", f"http://{HOST}:{PORT}/?token={tok}") if tok else ""
 
 
 def start(wait=8.0):
@@ -121,7 +153,7 @@ const token = new URLSearchParams(location.search).get("token") || "";
 const term = new Terminal({cursorBlink: true, fontSize: 14});
 const fit = new FitAddon.FitAddon(); term.loadAddon(fit);
 term.open(document.getElementById("t")); fit.fit();
-const ws = new WebSocket("ws://" + location.host + "/websocket?token=" + encodeURIComponent(token));
+const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/websocket?token=" + encodeURIComponent(token));
 ws.onmessage = e => { const m = JSON.parse(e.data); if (m[0] === "stdout") term.write(m[1]); };
 ws.onopen = () => ws.send(JSON.stringify(["set_size", term.rows, term.cols, 0, 0]));
 ws.onclose = () => term.write("\\r\\n[connection closed]\\r\\n");
@@ -152,8 +184,7 @@ def make_app(token, state):
             self._check()
 
         def check_origin(self, origin):
-            from urllib.parse import urlparse
-            return urlparse(origin).hostname in ("127.0.0.1", "localhost")
+            return origin_allowed(origin)
 
         def on_message(self, message):
             state["last"] = time.time()

@@ -1297,6 +1297,25 @@ def test_voice():
     ok("voice: transcribe with mocked model, fallback, model env, wav kept as attachment")
 
 
+def test_tailnet_urls():
+    import web_terminal as wt
+    h = "vm1.tail-abc12.ts.net"
+    assert wt.tailnet_host(h) == h and wt.tailnet_host(h + ":443") == h and wt.tailnet_host("HOST.ts.net.") == "host.ts.net"
+    for bad in ("", None, "localhost:8501", "evil.com", "x.ts.net.evil.com", ".ts.net", "ts.net", "a b.ts.net"):
+        assert wt.tailnet_host(bad) is None, bad
+    assert wt.service_url(h, "terminal", "http://127.0.0.1:8502/?token=T") == f"https://{h}:8443/?token=T"
+    assert wt.service_url(h, "grafana", "http://localhost:32000") == f"https://{h}:8444/"
+    assert wt.service_url(h, "prometheus", "http://10.0.1.28:30000") == f"https://{h}:8445/"
+    assert wt.service_url("localhost:8501", "grafana", "http://localhost:32000") == "http://localhost:32000"
+    assert wt.service_url(None, "terminal", "http://127.0.0.1:8502/?token=T") == "http://127.0.0.1:8502/?token=T"
+    assert wt.origin_allowed("http://127.0.0.1:8502") and wt.origin_allowed("http://localhost:8502")
+    assert wt.origin_allowed(f"https://{h}") and wt.origin_allowed(f"https://{h}:8443")
+    assert not wt.origin_allowed(f"http://{h}") and not wt.origin_allowed("https://evil.com")
+    assert not wt.origin_allowed("https://x.ts.net.evil.com") and not wt.origin_allowed("null")
+    assert wt.HOST == "127.0.0.1"
+    ok("tailnet URL builder and websocket origin check")
+
+
 def test_web_terminal():
     import web_terminal as wt
     assert wt.HOST == "127.0.0.1" and wt.PORT == 8502
@@ -1515,6 +1534,7 @@ if __name__ == "__main__":
         test_k8s_view()
         test_prom_view()
         test_file_view()
+        test_tailnet_urls()
         test_web_terminal()
         test_paper_plots()
         test_paper_build()

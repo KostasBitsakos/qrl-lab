@@ -578,7 +578,11 @@ _open_files = "path" in st.query_params and not st.session_state.get("fb_tab_don
 st.session_state["fb_tab_done"] = True
 TAB_NAMES = ["💬 Συνομιλία", DEC_TAB, "🤖 Πράκτορες", "📈 Πειράματα", "⚖️ Council",
              "🖥️ Πόροι", "☸️ Kubernetes", "📡 Prometheus", "📊 Grafana", FILES_TAB, "📝 Paper", "🎓 Συνέδρια", "🧾 Ιστορικό", "🔐 Sudo", "🧩 Επεκτάσεις", "⌨️ Terminal"]
-_term_url = web_terminal.iframe_url() if web_terminal.running() else ""
+try:
+    _req_host = st.context.headers.get("Host", "")
+except Exception:  # noqa: BLE001 - no request context (tests)
+    _req_host = ""
+_term_url = web_terminal.iframe_url(_req_host) if web_terminal.running() else ""
 _side = bool(_term_url) and st.sidebar.toggle("Terminal στα δεξιά", key="term_side")
 if _side:  # tabs in the left column, the terminal in a right-hand column
     _left, _right = st.columns([3, 2])
@@ -1220,6 +1224,8 @@ def _prom_names():
 with tab_prom:
     st.caption(f"Prometheus `{prom_view.BASE_URL}` · μόνο GET (`query`, `query_range`, `label/__name__/values`). "
                "Δεν υπάρχει node-exporter: τα «Node» βγαίνουν από το cAdvisor (root cgroup).")
+    if web_terminal.tailnet_host(_req_host):
+        st.markdown(f"[Prometheus UI (tailnet)]({web_terminal.service_url(_req_host, 'prometheus', prom_view.BASE_URL)})")
     try:
         _avail = _prom_avail()
     except Exception:  # noqa: BLE001
@@ -1282,7 +1288,7 @@ with tab_prom:
     prom_panel(p_sel, p_custom, p_range)
 
 # ================================================================ grafana (iframe + quick links; no credentials here)
-GRAFANA_URL = os.environ.get("QRL_GRAFANA_URL", "http://localhost:32000")
+GRAFANA_URL = web_terminal.service_url(_req_host, "grafana", os.environ.get("QRL_GRAFANA_URL", "http://localhost:32000"))
 with tab_grafana:
     st.info("VS Code → Ports → Forward 32000, μετά κάνε login στο Grafana μία φορά μέσα σε αυτό το frame.", icon="🔌")
     st.markdown(f"[Άνοιγμα σε νέα καρτέλα]({GRAFANA_URL})")
@@ -1592,7 +1598,7 @@ with tab_term:
         if st.button("Κλείσιμο", key="term_close"):
             web_terminal.stop()
             st.rerun()
-        url = web_terminal.iframe_url()
+        url = web_terminal.iframe_url(_req_host)
         if url and not _side:
             st.iframe(url, height=600)
         elif _side:
