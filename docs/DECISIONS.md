@@ -91,3 +91,8 @@ ChatGPT handoff adopted: codex mcp-server dropped, approvals enforced in the lau
 Screen QC4 (quantum fine-tuning head on a frozen sim-pretrained classical encoder; control: classical frozen-encoder
 head with matched parameters) and QC1 (full VQC Q-function with data re-uploading; control: parameter-matched
 classical model), about one week; keep the better one for the paper. Final choice after screening (PLAN §8.4–§8.5).
+
+## 2026-10-17 — D8 old simulator (R-20261017-007, researcher's own option)
+The paper does not mention the old simulator's issue (F1) at all, and the DInos claims are not changed. Sim v2 is
+presented simply as the simulator used here. Consequence kept in force: the paper does not restate DInos
+simulation numbers as comparison points (claims discipline); comparisons use our own runs only.

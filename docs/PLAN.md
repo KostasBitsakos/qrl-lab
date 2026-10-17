@@ -559,7 +559,7 @@ confirms the baseline → `git worktree add` for `qrl-dev`.
 | D5 | Quantum candidates to screen (§8.4) | accepted 2026-10-17 (R-20261017-006): screen QC4 + QC1, keep the better |
 | D6 | Publication gate thresholds (§9) | pending |
 | D7 | Target venue CCGrid 2027 + alternatives from scholar | pending |
-| D8 | How to handle F1/F5 with respect to published work and the public repo | researcher only |
+| D8 | How to handle F1/F5 with respect to published work and the public repo | decided 2026-10-17 (R-20261017-007): not mentioned in the paper; DInos claims unchanged |
 | D9 | IBM Quantum plan / QPU minutes | accepted 2026-10-16: account exists; hardware only when models are ready, per-job approval |
 | D10 | Kubernetes version, namespace and context for real runs | from inventory |
 | D11 | Bring the K8s cluster back up (F7); namespace-scoped credentials for agent-launched real runs | pending |
