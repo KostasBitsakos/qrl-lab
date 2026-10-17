@@ -7,7 +7,9 @@
     "source": "https://easychair.org/cfp/ccgrid27",
     "verified": "2026-10-15",
     "event_dates": "May 24–27 2027",
-    "location": "Dallas–Fort Worth"
+    "location": "Dallas–Fort Worth",
+    "tier": "CORE B (CORE2023)",
+    "acceptance": "δεν βρέθηκε επίσημο"
   },
   {
     "venue": "IEEE CCGrid 2027",
@@ -17,7 +19,9 @@
     "source": "https://easychair.org/cfp/ccgrid27",
     "verified": "2026-10-15",
     "event_dates": "May 24–27 2027",
-    "location": "Dallas–Fort Worth"
+    "location": "Dallas–Fort Worth",
+    "tier": "CORE B (CORE2023)",
+    "acceptance": "δεν βρέθηκε επίσημο"
   },
   {
     "venue": "ACM/SPEC ICPE 2027",
@@ -27,7 +31,9 @@
     "source": "https://icpe2027.spec.org/important-dates/",
     "verified": "2026-10-16",
     "event_dates": "δεν έχει ανακοινωθεί",
-    "location": "Gothenburg"
+    "location": "Gothenburg",
+    "tier": "CORE B (CORE2023)",
+    "acceptance": "≈28-35% (2026: 28%, 2025: 34.7%, 2024: 34.6%)"
   },
   {
     "venue": "ACM/SPEC ICPE 2027",
@@ -37,7 +43,9 @@
     "source": "https://icpe2027.spec.org/important-dates/",
     "verified": "2026-10-16",
     "event_dates": "δεν έχει ανακοινωθεί",
-    "location": "Gothenburg"
+    "location": "Gothenburg",
+    "tier": "CORE B (CORE2023)",
+    "acceptance": "≈28-35% (2026: 28%, 2025: 34.7%, 2024: 34.6%)"
   },
   {
     "venue": "IEEE/IFIP DSN 2027",
@@ -47,7 +55,9 @@
     "source": "https://dsn2027-berlin.github.io/call-for-contributions/",
     "verified": "2026-10-17",
     "event_dates": "Jun 22–25 2027",
-    "location": "Berlin"
+    "location": "Berlin",
+    "tier": "CORE A (CORE2023)",
+    "acceptance": "≈20% (2026: 19.75%, 2025: 20.2%, 2024: 20.58%)"
   },
   {
     "venue": "IEEE/IFIP DSN 2027",
@@ -57,7 +67,9 @@
     "source": "https://dsn2027-berlin.github.io/call-for-contributions/",
     "verified": "2026-10-17",
     "event_dates": "Jun 22–25 2027",
-    "location": "Berlin"
+    "location": "Berlin",
+    "tier": "CORE A (CORE2023)",
+    "acceptance": "≈20% (2026: 19.75%, 2025: 20.2%, 2024: 20.58%)"
   },
   {
     "venue": "ACM SIGMETRICS 2027 (winter cycle)",
@@ -67,7 +79,9 @@
     "source": "https://www.sigmetrics.org/sigmetrics2027/pages/cfp.html",
     "verified": "2026-10-17",
     "event_dates": "Jun 7–11 2027",
-    "location": "Atlanta (FCRC)"
+    "location": "Atlanta (FCRC)",
+    "tier": "CORE A* (CORE2023)",
+    "acceptance": "δεν βρέθηκε επίσημο"
   },
   {
     "venue": "ACM SIGMETRICS 2027 (winter cycle)",
@@ -77,7 +91,9 @@
     "source": "https://www.sigmetrics.org/sigmetrics2027/pages/cfp.html",
     "verified": "2026-10-17",
     "event_dates": "Jun 7–11 2027",
-    "location": "Atlanta (FCRC)"
+    "location": "Atlanta (FCRC)",
+    "tier": "CORE A* (CORE2023)",
+    "acceptance": "δεν βρέθηκε επίσημο"
   },
   {
     "venue": "IEEE PDP 2027",
@@ -87,7 +103,9 @@
     "source": "https://research.ac.upc.edu/PDP2027/",
     "verified": "2026-10-17",
     "event_dates": "Mar 17–19 2027",
-    "location": "Barcelona"
+    "location": "Barcelona",
+    "tier": "CORE C (CORE2023)",
+    "acceptance": "δεν βρέθηκε επίσημο"
   },
   {
     "venue": "IEEE PDP 2027",
@@ -97,6 +115,8 @@
     "source": "https://research.ac.upc.edu/PDP2027/",
     "verified": "2026-10-17",
     "event_dates": "Mar 17–19 2027",
-    "location": "Barcelona"
+    "location": "Barcelona",
+    "tier": "CORE C (CORE2023)",
+    "acceptance": "δεν βρέθηκε επίσημο"
   }
 ]

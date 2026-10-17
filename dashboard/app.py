@@ -1568,6 +1568,8 @@ if _tab_live(tab_venues):  # lazy: hidden tabs do no work
                     rows.append({"συνέδριο": it["venue"], "τι": it["what"], "προθεσμία": it["due_label"],
                                  "μέρες": round(days, 1),
                                  "Πότε / Πού": f"{it.get('event_dates') or '—'} · {it.get('location') or '—'}",
+                                 "Tier": it.get("tier") or "—",
+                                 "Acceptance (3 έτη)": it.get("acceptance") or "—",
                                  "πηγή": it["source"], "επαληθεύτηκε": it["verified"]})
                 st.markdown("##### Προθεσμίες")
                 st.html(deadlines_table_html(rows))

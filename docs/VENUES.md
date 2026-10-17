@@ -70,3 +70,14 @@ Rankings were not verifiable from any official source (see the end).
 4. **SIGMETRICS 2027 winter** (Jan 4 / Jan 11): fallback with extra time, but 20 pp and a high bar.
 5. **QSys 2027** once deadlines appear, with QCE 2027 as a quantum-track fallback.
 PDP 2027 (Oct 19 / Oct 26) is probably infeasible.
+
+### Tier & acceptance rates (2026-10-17)
+CORE tier: CORE2023 ranks read from portal.core.edu.au/conf-ranks (search by acronym, source=CORE2023) on 2026-10-17.
+
+| Venue | Tier | Acceptance (2026 / 2025 / 2024) | Sources |
+|---|---|---|---|
+| IEEE CCGrid | CORE B (CORE2023) | n/a / n/a / n/a (only the workshop target 20-25% in the CFW) | https://ccgrid2026.cdms.westernsydney.edu.au/cfw.html |
+| ACM/SPEC ICPE | CORE B (CORE2023) | 28% / 34.7% / 34.6% (full papers, research+industry tracks) | https://icpe.spec.org/past-conferences |
+| IEEE/IFIP DSN | CORE A (CORE2023) | 19.75% (65/329) / 20.2% (56/277) / 20.58% (42/204) | https://www.dependability.org/?p=808 |
+| ACM SIGMETRICS | CORE A* (CORE2023) | n/a / n/a / n/a | not found (POMACS issue records give no counts) |
+| IEEE PDP | CORE C (CORE2023) | n/a / n/a / n/a | not found |
