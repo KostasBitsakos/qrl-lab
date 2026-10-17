@@ -86,6 +86,38 @@ def resolve(path, roots=None):
     return real
 
 
+def glob_entries(pattern, show_hidden=False, roots=None, limit=500):
+    """Expand a glob (* ? [..]) into entries like list_dir; denied and escaping matches are omitted.
+    Raises FileViewError('outside') for a pattern outside the roots or 'missing' when nothing matches."""
+    import datetime as dt
+    import glob as _glob
+    roots = roots or ROOTS
+    p = expand(pattern)
+    if not p or "\x00" in p or not os.path.isabs(p):
+        raise FileViewError("outside")
+    p = os.path.normpath(p)
+    if is_denied(p):
+        raise FileViewError("denied")
+    rows = []
+    for m in sorted(_glob.glob(p, recursive=True, include_hidden=show_hidden)):
+        rp = os.path.realpath(m)
+        if not _under(rp, roots) or is_denied(m) or is_denied(rp):
+            continue
+        try:
+            st = os.stat(rp)
+        except OSError:
+            continue
+        isdir = os.path.isdir(rp)
+        rows.append({"name": os.path.basename(m), "path": m, "is_dir": isdir, "size": None if isdir else st.st_size,
+                     "mtime": dt.datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds"),
+                     "icon": icon_for(os.path.basename(m), isdir)})
+        if len(rows) >= limit:
+            break
+    if not rows:
+        raise FileViewError("outside" if not _under(os.path.realpath(p.split("*")[0] or "/"), roots) else "missing")
+    return rows
+
+
 def breadcrumbs(real, roots=None):
     """[(label, abs path)] from the allowed root down to real."""
     roots = [os.path.realpath(r) for r in (roots or ROOTS)]

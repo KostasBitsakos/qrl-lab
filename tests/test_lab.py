@@ -1075,6 +1075,40 @@ def test_lazy_tabs_and_tab_persistence():
         os.environ["QRL_EAGER_TABS"] = "1"
 
 
+def test_files_tab_keeps_tab_and_glob():
+    """Toggling a Files-tab widget after a ?path= deep link keeps the Files tab; globs expand to matches."""
+    import file_view
+    from streamlit.testing.v1 import AppTest
+    hits = file_view.glob_entries("~/qrl-lab/*", roots=[file_view.HOME])
+    assert hits and all(os.path.exists(h["path"]) for h in hits)
+    expect_glob_missing = False
+    try:
+        file_view.glob_entries(os.path.join(TMP, "nonexistent_zz*"), roots=[TMP])
+    except file_view.FileViewError as e:
+        expect_glob_missing = str(e) == "missing"
+    assert expect_glob_missing
+    os.environ.pop("QRL_EAGER_TABS", None)
+    try:
+        at = AppTest.from_file(os.path.join(TMP, "dashboard", "app.py"), default_timeout=60)
+        at.query_params["path"] = os.path.join(TMP, "tools")
+        at.run()
+        assert not at.exception, at.exception
+        assert at.session_state["tab"] == "\U0001F4C1 Αρχεία", at.session_state["tab"]
+        at.session_state["fb_path_in"] = os.path.join(TMP, "tools", "*.py")
+        at.run()
+        assert not at.exception and not any("Δεν υπάρχει" in w.value for w in at.warning)
+        assert any("αποτελέσματα" in c.value for c in at.caption)
+        for i in range(2):
+            at.toggle(key="fb_hidden").set_value(i == 0).run()
+            assert not at.exception, at.exception
+            assert at.session_state["tab"] == "\U0001F4C1 Αρχεία", "toggle must not reset the tab"
+            # tabs default is part of the widget id (key_as_main_identity=False): it must not change between reruns
+            assert at.session_state["tab_default"] == "\U0001F4C1 Αρχεία"
+        ok("files tab: tab survives widget interaction after deep link; glob expands")
+    finally:
+        os.environ["QRL_EAGER_TABS"] = "1"
+
+
 def test_db_busy_timeout_waits_for_writer():
     import sqlite3
     import threading
@@ -1783,6 +1817,7 @@ if __name__ == "__main__":
             test_venues_chat()
             test_deadlines_event_fields()
             test_lazy_tabs_and_tab_persistence()
+            test_files_tab_keeps_tab_and_glob()
             test_grafana_tab()
             test_decisions_live_and_tab()
             test_sudo_tab()

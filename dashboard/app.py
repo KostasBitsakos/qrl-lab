@@ -692,7 +692,11 @@ TAB_NAMES = [HOME_TAB, DEC_TAB, "🤖 Πράκτορες", "📈 Πειράμα�
              "🖥️ Πόροι", "☸️ Kubernetes", "📡 Prometheus", "📊 Grafana", FILES_TAB, "📝 Paper", "🎓 Συνέδρια", "🧾 Ιστορικό", "🔐 Sudo", "🧩 Επεκτάσεις", "⌨️ Terminal"]
 # Tab persistence (F5 / shared link): st.tabs(key="tab", bind="query-params") in Streamlit 1.66 keeps the active
 # label in ?tab=... and restores it on load; ?path=... (file deep link) only picks the default when ?tab is absent.
-_tab_default = FILES_TAB if (_open_files and "tab" not in st.query_params) else None
+# The default is part of the tabs widget identity: it must stay the same on every rerun of the session, otherwise the first
+# widget interaction after a deep link changes the identity and Streamlit resets the active tab to the first one.
+if "tab_default" not in st.session_state:
+    st.session_state["tab_default"] = FILES_TAB if (_open_files and "tab" not in st.query_params) else None
+_tab_default = st.session_state["tab_default"]
 _term_url = web_terminal.iframe_url(_req_host) if (web_terminal.running() and _unlocked) else ""
 _side = bool(_term_url) and st.sidebar.toggle("Terminal στα δεξιά", key="term_side")
 if _side:  # tabs in the left column, the terminal in a right-hand column
@@ -1189,8 +1193,13 @@ with tab_files:
     fc1, fc2 = st.columns([5, 1])
     fc1.text_input("Διαδρομή (απόλυτη ή ~/…)", key="fb_path_in")
     hidden = fc2.toggle("Κρυφά αρχεία", value=False, key="fb_hidden")
+    glob_hits = None
     try:
-        real = file_view.resolve(ss["fb_path_in"])
+        if "*" in ss["fb_path_in"] or "?" in ss["fb_path_in"]:
+            glob_hits = file_view.glob_entries(ss["fb_path_in"], show_hidden=hidden)
+            real = None
+        else:
+            real = file_view.resolve(ss["fb_path_in"])
     except file_view.FileViewError as e:
         real = None
         if str(e) == "denied":
@@ -1204,6 +1213,10 @@ with tab_files:
         ss["fb_path_in"] = p
         ss["fb_line"] = None
 
+    if glob_hits is not None:
+        st.caption(f"Μοτίβο `{ss['fb_path_in']}` · {len(glob_hits)} αποτελέσματα")
+        for i, r in enumerate(glob_hits[:200]):
+            st.button(f"{r['icon']} {r['path']}" + ("/" if r["is_dir"] else ""), key=f"fb_glob_{i}", on_click=_goto, args=(r["path"],))
     if real:
         crumbs = file_view.breadcrumbs(real)
         cols = st.columns(min(len(crumbs), 8) or 1)
