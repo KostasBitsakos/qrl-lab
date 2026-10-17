@@ -20,6 +20,7 @@ import time
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 
 ROOT = os.environ.get("QRL_LAB_DIR") or os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 os.environ["QRL_LAB_DIR"] = ROOT
@@ -30,6 +31,7 @@ import k8s_view  # noqa: E402
 import prom_view  # noqa: E402
 import web_terminal  # noqa: E402
 import sudo_ui  # noqa: E402
+import race_view  # noqa: E402
 import summarize_runs  # noqa: E402
 import paper_plots  # noqa: E402
 import paper_build  # noqa: E402
@@ -159,17 +161,22 @@ def read_events(max_lines=6000):
         size = f.tell()
         f.seek(max(0, size - 3_000_000))
         lines = f.read().decode("utf-8", "ignore").splitlines()[-max_lines:]
-    rows = []
+    rows, raw = [], []
     for line in lines:
         try:
             e = json.loads(line)
         except json.JSONDecodeError:
             continue
+        raw.append(e)
         rows.append({"ts": dt.datetime.fromtimestamp(e.get("ts", 0)), "agent": agent_key(e.get("agent_type")),
                      "agent_id": e.get("agent_id"), "event": e.get("hook_event_name", ""),
                      "tool": e.get("tool_name", ""), "summary": e.get("summary", ""),
                      "model": e.get("model", ""), "effort": e.get("effort", ""), "status": e.get("status", "")})
-    return pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+    ann = race_view.annotate(raw)  # (one-word task label, task group) per event
+    df["label"] = [a[0] for a in ann]
+    df["group"] = [a[1] for a in ann]
+    return df
 
 
 def agent_spans(ev):
@@ -631,14 +638,23 @@ with tab_agents:
     hours = st.select_slider("Παράθυρο", options=[1, 3, 6, 12, 24, 72], value=6, format_func=lambda h: f"{h} ώρες",
                              key="agent_hours")
 
+    race_on = st.toggle("🏁 Race view", key="race_view")
+
     @st.fragment(run_every=refresh)
-    def agents_view(hours):
+    def agents_view(hours, race_on=False):
         ev = read_events()
         if ev.empty:
             st.info("Δεν υπάρχει ακόμη δραστηριότητα πρακτόρων. Τα hooks του Claude Code γράφουν στο "
                     "`.lab/events.jsonl` μόλις ξεκινήσει ο συντονιστής.", icon="🤖")
             return
         now_ = dt.datetime.now()
+        if race_on:
+            ln = race_view.lanes(race_view.load_events(EVENTS), roles={k: (v[0], v[1]) for k, v in AGENTS.items()})
+            page, hgt = race_view.render(ln), race_view.height_for(len(ln))
+            try:  # st.components.v1.html is deprecated in newer Streamlit; st.iframe takes the same HTML string
+                components.html(page, height=hgt, scrolling=True)
+            except AttributeError:
+                st.iframe(page, height=hgt)
         # who is working now
         st.markdown("##### Τώρα")
         keys = active_agent_keys(ev)
@@ -666,12 +682,17 @@ with tab_agents:
         for k in lanes:
             sub = win[win["agent"] == k]
             name, color, _ = AGENTS.get(k, (k, OTHER_COLOR, ""))
+            # one label per task: written next to the last dot of each task group
+            last_of = sub.groupby("group").tail(1).index if "group" in sub else []
+            texts = [(sub.at[i, "label"] if i in last_of else "") for i in sub.index]
             fig.add_trace(go.Scatter(
-                x=sub["ts"], y=[name] * len(sub), mode="markers", name=name,
+                x=sub["ts"], y=[name] * len(sub), mode="markers+text", name=name,
+                text=texts, textposition="middle right", textfont=dict(size=11, color=color),
+                cliponaxis=False,
                 marker=dict(size=9, color=color, line=dict(width=2, color="#fcfcfb")),
                 customdata=list(zip(sub["tool"].fillna(""), sub["summary"].fillna("").str.slice(0, 120))),
                 hovertemplate="%{x|%H:%M:%S}<br><b>%{customdata[0]}</b> %{customdata[1]}<extra>" + name + "</extra>"))
-        fig.update_layout(height=90 + 46 * len(lanes), margin=dict(l=10, r=10, t=10, b=30), showlegend=False,
+        fig.update_layout(height=90 + 46 * len(lanes), margin=dict(l=10, r=90, t=10, b=30), showlegend=False,
                           hovermode="closest", plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
         fig.update_xaxes(showgrid=True, gridcolor="rgba(137,135,129,0.25)", gridwidth=1)
         fig.update_yaxes(showgrid=False, categoryorder="array", categoryarray=[AGENTS.get(k, (k,))[0] for k in lanes][::-1])
@@ -696,7 +717,7 @@ with tab_agents:
                                        "πράκτορας": [AGENTS.get(a, (a,))[0] for a in tail["agent"]],
                                        "γεγονός": tail["event"], "εργαλείο": tail["tool"],
                                        "περίληψη": tail["summary"]}), hide_index=True, width="stretch")
-    agents_view(hours)
+    agents_view(hours, race_on)
 
 # ================================================================ runs
 with tab_runs:

@@ -321,6 +321,53 @@ def test_agent_log():
     ok("agent_log start/end round trip (API and CLI)")
 
 
+def test_labels_and_race():
+    import agent_log, race_view
+    t = agent_log.task_word
+    assert t("engineer: Sudo tab for dashboard") == "Sudo" and t("Fix the health watchdog") == "Fix"
+    assert t("Να ελέγξει τον κώδικα") == "ελέγξει" and t("codex:codex-rescue: review x") == "review"
+    assert t("the a of") == "" and t("") == "" and t(None) == "" and t("12 34") == ""
+    assert len(t("supercalifragilistic-word")) == 14
+    assert agent_log.clean_label("  racing line extra ") == "racing line" and len(agent_log.clean_label("x" * 40)) == 14
+    # --label via API and CLI; default derived from --task
+    path = os.path.join(TMP, ".lab", "events.jsonl")
+    n0 = len(open(path).read().splitlines()) if os.path.exists(path) else 0
+    agent_log.start("codex-reviewer", task="review of sim v2")
+    agent_log.start("codex-reviewer", task="review of sim v2", label="gates")
+    subprocess.run([sys.executable, "tools/agent_log.py", "start", "--agent", "codex-quick", "--task", "x y", "--label", "ping"],
+                   capture_output=True, text=True, check=True)
+    recs = [json.loads(x) for x in open(path).read().splitlines()[n0:]]
+    assert [r.get("label") for r in recs] == ["review", "gates", "ping"], recs
+    # annotate: explicit label, task word, Agent-call lookup, coordinator gap groups
+    now = 1_000_000.0
+    ev = [{"hook_event_name": "PreToolUse", "tool_name": "Agent", "summary": "engineer: Sudo tab", "ts": now - 50},
+          {"hook_event_name": "SubagentStart", "agent_id": "e1", "agent_type": "engineer", "ts": now - 49},
+          {"hook_event_name": "PreToolUse", "agent_id": "e1", "agent_type": "engineer", "summary": "x.py", "ts": now - 40},
+          {"hook_event_name": "PreToolUse", "agent_id": "e1", "agent_type": "engineer", "summary": "y.py", "ts": now - 30},
+          {"hook_event_name": "SubagentStart", "agent_id": "c1", "agent_type": "mystery-bot", "label": "gates", "ts": now - 20},
+          {"hook_event_name": "SubagentStart", "agent_id": "s1", "agent_type": "scholar", "ts": now - 10},
+          {"hook_event_name": "SubagentStop", "agent_id": "s1", "agent_type": "scholar", "status": "failed", "ts": now - 5},
+          {"hook_event_name": "PreToolUse", "tool_name": "Bash", "summary": "Run tests", "ts": now - 3}]
+    ann = race_view.annotate(ev)
+    assert ann[2] == ann[3] == ("Sudo", "e1"), ann
+    assert ann[4][0] == "gates" and ann[5][0] == "scholar" and ann[7][0] == "tests", ann
+    roles = {"engineer": ("engineer (Claude Sonnet)", "#e87ba4"), "scholar": ("scholar (Claude Sonnet)", "#008300")}
+    ln = race_view.lanes(ev, now=now, roles=roles)
+    by = {(r["role"]): r for r in ln}
+    assert by["engineer"]["status"] == "running" and 0 < by["engineer"]["progress"] < 1, by["engineer"]
+    assert by["mystery-bot"]["progress"] is None, "unknown role = looping animation"
+    assert by["scholar"]["status"] == "failed" and by["scholar"]["progress"] == 1.0
+    assert ln[0]["role"] == "coordinator" and [r["status"] for r in ln[1:3]] == ["running", "running"], ln
+    h = race_view.render(ln, now)
+    assert "<script" not in h and "Press Start 2P" in h and "monospace" in h and "viewport" in h
+    assert "Sudo" in h and "gates" in h and "🏁" in h and "✗" in h and "loop" in h and "#e87ba4" in h
+    ev2 = [dict(ev[1], agent_type="<img src=x onerror=1>", label="<b>x</b>")]
+    h2 = race_view.render(race_view.lanes(ev2, now=now), now)
+    assert "<img" not in h2 and "<b>" not in h2 and "&lt;b&gt;" in h2
+    assert "άδεια" in race_view.render([], now)
+    ok("task labels (--label, derivation, Agent-call lookup) and race HTML (fixture events, escaping, no JS)")
+
+
 def test_agents_tab_roles():
     from streamlit.testing.v1 import AppTest
     now = time.time()
@@ -348,6 +395,10 @@ def test_agents_tab_roles():
         r = spans[spans["ρόλος"] == "codex-reviewer"].iloc[0]
         assert r["μοντέλο"] == "gpt-6.1-sol" and r["κατάσταση"] == "done" and r["διάρκεια"] == "1 λεπτά"
         assert spans[spans["ρόλος"] == "codex-architect"].iloc[0]["κατάσταση"] == "running"
+        at.toggle(key="race_view").set_value(True).run()
+        assert not at.exception, at.exception
+        at.toggle(key="race_view").set_value(False).run()
+        assert not at.exception, at.exception
     finally:
         open(path, "w").write(old)
     ok("Agents tab shows each Codex role with model, task, duration, status and per-role count")
@@ -1234,6 +1285,7 @@ if __name__ == "__main__":
         test_codex_health()
         test_watchdog()
         test_sudo_ui()
+        test_labels_and_race()
         test_deputy()
         test_voice()
         test_k8s_view()
