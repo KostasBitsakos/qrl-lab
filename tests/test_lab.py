@@ -313,6 +313,82 @@ def test_launcher():
     ok("launcher: refuses unapproved/rejected/tampered/used/wrong-context; runs approved; stop and time limit work")
 
 
+def test_sandbox():
+    import datetime as dtm
+    import sandbox_guard as G
+    wt = os.path.join(TMP, "code-tuning")
+    os.makedirs(os.path.join(wt, "exp"), exist_ok=True)
+    subprocess.run(["git", "-C", wt, "init", "-q", "-b", "dinos-tuning"], check=True)
+    with open(os.path.join(wt, "toy.py"), "w") as f:
+        f.write(SPEC_SCRIPT)
+    db = LabDB()
+    exp = (dtm.datetime.now(dtm.timezone.utc) + dtm.timedelta(days=1)).isoformat(timespec="seconds")
+    sb = {"branch": "dinos-tuning", "repo": "code", "seed_ranges_allowed": [[0, 999], [1000, 1004]],
+          "seed_ranges_forbidden": [[1100, 1109], [20000, 2147483647]], "cpu_hours_budget": 1.0, "max_parallel": 2,
+          "cpu_affinity": "8-39", "per_run_wall_clock_hours": 0.5, "expires": exp}
+    parent = {"name": "sbx", "scope": "sim", "kind": "sandbox", "sandbox": sb, "cwd": "code", "max_parallel": 2,
+              "entries": [{"name": "marker", "cmd": ["true"]}], "limits": {"wall_clock_hours": 0.5}}
+    rid = db.ask("approval", "sandbox", "b", scope="sim", spec=parent)
+    child = lambda **kw: dict({"name": "kid", "scope": "sim", "cwd": "code",
+                               "entries": [{"name": "s5", "seed": 5, "cmd": [sys.executable, "toy.py", "3", "0.05"]}]}, **kw)
+
+    def sstart(c):
+        p = os.path.join(TMP, "child.json")
+        json.dump(c, open(p, "w"))
+        return launch("sandbox-start", "--request", rid, "--spec", p)
+
+    out = sstart(child())
+    assert out.returncode != 0 and "not approved" in out.stderr, out
+    db.decide(rid, "approve", "")
+    # refusals
+    def refused(c, text):
+        out = sstart(c)
+        assert out.returncode != 0 and text in out.stderr, (text, out.stderr)
+    refused(child(scope="real"), "scope must be 'sim'")
+    refused(child(real={"kube_context": "x"}), "forbidden field")
+    refused(child(cwd="../simulations"), "must be relative")
+    refused(child(cwd="code/../../x"), "must be relative")
+    os.symlink(TMP, os.path.join(wt, "escape"))
+    refused(child(cwd="code/escape"), "outside")
+    c = child(); c["entries"][0]["seed"] = 20000; refused(c, "forbidden range")
+    c = child(); c["entries"][0]["seed"] = 1105; refused(c, "forbidden range")
+    c = child(); c["entries"][0]["seed"] = 1005; refused(c, "outside the allowed")
+    c = child(); c["entries"][0]["cmd"] += ["--eval-seeds", "1000", "1100"]; refused(c, "forbidden range")
+    c = child(); c["entries"][0]["cmd"] += ["--seed=7,30000"]; refused(c, "outside the allowed")
+    c = child(); c["entries"][0]["cmd"] += ["--seed", "abc"]; refused(c, "Cannot parse")
+    c = child(); del c["entries"][0]["seed"]; refused(c, "cannot be determined")
+    c = child(); c["entries"][0]["cmd"] = ["kubectl", "get", "pods"]; refused(c, "not allowed")
+    c = child(); c["entries"][0]["wall_clock_hours"] = 5; refused(c, "wall_clock_hours")
+    c = child(estimate_cpu_hours=1.0); c["max_parallel"] = 30; refused(c, "max_parallel")
+    c = child(cpu_affinity="0-3"); refused(c, "cpu_affinity")
+    c = child(); c["entries"] = [dict(c["entries"][0], cpus=1, wall_clock_hours=0.5) for _ in range(3)]
+    refused(c, "max_parallel")                                    # 3 entries > 2 parallel
+    c = child(); c["entries"] = [dict(c["entries"][0], cpus=2, wall_clock_hours=0.5) for _ in range(2)]
+    refused(c, "Budget")                                          # 2.0 CPU-h > 1.0 budget
+    assert [r for r in db.runs() if r["request_id"] == rid] == [], "refusals must start nothing"
+    # accepted: seeds 5 and 1003 via args, pinned, recorded under the parent id, in the tuning worktree
+    c = child(cpu_affinity="24-39"); c["entries"][0]["cmd"] += ["--eval-seeds", "1000-1003"]
+    out = sstart(c)
+    assert out.returncode == 0, out.stderr
+    run_id = out.stdout.split()[0]
+    r = wait_status(db, run_id, ("done", "failed"))
+    assert r["status"] == "done" and r["request_id"] == rid and r["cwd"] == os.path.realpath(wt), r
+    assert "kid/s5" in r["name"]
+    assert json.load(open(os.path.join(r["run_dir"], "spec_entry.json")))["cpu_affinity"] == "24-39"
+    st = launch("sandbox-status", "--request", rid)
+    assert st.returncode == 0 and "CPU-h used" in st.stdout, st
+    # wrong branch
+    subprocess.run(["git", "-C", wt, "symbolic-ref", "HEAD", "refs/heads/other"], check=True)
+    refused(child(), "not on branch")
+    subprocess.run(["git", "-C", wt, "symbolic-ref", "HEAD", "refs/heads/dinos-tuning"], check=True)
+    # expiry (pure function)
+    past = dtm.datetime.now(dtm.timezone.utc) + dtm.timedelta(days=2)
+    expect_error(lambda: G.check_child(child(), parent, now=past), "expired")
+    assert G.seed_ok(0, 1004, sb["seed_ranges_allowed"], sb["seed_ranges_forbidden"])
+    assert not G.seed_ok(999, 1100, sb["seed_ranges_allowed"], sb["seed_ranges_forbidden"])
+    ok("sandbox: refuses unapproved/real/bad cwd/branch/forbidden+unknown seeds/kubectl/over budget/parallel/expired; runs a valid child")
+
+
 def test_hook():
     env = dict(os.environ, CLAUDE_PROJECT_DIR=TMP)
     for payload in (
@@ -2173,6 +2249,7 @@ if __name__ == "__main__":
         test_decisions()
         test_hook()
         test_launcher()
+        test_sandbox()
         test_core_pinning()
         test_agent_log()
         test_uploads()

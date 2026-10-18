@@ -5,6 +5,10 @@
   launch_run.py start --request R-... --all         start the next entries not yet run, up to spec.max_parallel
                                                     (default 1); call again when a run finishes
   launch_run.py list                                runs and their status
+  launch_run.py sandbox-start --request R-... --spec child.json
+                                                    start every entry of a child spec under a standing sandbox approval
+                                                    (kind 'sandbox'); the child is verified, not separately approved
+  launch_run.py sandbox-status --request R-...      CPU-hours used/left, running runs, expiry
 
 It refuses unless ALL hold:
   - the request exists, is an 'approval' and its state is 'approved' (decided by the researcher in the dashboard);
@@ -151,6 +155,78 @@ def start_entry(db, rid, entry):
     return run_id
 
 
+def load_sandbox(db, rid):
+    r, spec = load_approved_spec(db, rid)
+    if spec.get("kind") != "sandbox" or not isinstance(spec.get("sandbox"), dict):
+        raise LabError(f"{rid} is not a sandbox approval.")
+    return r, spec
+
+
+def start_sandbox(db, rid, child):
+    """Verify a child spec against the sandbox approval and start all its entries (all or nothing)."""
+    import sandbox_guard as G
+    r, parent = load_sandbox(db, rid)
+    sb = parent["sandbox"]
+    cwd, plan = G.check_child(child, parent)
+    root = lab_root()
+    need = sum(p["reserve_cpu_h"] for p in plan)
+    sha = git_sha(cwd)
+    child_hash = canonical_hash(child)
+    run_ids = []
+    with db.tx() as c:
+        runs = [x for x in c.execute("SELECT * FROM runs WHERE request_id=?", (rid,)).fetchall()]
+        active = sum(1 for x in runs if x["status"] in ("starting", "running"))
+        if active + len(plan) > int(sb["max_parallel"]):
+            raise LabError(f"{active} running + {len(plan)} new > max_parallel {sb['max_parallel']}. Nothing was started.")
+        used = G.used_cpu_hours(db, rid)
+        if used + need > float(sb["cpu_hours_budget"]):
+            raise LabError(f"Budget: {used:.2f} used + {need:.2f} worst case > {sb['cpu_hours_budget']} CPU-h. "
+                           "Nothing was started.")
+        base = len(runs)
+        for p in plan:
+            e = child["entries"][p["entry"]]
+            idx = base + p["entry"]
+            run_id = f"{dt.datetime.now().strftime('%Y%m%d-%H%M%S')}-{rid}-s{idx}-a1"
+            run_dir = os.path.join(lab_dir(), "runs", run_id)
+            os.makedirs(run_dir, exist_ok=False)
+            c.execute("INSERT INTO runs(run_id, request_id, spec_hash, entry, attempt, name, scope, cmd, cwd, run_dir,"
+                      " code_sha, status, created) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                      (run_id, rid, child_hash, idx, 1, f"{child['name']}/{e.get('name') or p['entry']}", "sim",
+                       json.dumps(e["cmd"]), cwd, run_dir, sha, "starting", now()))
+            c.execute("INSERT INTO audit(ts, actor, action, target, detail) VALUES (?,?,?,?,?)",
+                      (now(), "launcher", "sandbox-start", run_id, f"{rid} child {child['name']} entry {p['entry']}"))
+            with open(os.path.join(run_dir, "spec_entry.json"), "w", encoding="utf-8") as f:
+                json.dump({"request_id": rid, "spec_hash": child_hash, "spec_name": child["name"], "scope": "sim",
+                           "entry": idx, "attempt": 1, "entry_spec": e, "limits": {"wall_clock_hours": p["wall_hours"]},
+                           "real": None, "cpu_affinity": child.get("cpu_affinity") or sb["cpu_affinity"], "env_threads": child.get("env_threads"),
+                           "code_sha": sha, "cwd": cwd,
+                           "sandbox": {"cpus": p["cpus"], "reserve_cpu_h": p["reserve_cpu_h"], "seeds": p["seeds"],
+                                       "branch": sb["branch"]}}, f, indent=2, ensure_ascii=False)
+            G.log_ledger(rid, {"ts": now(), "run_id": run_id, "name": child["name"], "seeds": p["seeds"],
+                               "reserve_cpu_h": p["reserve_cpu_h"], "cpus": p["cpus"]}, root)
+            run_ids.append(run_id)
+    for run_id in run_ids:
+        d = db.run(run_id)["run_dir"]
+        subprocess.Popen([sys.executable, os.path.abspath(__file__), "_supervise", run_id],
+                         cwd=root, start_new_session=True, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=open(os.path.join(d, "supervisor.log"), "a"))
+    return run_ids
+
+
+def sandbox_status(db, rid):
+    import sandbox_guard as G
+    _, parent = load_sandbox(db, rid)
+    sb = parent["sandbox"]
+    used = G.used_cpu_hours(db, rid)
+    budget = float(sb["cpu_hours_budget"])
+    exp = G.parse_ts(sb["expires"])
+    left_h = (exp - dt.datetime.now(dt.timezone.utc)).total_seconds() / 3600
+    return {"request": rid, "branch": sb["branch"], "cpu_hours_used": round(used, 3),
+            "cpu_hours_left": round(budget - used, 3), "budget": budget,
+            "running": G.active_runs(db, rid), "max_parallel": sb["max_parallel"],
+            "expires": sb["expires"], "expired": left_h <= 0, "hours_to_expiry": round(left_h, 2)}
+
+
 def supervise(run_id):
     db = LabDB()
     run = db.run(run_id)
@@ -216,6 +292,11 @@ def main():
     g.add_argument("--entry", type=int)
     g.add_argument("--all", action="store_true")
     sub.add_parser("list")
+    s = sub.add_parser("sandbox-start")
+    s.add_argument("--request", required=True)
+    s.add_argument("--spec", required=True)
+    s = sub.add_parser("sandbox-status")
+    s.add_argument("--request", required=True)
     s = sub.add_parser("_supervise")
     s.add_argument("run_id")
     a = p.parse_args()
@@ -228,6 +309,19 @@ def main():
         if a.cmd == "list":
             for r in db.runs():
                 print(f"{r['run_id']}  {r['status']:8s} exit={r['exit_code']}  {r['scope']}  {r['name']}")
+        elif a.cmd == "sandbox-start":
+            try:
+                with open(a.spec, encoding="utf-8") as f:
+                    child = json.load(f)
+            except (OSError, ValueError) as e:
+                raise LabError(f"Cannot read child spec {a.spec}: {e}")
+            for rid_ in start_sandbox(db, a.request, child):
+                print(rid_)
+        elif a.cmd == "sandbox-status":
+            st = sandbox_status(db, a.request)
+            print(f"{st['request']} ({st['branch']}): {st['cpu_hours_used']} / {st['budget']} CPU-h used, "
+                  f"{st['cpu_hours_left']} left; {st['running']}/{st['max_parallel']} running; "
+                  f"expires {st['expires']} ({'EXPIRED' if st['expired'] else str(st['hours_to_expiry']) + ' h left'})")
         elif a.all:
             _, spec = load_approved_spec(db, a.request)
             max_parallel = int(spec.get("max_parallel", 1))
