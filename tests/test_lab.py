@@ -318,7 +318,15 @@ def test_sandbox():
     import sandbox_guard as G
     wt = os.path.join(TMP, "code-tuning")
     os.makedirs(os.path.join(wt, "exp"), exist_ok=True)
-    subprocess.run(["git", "-C", wt, "init", "-q", "-b", "dinos-tuning"], check=True)
+    subprocess.run(["git", "-C", wt, "init", "-q", "-b", "qrl-dev"], check=True)
+    for rel in G.PROTECTED_FILES:                       # protected files identical on qrl-dev and dinos-tuning
+        os.makedirs(os.path.dirname(os.path.join(wt, rel)), exist_ok=True)
+        with open(os.path.join(wt, rel), "w") as f:
+            f.write(f"# protected {rel}\n")
+    git = ["git", "-C", wt, "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run(git + ["add", "-A"], check=True)
+    subprocess.run(git + ["commit", "-q", "-m", "base"], check=True)
+    subprocess.run(["git", "-C", wt, "checkout", "-q", "-b", "dinos-tuning"], check=True)
     with open(os.path.join(wt, "toy.py"), "w") as f:
         f.write(SPEC_SCRIPT)
     db = LabDB()
@@ -330,13 +338,18 @@ def test_sandbox():
               "entries": [{"name": "marker", "cmd": ["true"]}], "limits": {"wall_clock_hours": 0.5}}
     rid = db.ask("approval", "sandbox", "b", scope="sim", spec=parent)
     child = lambda **kw: dict({"name": "kid", "scope": "sim", "cwd": "code",
-                               "entries": [{"name": "s5", "seed": 5, "cmd": [sys.executable, "toy.py", "3", "0.05"]}]}, **kw)
+                               "entries": [{"name": "s5", "seed": 5, "cmd": ["python3", "toy.py", "3", "0.05"]}]}, **kw)
 
     def sstart(c):
         p = os.path.join(TMP, "child.json")
         json.dump(c, open(p, "w"))
         return launch("sandbox-start", "--request", rid, "--spec", p)
 
+    with open(os.path.join(wt, "sleeper.py"), "w") as f:
+        f.write("import time\ntime.sleep(300)\n")
+    with open(os.path.join(wt, "envdump.py"), "w") as f:
+        f.write("import json, os\njson.dump({k: v for k, v in os.environ.items() if k.startswith(('QRL_', 'OMP', 'PYTHON'))},"
+                " open(os.path.join(os.environ['QRL_RUN_DIR'], 'env.json'), 'w'))\n")
     out = sstart(child())
     assert out.returncode != 0 and "not approved" in out.stderr, out
     db.decide(rid, "approve", "")
@@ -365,7 +378,40 @@ def test_sandbox():
     refused(c, "max_parallel")                                    # 3 entries > 2 parallel
     c = child(); c["entries"] = [dict(c["entries"][0], cpus=2, wall_clock_hours=0.5) for _ in range(2)]
     refused(c, "Budget")                                          # 2.0 CPU-h > 1.0 budget
+    # (3) non-finite numbers anywhere, parsed strictly
+    for raw in ('{"name":"k","scope":"sim","cwd":"code","entries":[],"x":NaN}',
+                '{"name":"k","scope":"sim","cwd":"code","entries":[],"x":[Infinity]}',
+                '{"name":"k","scope":"sim","cwd":"code","entries":[],"x":1e999}'):
+        p = os.path.join(TMP, "nan.json"); open(p, "w").write(raw)
+        out = launch("sandbox-start", "--request", rid, "--spec", p)
+        assert out.returncode != 0 and "Non-finite" in out.stderr, out.stderr
+    c = child(); c["entries"][0]["wall_clock_hours"] = float("nan"); expect_error(lambda: G.check_child(c, parent), "Non-finite")
+    # (4) commands
+    for cmd, text in ((["bash", "toy.py"], "Shell"), (["python3", "-c", "print(1)"], "Shell"),
+                      (["/bin/sh", "toy.py"], "Shell"), (["env", "python3", "toy.py"], "Shell"),
+                      (["/usr/bin/python3", "toy.py"], "must be the project venv"),
+                      (["python3", "-m", "http.server"], ".py script"), (["python3", "toy.txt"], ".py script"),
+                      (["python3", "escape/x.py"], "not a file inside"), (["python3", "../toy.py"], "not a file inside")):
+        c = child(); c["entries"][0]["cmd"] = cmd; refused(c, text)
+    open(os.path.join(TMP, "x.py"), "w").write("print(1)\n")
+    # (5) env allowlist
+    for envd in ({"PYTHONPATH": "/x"}, {"QRL_SANDBOX_SEEDS": "0-99999"}, {"OMP_NUM_THREADS": "8"}, {"OMP_NUM_THREADS": "0"},
+                 {"LD_PRELOAD": "x"}):
+        refused(child(env_threads=envd), "not allowed"); refused(child(env=envd), "not allowed")
+        c = child(); c["entries"][0]["env"] = envd; refused(c, "not allowed")
+    # (4) protected files must equal qrl-dev
+    prot = os.path.join(wt, G.PROTECTED_FILES[0])
+    orig = open(prot).read(); open(prot, "w").write(orig + "# tampered\n")
+    refused(child(), "Protected file"); open(prot, "w").write(orig)
+    os.remove(prot); refused(child(), "Protected file"); open(prot, "w").write(orig)
     assert [r for r in db.runs() if r["request_id"] == rid] == [], "refusals must start nothing"
+    # (1)/(2) pure helpers: seed env string, disjoint cores, caps, empty pool fails closed
+    assert G.seed_env(sb) == "0-999,1000-1004", G.seed_env(sb)
+    assert G.seed_env(dict(sb, seed_ranges_forbidden=[[500, 600]])) == "0-499,601-999,1000-1004"
+    assert G.assign_cores(range(8, 40), [8, 9], [2, 1]) == [[10, 11], [12]]
+    expect_error(lambda: G.assign_cores([], [], [1]), "empty")
+    expect_error(lambda: G.assign_cores(range(8, 40), [], [1] * 25), "limit 24")
+    expect_error(lambda: G.assign_cores(range(8, 10), [], [3]), "free cores")
     # accepted: seeds 5 and 1003 via args, pinned, recorded under the parent id, in the tuning worktree
     c = child(cpu_affinity="24-39"); c["entries"][0]["cmd"] += ["--eval-seeds", "1000-1003"]
     out = sstart(c)
@@ -375,6 +421,36 @@ def test_sandbox():
     assert r["status"] == "done" and r["request_id"] == rid and r["cwd"] == os.path.realpath(wt), r
     assert "kid/s5" in r["name"]
     assert json.load(open(os.path.join(r["run_dir"], "spec_entry.json")))["cpu_affinity"] == "24-39"
+    lj = json.load(open(os.path.join(r["run_dir"], "launcher.json")))
+    assert lj["cpu_seconds"] is not None
+    led = [json.loads(l) for l in open(os.path.join(TMP, ".lab", "sandbox", f"{rid}.ledger.jsonl"))]
+    assert any(x.get("event") == "done" and x.get("cpu_seconds") is not None for x in led), led
+    # env of the child: seed guard set from the sandbox, threads 1, nothing inherited
+    os.environ["PYTHONPATH"] = "/should/not/leak"
+    c = child(); c["entries"][0]["cmd"] = ["python3", "envdump.py"]; c["entries"][0]["cpus"] = 2; c["entries"][0]["wall_clock_hours"] = 0.2
+    c["entries"].append(dict(c["entries"][0], name="b"))
+    out = sstart(c); assert out.returncode == 0, out.stderr
+    del os.environ["PYTHONPATH"]
+    runs2 = out.stdout.split()
+    cores_seen = []
+    for rr in runs2:
+        r2 = wait_status(db, rr, ("done", "failed")); assert r2["status"] == "done", r2
+        ev = json.load(open(os.path.join(r2["run_dir"], "env.json")))
+        assert ev["QRL_SANDBOX_SEEDS"] == "0-999,1000-1004" and ev["OMP_NUM_THREADS"] == "1" and "PYTHONPATH" not in ev, ev
+        cores_seen.append(json.load(open(os.path.join(r2["run_dir"], "spec_entry.json")))["sandbox"]["cores"])
+    assert all(len(x) == 2 for x in cores_seen) and not set(cores_seen[0]) & set(cores_seen[1]), cores_seen
+    assert all(8 <= x <= 39 for cs in cores_seen for x in cs), cores_seen
+    # (6) absolute expiry enforced by the supervisor (parent re-asked with an expiry 8 s ahead)
+    sb2 = dict(sb, expires=(dtm.datetime.now(dtm.timezone.utc) + dtm.timedelta(seconds=8)).isoformat(timespec="seconds"),
+               cpu_hours_budget=5.0)
+    rid2 = db.ask("approval", "sandbox2", "b", scope="sim", spec=dict(parent, sandbox=sb2))
+    db.decide(rid2, "approve", "")
+    c = child(); c["entries"][0]["cmd"] = ["python3", "sleeper.py"]; c["entries"][0]["seed"] = 6
+    p = os.path.join(TMP, "child2.json"); json.dump(c, open(p, "w"))
+    out = launch("sandbox-start", "--request", rid2, "--spec", p); assert out.returncode == 0, out.stderr
+    r3 = wait_status(db, out.stdout.split()[0], ("stopped", "done", "failed"), timeout=40)
+    assert r3["status"] == "stopped", r3
+    assert "expired" in json.load(open(os.path.join(r3["run_dir"], "launcher.json")))["reason"]
     st = launch("sandbox-status", "--request", rid)
     assert st.returncode == 0 and "CPU-h used" in st.stdout, st
     # wrong branch

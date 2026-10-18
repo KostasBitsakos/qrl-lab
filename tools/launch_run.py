@@ -39,6 +39,14 @@ DEFAULT_SIM_CPUS = "8-39"
 THREAD_ENV = ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS")
 
 
+G_ENV_THREADS = ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS")
+
+
+def parse_ts_epoch(s):
+    d = dt.datetime.fromisoformat(s)
+    return (d if d.tzinfo else d.replace(tzinfo=dt.timezone.utc)).timestamp()
+
+
 def parse_cpus(v):
     """'8-39', '0,2-3' or [0, 1] -> sorted list of ints."""
     if isinstance(v, (list, tuple)):
@@ -169,6 +177,11 @@ def start_sandbox(db, rid, child):
     sb = parent["sandbox"]
     cwd, plan = G.check_child(child, parent)
     root = lab_root()
+    G.verify_protected(G.worktree_path(sb, root))
+    avail = os.sched_getaffinity(0) if hasattr(os, "sched_getaffinity") else set()
+    pool = sorted(set(parse_cpus(child.get("cpu_affinity") or sb["cpu_affinity"])) & set(avail))
+    seeds_env = G.seed_env(sb)
+    env_threads = G.check_env(child.get("env_threads"), "child")
     need = sum(p["reserve_cpu_h"] for p in plan)
     sha = git_sha(cwd)
     child_hash = canonical_hash(child)
@@ -178,12 +191,14 @@ def start_sandbox(db, rid, child):
         active = sum(1 for x in runs if x["status"] in ("starting", "running"))
         if active + len(plan) > int(sb["max_parallel"]):
             raise LabError(f"{active} running + {len(plan)} new > max_parallel {sb['max_parallel']}. Nothing was started.")
+        busy = sandbox_busy_cores(c)
+        cores = G.assign_cores(pool, busy, [p["cpus"] for p in plan])
         used = G.used_cpu_hours(db, rid)
         if used + need > float(sb["cpu_hours_budget"]):
             raise LabError(f"Budget: {used:.2f} used + {need:.2f} worst case > {sb['cpu_hours_budget']} CPU-h. "
                            "Nothing was started.")
         base = len(runs)
-        for p in plan:
+        for p, pcores in zip(plan, cores):
             e = child["entries"][p["entry"]]
             idx = base + p["entry"]
             run_id = f"{dt.datetime.now().strftime('%Y%m%d-%H%M%S')}-{rid}-s{idx}-a1"
@@ -198,12 +213,14 @@ def start_sandbox(db, rid, child):
             with open(os.path.join(run_dir, "spec_entry.json"), "w", encoding="utf-8") as f:
                 json.dump({"request_id": rid, "spec_hash": child_hash, "spec_name": child["name"], "scope": "sim",
                            "entry": idx, "attempt": 1, "entry_spec": e, "limits": {"wall_clock_hours": p["wall_hours"]},
-                           "real": None, "cpu_affinity": child.get("cpu_affinity") or sb["cpu_affinity"], "env_threads": child.get("env_threads"),
+                           "real": None, "cpu_affinity": child.get("cpu_affinity") or sb["cpu_affinity"], "env_threads": dict(env_threads, **G.check_env(e.get("env_threads"), "entry")),
                            "code_sha": sha, "cwd": cwd,
                            "sandbox": {"cpus": p["cpus"], "reserve_cpu_h": p["reserve_cpu_h"], "seeds": p["seeds"],
-                                       "branch": sb["branch"]}}, f, indent=2, ensure_ascii=False)
+                                       "branch": sb["branch"], "cores": pcores, "seed_env": seeds_env,
+                                       "expires": sb["expires"], "request_id": rid}}, f, indent=2, ensure_ascii=False)
             G.log_ledger(rid, {"ts": now(), "run_id": run_id, "name": child["name"], "seeds": p["seeds"],
-                               "reserve_cpu_h": p["reserve_cpu_h"], "cpus": p["cpus"]}, root)
+                               "reserve_cpu_h": p["reserve_cpu_h"], "cpus": p["cpus"], "cores": pcores,
+                               "event": "start"}, root)
             run_ids.append(run_id)
     for run_id in run_ids:
         d = db.run(run_id)["run_dir"]
@@ -211,6 +228,18 @@ def start_sandbox(db, rid, child):
                          cwd=root, start_new_session=True, stdin=subprocess.DEVNULL,
                          stdout=subprocess.DEVNULL, stderr=open(os.path.join(d, "supervisor.log"), "a"))
     return run_ids
+
+
+def sandbox_busy_cores(c):
+    """Cores assigned to sandbox runs that are starting/running (any request), read from their spec_entry.json."""
+    busy = []
+    for x in c.execute("SELECT run_dir FROM runs WHERE status IN ('starting','running')").fetchall():
+        try:
+            with open(os.path.join(x["run_dir"], "spec_entry.json"), encoding="utf-8") as f:
+                busy += (json.load(f).get("sandbox") or {}).get("cores") or []
+        except (OSError, ValueError):
+            pass
+    return busy
 
 
 def sandbox_status(db, rid):
@@ -233,10 +262,23 @@ def supervise(run_id):
     with open(os.path.join(run["run_dir"], "spec_entry.json"), encoding="utf-8") as f:
         meta = json.load(f)
     limit_s = float(meta["limits"]["wall_clock_hours"]) * 3600
-    env = dict(os.environ, QRL_RUN_ID=run_id, QRL_RUN_DIR=run["run_dir"], QRL_LAB_DIR=lab_root(),
+    sbm = meta.get("sandbox")
+    base_env = os.environ
+    if sbm:   # sandbox: no inherited QRL_*/PYTHON* variables; the launcher sets the seed guard and thread counts
+        base_env = {k: v for k, v in os.environ.items() if not k.startswith("QRL_") and
+                    k not in ("PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME", "LD_PRELOAD", "LD_LIBRARY_PATH")}
+    env = dict(base_env, QRL_RUN_ID=run_id, QRL_RUN_DIR=run["run_dir"], QRL_LAB_DIR=lab_root(),
                QRL_RUN_SEED=str(meta["entry_spec"].get("seed", "")))
     log = open(os.path.join(run["run_dir"], "output.log"), "ab")
-    cores, upd = pin_plan(meta.get("scope"), meta.get("cpu_affinity"), meta.get("env_threads"))
+    if sbm:
+        cores = [int(c) for c in sbm["cores"]]
+        upd = {k: "1" for k in G_ENV_THREADS}
+        upd.update({k: str(v) for k, v in (meta.get("env_threads") or {}).items()})
+        upd["QRL_SANDBOX_SEEDS"] = sbm["seed_env"]
+        expires_ts = parse_ts_epoch(sbm["expires"])
+    else:
+        cores, upd = pin_plan(meta.get("scope"), meta.get("cpu_affinity"), meta.get("env_threads"))
+        expires_ts = None
     env.update(upd)
     if cores:
         log.write(f"[launcher] cpu affinity {cores[0]}-{cores[-1]} ({len(cores)} cores), threads={upd.get('OMP_NUM_THREADS')}\n".encode())
@@ -245,7 +287,7 @@ def supervise(run_id):
         proc = subprocess.Popen(json.loads(run["cmd"]), cwd=run["cwd"], env=env, stdout=log,
                                 stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True,
                                 preexec_fn=(lambda: os.sched_setaffinity(0, cores)) if cores else None)
-    except OSError as e:
+    except (OSError, subprocess.SubprocessError) as e:
         with db.tx() as c:
             c.execute("UPDATE runs SET status='failed', ended=?, exit_code=-1 WHERE run_id=?", (now(), run_id))
         log.write(f"\n[launcher] could not start: {e}\n".encode())
@@ -257,6 +299,8 @@ def supervise(run_id):
         time.sleep(POLL)
         if db.run(run_id)["stop_requested"]:
             reason = "stopped by the researcher"
+        elif expires_ts is not None and time.time() >= expires_ts:
+            reason = f"sandbox expired at {sbm['expires']}"
         elif time.time() - t0 > limit_s:
             reason = f"wall-clock limit {meta['limits']['wall_clock_hours']} h reached"
         if reason:
@@ -273,13 +317,23 @@ def supervise(run_id):
             proc.wait()
             break
     code = proc.returncode
+    cpu_s = None
+    if sbm:   # CPU time of the whole reaped process tree (this supervisor has exactly one child)
+        import resource
+        ru = resource.getrusage(resource.RUSAGE_CHILDREN)
+        cpu_s = round(ru.ru_utime + ru.ru_stime, 2)
     status = "stopped" if reason else ("done" if code == 0 else "failed")
     with db.tx() as c:
         c.execute("UPDATE runs SET status=?, exit_code=?, ended=? WHERE run_id=?", (status, code, now(), run_id))
         c.execute("INSERT INTO audit(ts, actor, action, target, detail) VALUES (?,?,?,?,?)",
                   (now(), "launcher", status, run_id, reason or f"exit {code}"))
     with open(os.path.join(run["run_dir"], "launcher.json"), "w", encoding="utf-8") as f:
-        json.dump({"status": status, "exit_code": code, "reason": reason, "seconds": round(time.time() - t0, 1)}, f)
+        json.dump({"status": status, "exit_code": code, "reason": reason, "seconds": round(time.time() - t0, 1),
+                   "cpu_seconds": cpu_s}, f)
+    if sbm:
+        import sandbox_guard as G
+        G.log_ledger(meta["request_id"], {"ts": now(), "run_id": run_id, "event": status, "wall_s": round(time.time() - t0, 1),
+                                          "cpus": sbm["cpus"], "cpu_seconds": cpu_s}, lab_root())
     log.close()
 
 
@@ -311,8 +365,9 @@ def main():
                 print(f"{r['run_id']}  {r['status']:8s} exit={r['exit_code']}  {r['scope']}  {r['name']}")
         elif a.cmd == "sandbox-start":
             try:
+                import sandbox_guard as G
                 with open(a.spec, encoding="utf-8") as f:
-                    child = json.load(f)
+                    child = G.loads_strict(f.read())
             except (OSError, ValueError) as e:
                 raise LabError(f"Cannot read child spec {a.spec}: {e}")
             for rid_ in start_sandbox(db, a.request, child):
