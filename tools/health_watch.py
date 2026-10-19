@@ -4,7 +4,8 @@
 Every INTERVAL seconds it reads the visible text of the coordinator's tmux window (`tmux capture-pane -p`) and
 classifies it with the regex table PATTERNS below (extend the table, nothing else). The result goes to
 .lab/health.json (the dashboard shows it as a banner) and every state change is appended to .lab/events.jsonl.
-Only the one matched line (max 300 chars) is stored, never the pane. Nothing read from the pane is executed.
+Only the matched line (max 300 chars) is stored; for a permission dialog also ~15 lines of the dialog block
+(`prompt_text`), never the whole pane. Permission is recognised only from the bottom dialog block. Nothing read from the pane is executed.
 
 Run:  python3 tools/health_watch.py            (loop)      python3 tools/health_watch.py --once
 """
@@ -16,12 +17,13 @@ import sys
 import time
 import traceback
 
-LAB = os.environ.get("QRL_LAB_DIR") or os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".lab"))
+LAB = os.path.join(os.environ.get("QRL_LAB_DIR") or os.path.abspath(os.path.join(os.path.dirname(__file__), "..")), ".lab")
 SESSION = "lab"
 WINDOW = "coordinator"  # tools/start-coordinator.sh: the window that is not `dashboard` / `health`
 INTERVAL = float(os.environ.get("QRL_HEALTH_INTERVAL", "20"))
 TAIL_LINES = 25  # only the bottom of the screen counts, so old scrolled-up text does not keep a state alive
 MAX_LINE = 300
+STALE_AFTER = 120  # seconds; an older health.json is from a previous run of the watcher
 SHELLS = ("bash", "sh", "zsh", "fish", "dash")  # the window falls back to `exec bash` when claude exits
 
 # Highest priority first. Each entry: (state, compiled regex). A named group `when` is captured verbatim.
@@ -31,11 +33,34 @@ PATTERNS = [
     # Only Claude Code's own UI wording, anchored, so tool output that merely mentions these words
     # (git logs, file contents) does not trigger a false banner.
     ("limit", re.compile(r"(?i)^[\s│⎿>]*(?:claude )?(?:your )?(?:usage limit (?:has been )?reached|[\w-]+ limit reached|out of (?:extra )?usage|you(?:'|’)?ve hit your [\w-]+ limit)")),
-    ("permission", re.compile(r"(?i)^[\s│❯>]*Do you want to\b")),
-    ("permission", re.compile(r"(?i)^[\s│❯>]*Claude needs your permission")),
-    ("permission", re.compile(r"^[\s│❯>]*1\.\s*Yes\b")),
     ("api_error", re.compile(r"^[\s│⎿>]*API Error\b")),
 ]
+
+# Permission dialog: recognised only as the LAST block of the capture. The last "1. Yes" option line must be followed
+# by nothing but option lines, box borders and Claude Code's dialog hint line. Text in scrollback or tool output is
+# always followed by the normal input box / footer / more output, so it never matches.
+OPT1 = re.compile(r"^[\s│❯>]*1\.\s*Yes\b")
+OPTN = re.compile(r"^[\s│❯>]*[2-9]\.\s+\S")
+QUESTION = re.compile(r"(?i)^[\s│❯>]*(?:Do you want to\b|Claude needs your permission)")
+BORDER = re.compile(r"^[\s│╭╮╰╯─┌┐└┘├┤\-]*$")
+HINT = re.compile(r"(?i)(?:esc to cancel|enter to confirm|tab to amend|ctrl\+e to explain|to navigate)")
+CONTEXT_LINES = 15
+
+
+def _dialog(lines):
+    """Return (matched_line, prompt_text) when `lines` end in a real permission dialog, else None."""
+    idx = [i for i, ln in enumerate(lines) if OPT1.search(ln)]
+    if not idx:
+        return None
+    i = idx[-1]
+    tail = lines[i + 1:]
+    if not all(OPTN.search(t) or BORDER.match(t) or HINT.search(t) or len(t) - len(t.lstrip()) >= 4 for t in tail):
+        return None  # something else (input box, footer, output) follows: not a live dialog
+    if not any(OPTN.search(t) for t in tail):
+        return None  # a dialog has at least option 2
+    q = next((j for j in range(i, max(-1, i - 12), -1) if QUESTION.search(lines[j])), i)
+    block = lines[max(0, q - 2):][:CONTEXT_LINES]
+    return lines[q].strip()[:MAX_LINE], "\n".join(b[:200] for b in block)
 
 
 def detect(pane_text, window_exists=True, pane_cmd=None):
@@ -45,12 +70,23 @@ def detect(pane_text, window_exists=True, pane_cmd=None):
     if pane_cmd and pane_cmd.strip().lower() in SHELLS:
         return {"state": "down", "detail": f"το window τρέχει μόνο {pane_cmd.strip()}", "line": ""}
     lines = [ln.rstrip() for ln in (pane_text or "").splitlines() if ln.strip()][-TAIL_LINES:]
-    for state, rx in PATTERNS:
-        for line in reversed(lines):
-            m = rx.search(line)
-            if m:
-                when = (m.groupdict().get("when") or "").strip()
-                return {"state": state, "detail": when, "line": line.strip()[:MAX_LINE]}
+    def scan(table):
+        for state, rx in table:
+            for line in reversed(lines):
+                m = rx.search(line)
+                if m:
+                    when = (m.groupdict().get("when") or "").strip()
+                    return {"state": state, "detail": when, "line": line.strip()[:MAX_LINE]}
+        return None
+    r = scan(PATTERNS[:2])
+    if r:
+        return r
+    dlg = _dialog(lines)
+    if dlg:
+        return {"state": "permission", "detail": "", "line": dlg[0], "prompt_text": dlg[1]}
+    r = scan(PATTERNS[2:])
+    if r:
+        return r
     return {"state": "ok", "detail": "", "line": ""}
 
 
@@ -96,9 +132,12 @@ def step(result, lab=LAB, now=None):
     except (OSError, ValueError):
         prev = {}
     changed = prev.get("state") != result["state"]
-    since = now if changed or not prev.get("since") else prev["since"]
+    stale = now - float(prev.get("checked", 0) or 0) > STALE_AFTER  # watcher was not running (reboot): do not inherit
+    since = now if changed or stale or not prev.get("since") else prev["since"]
     cur = {"state": result["state"], "detail": result["detail"], "line": result["line"], "since": since,
            "checked": now}
+    if result["state"] == "permission":
+        cur["prompt_text"] = result.get("prompt_text", "")
     if prev.get("codex"):  # written by tools/codex_health.py; this watcher only watches the coordinator window
         cur["codex"] = prev["codex"]
     os.makedirs(lab, exist_ok=True)

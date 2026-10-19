@@ -482,6 +482,15 @@ def health_banner():
     txt = health_banner_text(h)
     if txt:
         st.error(txt)
+        if h.get("state") == "permission":
+            try:
+                n = len(perm_store.pending())
+            except Exception:
+                n = 0
+            st.caption(f"Αίτημα Sudo στο perm_store: {'ναι (' + str(n) + ')' if n else 'όχι — πιθανό ψευδής συναγερμός ή άδεια του terminal'}")
+            if h.get("prompt_text"):
+                with st.expander("Κείμενο που εντοπίστηκε"):
+                    st.code(h["prompt_text"], language=None)
     ctxt = codex_banner_text(h)
     if ctxt:
         st.error(ctxt)

@@ -733,9 +733,19 @@ def test_health_watch():
     assert d("Your usage limit has been reached", True)["state"] == "limit"
     r = d("You've hit your session limit · resets 3:20am (UTC)", True, "claude")  # seen live 2026-10-17
     assert r["state"] == "limit" and r["detail"] == "3:20am (UTC)", r
+    dlg = ("● Bash(ls)\n╭──────────────────╮\n│ Bash command     │\n│   ls -la         │\n│ Do you want to proceed? │\n"
+           "│ ❯ 1. Yes         │\n│   2. Yes, and don't ask again │\n│   3. No, and tell Claude what to do differently │\n"
+           "╰──────────────────╯\n  Esc to cancel · Tab to amend")
+    r = d("some output\n" + dlg, True, "claude")
+    assert r["state"] == "permission" and "Do you want to proceed" in r["line"] and "1. Yes" in r["prompt_text"], r
+    assert len(r["prompt_text"].splitlines()) <= 15
     assert d("Do you want to proceed?\n❯ 1. Yes\n  2. No", True)["state"] == "permission"
-    assert d("Claude needs your permission to use Bash", True)["state"] == "permission"
-    assert d("│ ❯ 1. Yes, and don't ask again", True)["state"] == "permission"
+    # same text in scrollback, followed by the normal input box and footer or later output: not a dialog
+    footer = "\n╭────╮\n│ > │\n╰────╯\n  ? for shortcuts"
+    assert d(dlg + footer, True, "claude")["state"] == "ok"
+    assert d("$ grep -r 'Do you want to' .\nfoo.py: 1. Yes\n● done\n  Next steps" , True)["state"] == "ok"
+    assert d("Claude needs your permission to use Bash\n> ", True)["state"] == "ok"
+    assert d("1. Yes\nplain list item", True)["state"] == "ok"
     assert d("API Error: 529 overloaded_error", True)["state"] == "api_error"
     # tool output that merely mentions these words must not raise a banner (seen live 2026-10-16)
     for t in ("6b6b034 health_watch: exact banner (usage limit, permission prompt, API error)",
@@ -750,14 +760,18 @@ def test_health_watch():
     c1 = hw.step(d("API Error: x", True, "claude"), lab, now=100.0)
     c2 = hw.step(d("API Error: x", True, "claude"), lab, now=150.0)
     assert c1["since"] == c2["since"] == 100.0 and c2["checked"] == 150.0
-    c3 = hw.step(d("fine", True, "claude"), lab, now=200.0)
-    assert c3["state"] == "ok" and c3["since"] == 200.0
+    c2b = hw.step(d("API Error: x", True, "claude"), lab, now=150.0 + hw.STALE_AFTER + 5)  # stale file: since resets
+    assert c2b["since"] == 150.0 + hw.STALE_AFTER + 5 and "prompt_text" not in c2b
+    cp = hw.step(d(dlg, True, "claude"), lab, now=1000.0)
+    assert cp["state"] == "permission" and "Esc to cancel" in cp["prompt_text"]
+    c3 = hw.step(d("fine", True, "claude"), lab, now=1020.0)
+    assert c3["state"] == "ok" and c3["since"] == 1020.0
     evs = [json.loads(l) for l in open(os.path.join(lab, "events.jsonl"))]
-    assert [e["state"] for e in evs] == ["api_error", "ok"] and all("ts" in e and "hook_event_name" in e for e in evs), evs
+    assert [e["state"] for e in evs] == ["api_error", "permission", "ok"] and all("ts" in e and "hook_event_name" in e for e in evs), evs
     # codex key survives the watcher's rewrite; log + heartbeat helpers
     import codex_health as ch
     ch.record("", "ERROR: You've hit your usage limit. Try again at 3:20 AM.", lab=lab, now=300.0)
-    c4 = hw.step(d("fine", True, "claude"), lab, now=320.0)
+    c4 = hw.step(d("fine", True, "claude"), lab, now=1040.0)
     assert c4["codex"]["state"] == "limit", c4
     hw.log_error("boom", lab); hw.heartbeat(lab, now=5.0)
     assert "boom" in open(os.path.join(lab, "health_watch.log")).read()
