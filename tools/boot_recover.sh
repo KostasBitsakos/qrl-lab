@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run once after a VM boot (cron @reboot): record the outage, restart the lab detached (conversation resumed),
-# make sure the web terminal is up, then post a Greek status message to the dashboard. Idempotent per boot.
+# verify (with retries) that every component really serves, then post a Greek status message to the dashboard. Idempotent per boot.
 # Crontab line:  @reboot sleep 30 && /home/ubuntu/qrl-lab/tools/boot_recover.sh  # qrl-lab boot
 # QRL_BOOT_DRYRUN=1: no tmux start/kill, no dashboard post, outages and flag go to a temp dir (printed at the end).
 set -u
@@ -33,12 +33,9 @@ if [ "$DRY" = 1 ]; then
   say "dry run: would run tools/start-coordinator.sh resume --detached and start web_terminal"
 else
   ./tools/start-coordinator.sh resume --detached >> "$LOG" 2>&1 && say "lab session ensured" || say "start-coordinator failed"
-  python3 - >> "$LOG" 2>&1 <<'PY'
-import sys; sys.path.insert(0, "tools")
-import web_terminal
-print("web_terminal:", web_terminal.start())
-PY
-  sleep 10   # let the windows come up before listing them
+  # restart what is down and RETRY until it really serves (dashboard HTTP 200, fresh heartbeat, terminal port)
+  python3 tools/verify_services.py ensure --retries 6 >> "$LOG" 2>&1
+  say "verified: $(python3 tools/verify_services.py check 2>>"$LOG")"
 fi
 
 if [ "$DRY" = 1 ]; then

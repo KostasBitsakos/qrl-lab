@@ -816,8 +816,9 @@ def test_watchdog():
         assert wins().count("health") == 1 and "coordinator" in wins(), wins()
         hb = os.path.join(wl, ".lab", "health_watch.heartbeat")
         open(hb, "w").write("{}"); os.utime(hb, (1, 1))  # stale heartbeat -> window recreated
-        subprocess.run([wd], env=env)
-        assert wins().count("health") == 1 and "stale" in open(os.path.join(wl, ".lab", "watchdog.log")).read()
+        for _ in range(3):  # 3 failed checks in a row, then the restart (no single-glitch restarts)
+            subprocess.run([wd], env=env)
+        assert wins().count("health") == 1 and "restart:health" in open(os.path.join(wl, ".lab", "watchdog.log")).read()
     finally:
         subprocess.run(["tmux", "kill-session", "-t", sess], capture_output=True)
     ok("watchdog.sh: starts missing window, idempotent, recreates on stale heartbeat")
@@ -1009,6 +1010,77 @@ def test_outage_logic_and_dry_run():
     assert len(rows) == 1 and rows[0]["downtime_s"] > 10**6, rows
     assert not os.path.exists(os.path.join(lab, "outages.jsonl")) and os.path.exists(os.path.join(d, "recovery_flag.json"))
     ok("outage: heartbeat parsing, kinds, banner TTL, boot_recover.sh dry run (temp files only)")
+
+
+def test_boot_report_is_truthful():
+    """Simulated reboot: the announcement must say ΟΧΙ for a component whose verification failed, never a blanket 'all up'."""
+    d = tempfile.mkdtemp(prefix="bt-", dir=TMP)
+    lab = os.path.join(TMP, ".lab"); os.makedirs(lab, exist_ok=True)
+    open(os.path.join(lab, "heartbeat_pre_boot"), "w").write(str(int(time.time()) - 10**7))
+    fake = {"coordinator": {"ok": True, "detail": "x"}, "dashboard": {"ok": False, "detail": "no HTTP 200"},
+            "health": {"ok": False, "detail": "heartbeat 99999s old"}, "terminal": {"ok": False, "detail": "on demand"}}
+    env = dict(os.environ, QRL_BOOT_DRYRUN="1", QRL_BOOT_DRYRUN_DIR=d, QRL_LAB_DIR=TMP, QRL_VERIFY_FAKE=json.dumps(fake))
+    r = subprocess.run(["bash", os.path.join(TMP, "tools", "boot_recover.sh")], capture_output=True, text=True, env=env, timeout=60)
+    assert r.returncode == 0, r.stderr
+    out = r.stdout
+    assert "συντονιστής (Claude): ναι (επαληθεύτηκε)" in out, out
+    assert "dashboard: ΟΧΙ (no HTTP 200)" in out and "health watch: ΟΧΙ (heartbeat 99999s old)" in out, out
+    assert "Όλα ξαναστήθηκαν" not in out
+    # all fine -> all verified
+    import verify_services as vs
+    good = {k: {"ok": True, "detail": ""} for k in vs.ORDER}
+    assert all("ναι (επαληθεύτηκε)" in i for i in vs.report_items(good))
+    # ensure(): retries and stays truthful when the restart does not help (dry-run: restart only recorded)
+    os.environ["QRL_VERIFY_DRYRUN"] = "1"; os.environ["QRL_VERIFY_FAKE"] = json.dumps(fake)
+    try:
+        calls = []
+        rep = vs.ensure(retries=3, wait=0, sleep=lambda s: calls.append(s))
+        assert len(calls) == 3 and not rep["dashboard"]["ok"] and not rep["health"]["ok"]
+    finally:
+        os.environ.pop("QRL_VERIFY_DRYRUN"); os.environ.pop("QRL_VERIFY_FAKE")
+    ok("boot report: per-component verified truth, no blanket 'all restarted', ensure() retries")
+
+
+def test_banner_dismissal():
+    import banners
+    f = os.path.join(TMP, "dis.json"); fl = os.path.join(TMP, "flag1.json")
+    os.environ["QRL_DISMISSED_FILE"] = f; os.environ["QRL_RECOVERY_FLAG"] = fl
+    try:
+        json.dump({"boot_at": 111, "recovered_at": time.time()}, open(fl, "w"))
+        k = banners.reboot_key()
+        assert not banners.is_dismissed("reboot", k)
+        banners.dismiss("reboot", k)
+        assert banners.is_dismissed("reboot", banners.reboot_key()) and not banners.is_dismissed("health", k)  # persisted on disk
+        json.dump({"boot_at": 222, "recovered_at": time.time()}, open(fl, "w"))
+        assert not banners.is_dismissed("reboot", banners.reboot_key()), "a NEW event shows again"
+        assert not banners.is_dismissed("health", "down:1")
+        banners.dismiss("health", "down:1"); assert banners.is_dismissed("health", "down:1") and not banners.is_dismissed("health", "down:2")
+    finally:
+        os.environ.pop("QRL_DISMISSED_FILE"); os.environ.pop("QRL_RECOVERY_FLAG")
+    ok("banners: dismissal persists server-side, keyed by id + event, new event shows again")
+
+
+def test_watchdog_gives_up_loudly():
+    import verify_services as vs
+    lab = tempfile.mkdtemp(prefix="wg-", dir=TMP)
+    os.makedirs(os.path.join(lab, ".lab")); os.makedirs(os.path.join(lab, ".venv", "bin"))
+    open(os.path.join(lab, ".venv", "bin", "streamlit"), "w").close()
+    old = (vs.ROOT, vs.LAB); vs.ROOT, vs.LAB = lab, os.path.join(lab, ".lab")
+    os.environ["QRL_OUTAGES_FILE"] = os.path.join(lab, ".lab", "outages.jsonl")
+    try:
+        bad = {k: {"ok": True, "detail": ""} for k in vs.ORDER}
+        bad["dashboard"] = {"ok": False, "detail": "no HTTP 200"}
+        restarts, msgs = [], []
+        for _ in range(60):
+            vs.tick(bad, do_restart=restarts.append, notify=msgs.append)
+        assert len(restarts) == vs.MAX_RESTARTS and len(msgs) == 1, (restarts, msgs)  # bounded, then one loud alert
+        rows = [json.loads(x) for x in open(os.environ["QRL_OUTAGES_FILE"])]
+        assert len(rows) == 1 and rows[0]["kind"] == "service_failure" and rows[0]["component"] == "dashboard"
+        vs.tick({k: {"ok": True, "detail": ""} for k in vs.ORDER}, do_restart=restarts.append, notify=msgs.append)
+        assert vs._load_state()["dashboard"]["restarts"] == 0  # healthy again -> counters reset
+    finally:
+        vs.ROOT, vs.LAB = old; os.environ.pop("QRL_OUTAGES_FILE")
+    ok("watchdog: bounded restarts, one outages.jsonl entry + message, reset when healthy")
 
 
 def test_changes_tab():
@@ -2346,6 +2418,9 @@ if __name__ == "__main__":
         test_health_watch()
         test_codex_health()
         test_watchdog()
+        test_boot_report_is_truthful()
+        test_banner_dismissal()
+        test_watchdog_gives_up_loudly()
         test_sudo_ui()
         test_perm_hook()
         test_edit_messages()

@@ -24,16 +24,9 @@ date +%s > "$HB.tmp" && mv "$HB.tmp" "$HB"
 tmux has-session -t "$S" 2>/dev/null || exit 0   # no session: the researcher has not started the lab; do nothing
 have() { tmux list-windows -t "$S" -F '#W' | grep -qx "$1"; }
 
-if have health; then
-  hb="$LAB/.lab/health_watch.heartbeat"
-  if [ -f "$hb" ]; then
-    age=$(( $(date +%s) - $(stat -c %Y "$hb") ))
-    if [ "$age" -gt "$STALE" ]; then
-      say "health heartbeat stale (${age}s): recreating window"
-      tmux kill-window -t "$S:health" 2>/dev/null
-    fi
-  fi
-fi
+# Stale health heartbeat, dead dashboard (no HTTP 200): restarted by verify_services.py after 3 failed checks in a row;
+# after 5 failed restarts it writes .lab/outages.jsonl (service_failure) and posts a dashboard message, then stops retrying.
+python3 "$(dirname "$(readlink -f "$0")")/verify_services.py" watchdog 2>>"$LOG" | while read -r l; do say "verify_services: $l"; done
 if ! have health; then
   tmux new-window -d -t "$S" -n health -c "$LAB" "python3 tools/health_watch.py; exec bash" && say "started window health"
 fi

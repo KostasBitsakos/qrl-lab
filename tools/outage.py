@@ -170,23 +170,17 @@ def record(lab=None, now=None, boot_at=None, shutdowns="auto"):
 
 
 def up_status():
-    """Short Greek list of what is running (best effort)."""
-    items = []
-    try:
-        w = subprocess.run(["tmux", "list-windows", "-t", "lab", "-F", "#W"], capture_output=True, text=True, timeout=5).stdout.split()
-    except (OSError, subprocess.SubprocessError):
-        w = []
-    for name, label in (("coordinator", "συντονιστής (Claude, resume)"), ("dashboard", "dashboard"), ("health", "health watch"),
-                        ("terminal", "web terminal")):
-        items.append(f"{label}: {'ναι' if name in w else 'ΟΧΙ'}")
-    return items
+    """Greek per-component truth, from real checks (HTTP 200, fresh heartbeat, claude in the window, terminal port)."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import verify_services
+    return verify_services.report_items(verify_services.check_all())
 
 
 def message(row, items):
     kind = {"reboot": "καθαρή επανεκκίνηση", "crash/power": "κατάρρευση/διακοπή ρεύματος", "unknown": "άγνωστη αιτία"}[row["kind"]]
     down = f"στις {fmt_ts(row['down_at'])}" if row["down_at"] else "(ώρα άγνωστη, δεν υπήρχε heartbeat)"
     return (f"Κώστα, το VM έπεσε {down} και ξανανέβηκε στις {fmt_ts(row['boot_at'])} "
-            f"(διάρκεια {fmt_dur(row['downtime_s'])}, {kind}). Όλα ξαναστήθηκαν: " + "; ".join(items) + ". "
+            f"(διάρκεια {fmt_dur(row['downtime_s'])}, {kind}). Κατάσταση υπηρεσιών (επαληθευμένη τώρα): " + "; ".join(items) + ". "
             "Δεν καλύπτεται: αν το Claude ζητήσει νέο login, χρειάζεται δικό σου βήμα στο terminal· τυχόν runs που έτρεχαν "
             "διακόπηκαν και πρέπει να ελεγχθούν.")
 
