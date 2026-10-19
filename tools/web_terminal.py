@@ -135,8 +135,8 @@ def stop():
     return r.returncode == 0
 
 
-def write_token(path):
-    tok = secrets.token_urlsafe(32)
+def write_token(path, tok=None):
+    tok = tok or secrets.token_urlsafe(32)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
         f.write(tok)
@@ -198,15 +198,17 @@ def main():
     import tornado.ioloop
     tpath = lab_path("terminal_token")
     os.makedirs(os.path.dirname(tpath), exist_ok=True)
-    token = write_token(tpath)
+    token = secrets.token_urlsafe(32)
     state = {"last": time.time()}
     app, mgr = make_app(token, state)
-    app.listen(PORT, address=HOST)
+    app.listen(PORT, address=HOST)  # bind first: a second instance must fail before touching the token file
+    write_token(tpath, token)
     loop = tornado.ioloop.IOLoop.current()
 
     def cleanup(*_):
         try:
-            os.remove(tpath)
+            if read_token() == token:  # never delete a token that a newer instance wrote
+                os.remove(tpath)
         except OSError:
             pass
         os._exit(0)  # also ends the shell child via SIGHUP when the pty closes

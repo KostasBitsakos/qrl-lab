@@ -51,6 +51,9 @@ at the start of every session, the rest when relevant. The rules in AGENTS.md (i
 - Approved runs → `runner` (Haiku). Implementation, tests, dashboard → `engineer` (Sonnet; `model: opus` only for
   circuit or simulator design, with a reason). Literature, citations, venues → `scholar`. Paper text → `writer`.
 - Repetitive work (metrics, plots, parsing, monitoring) → a script, never an LLM loop. Max 3 concurrent subagents.
+- **Researcher overrides**: if `docs/agent_routing.json` exists (written from the dashboard «Αρχιτεκτονική» tab), its
+  `{role: {model, effort}}` entries override the defaults above and in `docs/DECISIONS.md`: pass them as `model`/`effort`
+  to the Agent tool, or as `--model`/`--effort` to Codex. Read it before every delegation.
 
 ## State you keep
 `docs/PLAN.md` §11 (timeline status) and §13 (decisions); `docs/DECISIONS.md` for accepted decisions.
