@@ -58,14 +58,39 @@ def check_health(lab=None, now=None):
     return (age <= HB_STALE), f"heartbeat {int(age)}s old"
 
 
+def _descendants_have_claude(pid):
+    """True if the process tree under `pid` contains a `claude` process (the foreground command can be a tool shell)."""
+    try:
+        out = subprocess.run(["ps", "-eo", "pid=,ppid=,comm=,args="], capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    kids, info = {}, {}
+    for ln in out.splitlines():
+        t = ln.split(None, 3)
+        if len(t) >= 3 and t[0].isdigit() and t[1].isdigit():
+            kids.setdefault(int(t[1]), []).append(int(t[0]))
+            info[int(t[0])] = (t[2] + " " + (t[3] if len(t) > 3 else "")).lower()
+    todo, seen = [int(pid)], set()
+    while todo:
+        p = todo.pop()
+        if p in seen:
+            continue
+        seen.add(p)
+        if p != int(pid) and "claude" in info.get(p, ""):
+            return True
+        todo += kids.get(p, [])
+    return False
+
+
 def check_coordinator():
-    rc, out = _tmux("list-panes", "-t", f"{SESSION}:coordinator", "-F", "#{pane_current_command}")
-    cmd = out.strip().splitlines()[0].strip() if rc == 0 and out.strip() else ""
-    if not cmd:
+    rc, out = _tmux("list-panes", "-t", f"{SESSION}:coordinator", "-F", "#{pane_current_command} #{pane_pid}")
+    parts = out.strip().splitlines()[0].split() if rc == 0 and out.strip() else []
+    if len(parts) < 2:
         return False, "no coordinator window"
-    if cmd.lower() in SHELLS:
-        return False, f"window runs only {cmd}"
-    return True, f"window runs {cmd}"
+    cmd, pid = parts[0], parts[1]
+    if "claude" in cmd.lower() or _descendants_have_claude(pid):
+        return True, "claude process in the coordinator window"
+    return False, f"no claude process in the window (foreground: {cmd})"
 
 
 def check_terminal():
