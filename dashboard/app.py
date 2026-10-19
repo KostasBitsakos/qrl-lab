@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 import modreload  # noqa: E402
 import importlib  # noqa: E402
 _LOCAL_MODS = ["labdb", "file_view", "replytext", "k8s_view", "prom_view", "web_terminal", "sudo_ui", "race_view", "brain_view",
-               "perm_store", "ext_catalog", "summarize_runs", "paper_plots", "paper_build", "uploads", "installed_view", "access", "outage", "models_view", "banners"]
+               "perm_store", "ext_catalog", "summarize_runs", "paper_plots", "paper_build", "uploads", "installed_view", "access", "outage", "models_view", "banners", "sandbox_view", "topology_view", "topology_ui"]
 for _n in _LOCAL_MODS:  # first import so they are in sys.modules, then reload those whose file changed
     importlib.import_module(_n)
 modreload.reload_changed(_LOCAL_MODS)
@@ -49,6 +49,8 @@ import access  # noqa: E402
 import outage  # noqa: E402
 import term_prompt  # noqa: E402
 import banners  # noqa: E402
+import sandbox_view  # noqa: E402
+import topology_ui  # noqa: E402
 import changes_view  # noqa: E402
 import models_view  # noqa: E402
 import summarize_runs  # noqa: E402
@@ -798,7 +800,7 @@ DEC_TAB = "✅ Αποφάσεις"
 _open_files = "path" in st.query_params and not st.session_state.get("fb_tab_done")
 st.session_state["fb_tab_done"] = True
 TAB_NAMES = [HOME_TAB, DEC_TAB, "🤖 Πράκτορες", "📈 Πειράματα", "⚖️ Council",
-             "🖥️ Πόροι", "☸️ Kubernetes", "📡 Prometheus", "📊 Grafana", FILES_TAB, "📝 Paper", "🎓 Συνέδρια", "🧾 Ιστορικό", "🔐 Sudo", "🧩 Επεκτάσεις", "🔌 Διακοπές", "🧭 Ιστορικό αλλαγών", "🧠 Μοντέλα", "⌨️ Terminal"]
+             "🖥️ Πόροι", "☸️ Kubernetes", "📡 Prometheus", "📊 Grafana", FILES_TAB, "📝 Paper", "🎓 Συνέδρια", "🧾 Ιστορικό", "🔐 Sudo", "🧩 Επεκτάσεις", "🔌 Διακοπές", "🧭 Ιστορικό αλλαγών", "🧠 Μοντέλα", "🏛️ Αρχιτεκτονική", "⌨️ Terminal"]
 # Tab persistence (F5 / shared link): st.tabs(key="tab", bind="query-params") in Streamlit 1.66 keeps the active
 # label in ?tab=... and restores it on load; ?path=... (file deep link) only picks the default when ?tab is absent.
 # The default is part of the tabs widget identity: it must stay the same on every rerun of the session, otherwise the first
@@ -814,10 +816,10 @@ if _side:  # tabs in the left column, the terminal in a right-hand column
         st.iframe(_term_url, height=700)
     with _left:
         (tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_prom, tab_grafana, tab_files, tab_paper, tab_venues,
-         tab_audit, tab_sudo, tab_ext, tab_outage, tab_changes, tab_models, tab_term) = st.tabs(TAB_NAMES, default=_tab_default, key="tab", bind="query-params")
+         tab_audit, tab_sudo, tab_ext, tab_outage, tab_changes, tab_models, tab_arch, tab_term) = st.tabs(TAB_NAMES, default=_tab_default, key="tab", bind="query-params")
 else:
     (tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_prom, tab_grafana, tab_files, tab_paper, tab_venues,
-     tab_audit, tab_sudo, tab_ext, tab_outage, tab_changes, tab_models, tab_term) = st.tabs(TAB_NAMES, default=_tab_default, key="tab", bind="query-params")
+     tab_audit, tab_sudo, tab_ext, tab_outage, tab_changes, tab_models, tab_arch, tab_term) = st.tabs(TAB_NAMES, default=_tab_default, key="tab", bind="query-params")
 
 # ================================================================ conversation
 with tab_chat:
@@ -1197,6 +1199,43 @@ if _tab_live(tab_runs):  # lazy: hidden tabs do no work
                 st.caption("Τα runs του αιτήματος δεν έχουν ακόμη επεισόδια με `model` και `reward`.")
         else:
             st.caption("Δεν υπάρχουν runs αιτήματος για σύγκριση.")
+
+        st.markdown("##### Sandbox")
+
+        @st.fragment(run_every=refresh)
+        def sandbox_section():
+            paths = sandbox_view.ledger_paths(os.path.join(ROOT, ".lab", "sandbox"))
+            if not paths:
+                st.caption("Δεν υπάρχουν sandbox ledgers.")
+                return
+            dd = db()
+            try:
+                by_id = {r["run_id"]: dict(r) for r in dd.runs(limit=100000)}
+                for pth in paths:
+                    rid = os.path.basename(pth).split(".ledger.")[0]
+                    try:
+                        import launch_run
+                        s = launch_run.sandbox_status(dd, rid)
+                        st.markdown(f"**{rid}** · branch `{s['branch']}` · CPU-h {s['cpu_hours_used']}/{s['budget']} "
+                                    f"(απομένουν {s['cpu_hours_left']}) · τρέχουν {s['running']}/{s['max_parallel']} · "
+                                    + (":red[έληξε]" if s["expired"] else f"λήγει σε {s['hours_to_expiry']} ώρες ({s['expires']})"))
+                    except Exception as e:  # noqa: BLE001 - read-only view; show what is known
+                        st.markdown(f"**{rid}** · η σύνοψη δεν είναι διαθέσιμη ({type(e).__name__})")
+                    v = sandbox_view.summarize(sandbox_view.read_ledger(pth), by_id)
+                    if v["running"]:
+                        st.dataframe(pd.DataFrame([{"run_id": x["run_id"], "batch": x["batch"], "πυρήνες": ",".join(map(str, x["cores"])),
+                                                    "ξεκίνησε": fmt_ts(x["started"]), "διάρκεια": ago(x["elapsed_s"]) if x["elapsed_s"] is not None else "—"}
+                                                   for x in v["running"]]), hide_index=True, width="stretch")
+                    else:
+                        st.caption("Κανένα sandbox run δεν τρέχει.")
+                    if v["finished"]:
+                        with st.expander(f"Τελευταία {len(v['finished'])} ολοκληρωμένα"):
+                            st.dataframe(pd.DataFrame([{"run_id": x["run_id"], "όνομα": x["name"], "wall (s)": x["wall_s"],
+                                                        "CPU (s)": x["cpu_seconds"], "κατάσταση": x["status"]}
+                                                       for x in v["finished"]]), hide_index=True, width="stretch")
+            finally:
+                dd.close()
+        sandbox_section()
 
         st.markdown("##### Διακοπή run")
         d = db()
@@ -2058,6 +2097,11 @@ if _tab_live(tab_models):  # lazy: hidden tabs do no work
             _models_tab()
         except (OSError, ValueError) as ex:
             st.error(f"Δεν φορτώθηκε το docs/models.json: {ex}")
+
+# ================================================================ architecture (3D topology of the whole lab)
+if _tab_live(tab_arch):  # lazy: hidden tabs do no work
+    with tab_arch:
+        topology_ui.show(_unlocked, pin_form, _cinfo.get("login", "?") if _on_tailnet else "researcher")
 
 # ================================================================ extensions (catalog only from .lab/extensions_catalog.json)
 if _tab_live(tab_ext):  # lazy: hidden tabs do no work
