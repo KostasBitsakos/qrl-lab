@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 import modreload  # noqa: E402
 import importlib  # noqa: E402
 _LOCAL_MODS = ["labdb", "file_view", "replytext", "k8s_view", "prom_view", "web_terminal", "sudo_ui", "race_view", "brain_view",
-               "perm_store", "ext_catalog", "summarize_runs", "paper_plots", "paper_build", "uploads", "installed_view", "access", "outage", "models_view"]
+               "perm_store", "ext_catalog", "summarize_runs", "paper_plots", "paper_build", "uploads", "installed_view", "access", "outage", "models_view", "banners"]
 for _n in _LOCAL_MODS:  # first import so they are in sys.modules, then reload those whose file changed
     importlib.import_module(_n)
 modreload.reload_changed(_LOCAL_MODS)
@@ -47,6 +47,8 @@ import ext_catalog  # noqa: E402
 import installed_view  # noqa: E402
 import access  # noqa: E402
 import outage  # noqa: E402
+import term_prompt  # noqa: E402
+import banners  # noqa: E402
 import changes_view  # noqa: E402
 import models_view  # noqa: E402
 import summarize_runs  # noqa: E402
@@ -475,14 +477,26 @@ def sidebar_brain():
 with st.sidebar:
     sidebar_brain()
 
-# ---------------------------------------------------------------- health banner (every tab; no inputs inside)
+# ---------------------------------------------------------------- system banners (every tab), each with a server-side «✕»
+def dismissible(bid, key, text, kind="error"):
+    """Show `text` with a ✕ button; the dismissal is stored in .lab/dismissed_banners.json (keyed by banner id + event key)."""
+    if key is None or banners.is_dismissed(bid, key):
+        return False
+    c = st.columns([30, 1])
+    getattr(c[0], kind)(text)
+    if c[1].button("✕", key=f"dismiss_{bid}", help="Απόκρυψη (ξαναεμφανίζεται μόνο για νέο συμβάν)"):
+        banners.dismiss(bid, key)
+        st.rerun(scope="fragment")
+    return True
+
+
 @st.fragment(run_every=refresh)
 def health_banner():
     h = read_health()
     txt = health_banner_text(h)
     if txt:
-        st.error(txt)
-        if h.get("state") == "permission":
+        shown = dismissible("health", f"{h.get('state')}:{h.get('since')}", txt)
+        if shown and h.get("state") == "permission":
             try:
                 n = len(perm_store.pending())
             except Exception:
@@ -493,7 +507,7 @@ def health_banner():
                     st.code(h["prompt_text"], language=None)
     ctxt = codex_banner_text(h)
     if ctxt:
-        st.error(ctxt)
+        dismissible("codex", f"limit:{((h or {}).get('codex') or {}).get('since')}", ctxt)
 
 
 health_banner()
@@ -503,7 +517,7 @@ health_banner()
 def recovery_banner():
     txt = outage.banner_text()
     if txt:
-        st.warning(txt)
+        dismissible("reboot", banners.reboot_key(), txt, kind="warning")
 
 
 recovery_banner()
@@ -722,10 +736,36 @@ def _go_sudo():
     st.session_state["tab"] = SUDO_TAB
 
 
+def term_prompt_panel(where, unlocked):
+    """Answer the coordinator's terminal permission dialog (tools/term_prompt.py, R-20261019-002)."""
+    h = read_health() or {}
+    if h.get("state") != "permission" or not h.get("prompt_text") or perm_store.pending():
+        return
+    txt = h["prompt_text"]
+    ph = term_prompt.prompt_hash(txt)
+    with st.container(border=True):
+        st.warning("Το terminal του συντονιστή περιμένει απάντηση (δεν υπάρχει αίτημα στο Sudo):", icon="⌨️")
+        st.code(txt, language=None)
+        if not unlocked:
+            pin_form(f"term_{where}")
+            return
+        c = st.columns(2)
+        who = _cinfo.get("login", "?") if _on_tailnet else "local"
+        if c[0].button("Έγκριση", key=f"term_ok_{where}", type="primary"):
+            st.session_state["_term_msg"] = term_prompt.answer("approve", ph, who, True)[1]
+            st.rerun()
+        if c[1].button("Απόρριψη", key=f"term_no_{where}"):
+            st.session_state["_term_msg"] = term_prompt.answer("deny", ph, who, True)[1]
+            st.rerun()
+    if st.session_state.get("_term_msg"):
+        st.info(st.session_state.pop("_term_msg"))
+
+
 @st.fragment(run_every=3)
 def perm_banner():
     pend = perm_store.pending()
     if not pend:
+        term_prompt_panel("banner", (not _on_tailnet) or st.session_state.get("pin_until", 0) > time.time())
         return
     unlocked = (not _on_tailnet) or st.session_state.get("pin_until", 0) > time.time()
     with st.container(border=True):
@@ -1685,6 +1725,7 @@ with tab_sudo:
         @st.fragment(run_every=refresh)
         def perm_requests():
             pend = perm_store.pending()
+            term_prompt_panel("sudo", True)
             if not pend:
                 st.caption("Κανένα αίτημα άδειας από το terminal αυτή τη στιγμή. Όταν ο συντονιστής ζητήσει άδεια, "
                            "εμφανίζεται εδώ για ~90 δευτερόλεπτα· αν δεν απαντήσεις, ρωτάει κανονικά το terminal.")
