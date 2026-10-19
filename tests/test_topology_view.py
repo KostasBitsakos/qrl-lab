@@ -78,7 +78,7 @@ def test_render_escapes_script_end():
     inv = {"nodes": [{"id": "x", "label": "</script><b>", "group": "agents", "runs_as": "", "desc": "", "status": "idle", "hb": None}],
            "links": [], "groups": tv.build_inventory({})["groups"], "status_colors": tv.STATUS_COLOR}
     page = tv.render(inv)
-    assert page.count("</script>") == 3 and "3d-force-graph@1.73.4" in page and "three@0.160.0" in page
+    assert page.count("</script>") == 3 and "3d-force-graph@1.73.4" in page and "three.min.js" not in page and "force-graph@1.43.5" in page and "Το 3D δεν φόρτωσε" in page
 
 
 def test_tailscale_parse():

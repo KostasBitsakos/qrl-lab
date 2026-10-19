@@ -472,55 +472,98 @@ _PAGE = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport
 <style>
 html,body{margin:0;height:100%;background:radial-gradient(ellipse at center,#0b1030 0%,#03040c 80%);font-family:system-ui,sans-serif;color:#cfe;overflow:hidden}
 #g{position:absolute;inset:0}
-#leg{position:absolute;left:8px;top:8px;background:#050818cc;border:1px solid #234;border-radius:8px;padding:6px 8px;font-size:11px;max-width:46vw;z-index:5}
-#leg i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;box-shadow:0 0 6px currentColor}
+#lab{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+.nl{position:absolute;left:0;top:0;white-space:nowrap;font-size:11px;line-height:1.15;padding:1px 5px;border-radius:5px;background:#03061acc;border:1px solid;text-shadow:0 0 4px #000;will-change:transform}
+.nl small{display:block;font-size:9px;opacity:.7}
+.nl i{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:4px;animation:hb var(--p,3s) ease-in-out infinite}
+@keyframes hb{0%,100%{transform:scale(1);opacity:.6}50%{transform:scale(1.7);opacity:1}}
+#leg{position:absolute;right:6px;top:6px;background:#050818cc;border:1px solid #234;border-radius:8px;padding:5px 7px;font-size:10px;max-width:42vw;z-index:5}
+#leg i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;box-shadow:0 0 6px currentColor}
 #info{position:absolute;left:8px;right:8px;bottom:8px;background:#050818ee;border:1px solid #2a4;border-radius:10px;padding:8px 10px;font-size:12px;z-index:5;display:none}
+#err{position:absolute;inset:0;display:none;align-items:center;justify-content:center;text-align:center;padding:20px;color:#ff8a9c;font-size:15px;z-index:9}
 .tip{background:#050818f0;border:1px solid #3af;border-radius:8px;padding:6px 9px;font-size:12px;max-width:260px;line-height:1.35}
 .tip b{color:#fff}.k{color:#7ad}
-</style></head><body><div id="g"></div><div id="leg"></div><div id="info"></div>
-<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+</style></head><body><div id="g"></div><div id="lab"></div><div id="leg"></div><div id="info"></div><div id="err"></div>
+<script>
+function fail(r){var e=document.getElementById('err');e.style.display='flex';e.innerHTML='<div>Το 3D δεν φόρτωσε: '+String(r).replace(/[<&]/g,' ')+'<br><small>Δες τον πίνακα κόμβων από κάτω.</small></div>';}
+window.addEventListener('error',function(ev){var t=ev.target;if(t&&t.tagName==='SCRIPT')fail('αποτυχία φόρτωσης από CDN ('+t.src+')');else if(ev.message)fail(ev.message);},true);
+window.addEventListener('unhandledrejection',function(ev){fail(ev.reason);});
+</script>
 <script src="https://cdn.jsdelivr.net/npm/3d-force-graph@1.73.4/dist/3d-force-graph.min.js"></script>
 <script>
+(function(){try{
 const D=__DATA__;
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const SC=D.status_colors, GC={};for(const k in D.groups)GC[k]=D.groups[k].color;
-const leg=document.getElementById('leg');
-leg.innerHTML='<b>Ομάδες</b><br>'+Object.values(D.groups).map(g=>`<i style="color:${g.color};background:${g.color}"></i>${esc(g.label)}`).join('<br>')
- +'<br><b>Κατάσταση</b> (χρώμα πυρήνα)<br>'+Object.keys(SC).map(s=>`<i style="color:${SC[s]};background:${SC[s]}"></i>${s}`).join(' ')
- +'<br><span style="opacity:.7">παλμός = ηλικία heartbeat · σωματίδια = ροή</span>';
+let gl=false;try{const c=document.createElement('canvas');gl=!!(c.getContext('webgl2')||c.getContext('webgl'))}catch(e){}
+const use3d=gl&&typeof ForceGraph3D!=='undefined';
+if(gl&&!use3d){setTimeout(()=>{if(typeof ForceGraph3D==='undefined')fail('το ForceGraph3D δεν ορίστηκε (CDN μπλοκαρισμένο ή offline)')},4000);return;}
+document.getElementById('leg').innerHTML='<b>Ομάδες</b><br>'+Object.values(D.groups).map(g=>`<i style="color:${g.color};background:${g.color}"></i>${esc(g.label)}`).join('<br>')
+ +'<br><b>Κατάσταση</b> (χρώμα κόμβου)<br>'+Object.keys(SC).map(s=>`<i style="color:${SC[s]};background:${SC[s]}"></i>${s}`).join(' ')
+ +'<br><span style="opacity:.7">περίγραμμα = ομάδα · παλμός = heartbeat · σωματίδια = ροή</span>'
+ +(use3d?'':'<br><b style="color:#ffb020">Λειτουργία 2D (χωρίς WebGL) — για 3D ενεργοποίησε το hardware acceleration στον browser</b>');
 function tip(n){return `<div class="tip"><b>${esc(n.label)}</b><br>${esc(n.desc)}<br><span class="k">τρέχει ως:</span> ${esc(n.runs_as)}`
  +(n.model?`<br><span class="k">μοντέλο:</span> ${esc(n.model)} / ${esc(n.effort)}${n.override?' <b style="color:#ffb020">(override)</b>':''}`:'')
  +`<br><span class="k">κατάσταση:</span> <span style="color:${SC[n.status]}">${esc(n.status)}</span>`
  +(n.hb!=null?`<br><span class="k">heartbeat:</span> ${n.hb}s`:'')+(n.extra?`<br>${esc(n.extra)}`:'')+'</div>';}
 const nodes=D.nodes.map(n=>Object.assign({},n)), idx={};nodes.forEach(n=>idx[n.id]=n);
 const links=D.links.map(l=>Object.assign({},l));
-const gl=[];  // pulsing meshes
-function mk(n){
-  const grp=new THREE.Group(), r=n.id==='coordinator'?7:(n.group==='external'?5:4);
-  const core=new THREE.Mesh(new THREE.SphereGeometry(r,16,16),new THREE.MeshBasicMaterial({color:SC[n.status]||SC.unknown}));
-  const shell=new THREE.Mesh(new THREE.SphereGeometry(r*1.7,16,16),new THREE.MeshBasicMaterial({color:GC[n.group],transparent:true,opacity:.22,depthWrite:false}));
-  grp.add(core);grp.add(shell);
-  const period=n.hb==null?(n.status==='alive'?2.4:(n.status==='idle'?5:0)):Math.min(8,Math.max(.8,.8+n.hb/30));
-  const st=n.status==='down'||n.status==='stale'?1.8:1;
-  if(period>0)gl.push({shell,core,period:period/st,ph:Math.random()*6.28,amp:n.status==='alive'?.28:.12});
-  return grp;}
+const short=s=>{s=String(s).split(/ [·(—]/)[0];return s.length>26?s.slice(0,25)+'…':s};
+const period=n=>n.hb==null?(n.status==='alive'?2.4:(n.status==='idle'?5:1.2)):Math.min(8,.8+n.hb/30);
+// fixed, clearly separated layout: group anchors on a ring, nodes of a group on a Fibonacci sphere around the anchor
+const keys=Object.keys(D.groups), byg={};nodes.forEach(n=>(byg[n.group]=byg[n.group]||[]).push(n));
+keys.forEach((k,i)=>{const a=i/keys.length*6.2832, g=byg[k]||[], R=40+17*Math.sqrt(g.length), cx=Math.cos(a)*(190+R), cz=Math.sin(a)*(190+R);
+ g.forEach((n,j)=>{const m=g.length, y=m>1?1-2*j/(m-1):0, r=Math.sqrt(Math.max(0,1-y*y)), t=j*2.39996;
+  n.fx=cx+Math.cos(t)*r*R;n.fy=y*R*.8;n.fz=cz+Math.sin(t)*r*R;n.x=n.fx;n.y=n.fy;n.z=n.fz});});
 const el=document.getElementById('g'), info=document.getElementById('info');
-const G=ForceGraph3D()(el).backgroundColor('rgba(0,0,0,0)').graphData({nodes,links})
- .nodeThreeObject(mk).nodeLabel(tip).nodeThreeObjectExtend(false)
- .linkColor(l=>'rgba(120,200,255,.35)').linkWidth(.4).linkOpacity(.5)
- .linkDirectionalParticles(l=>l.kind==='API'?3:2).linkDirectionalParticleWidth(1.6).linkDirectionalParticleSpeed(.006)
- .linkDirectionalParticleColor(l=>GC[(idx[l.target.id||l.target]||{}).group]||'#fff')
- .onNodeClick(n=>{info.style.display='block';info.innerHTML=tip(n).replace('class="tip"','');
-   const d=70;G.cameraPosition({x:n.x*(1+d/Math.hypot(n.x,n.y,n.z||1)),y:n.y*(1+d/Math.hypot(n.x,n.y,n.z||1)),z:(n.z||0)*(1+d/Math.hypot(n.x,n.y,n.z||1))},n,900);})
- .onBackgroundClick(()=>{info.style.display='none'});
-// group clustering: weak pull toward a per-group anchor
-const keys=Object.keys(D.groups), anc={};keys.forEach((k,i)=>{const a=i/keys.length*6.283;anc[k]={x:Math.cos(a)*90,y:(i%2?1:-1)*35,z:Math.sin(a)*90}});
-G.d3Force('cluster',a=>{nodes.forEach(n=>{const c=anc[n.group];if(!c||n.x==null)return;n.vx+=(c.x-n.x)*.012*a;n.vy+=(c.y-n.y)*.012*a;n.vz+=(c.z-n.z)*.012*a})});
-G.d3Force('link').distance(28);
-function size(){G.width(window.innerWidth).height(window.innerHeight)}size();addEventListener('resize',size);
-const ctl=G.controls();ctl.autoRotate=true;ctl.autoRotateSpeed=.5;
-el.addEventListener('pointerdown',()=>{ctl.autoRotate=false});
-(function tick(t){requestAnimationFrame(tick);t=t/1000;gl.forEach(o=>{const s=1+o.amp*Math.sin(t*6.283/o.period+o.ph);o.shell.scale.setScalar(s);o.core.scale.setScalar(1+(s-1)*.4)})})(0);
+const sel=n=>{info.style.display='block';info.innerHTML=tip(n).replace('class="tip"','')};
+function size(G){G.width(window.innerWidth).height(window.innerHeight)}
+if(use3d){
+ const labs=document.getElementById('lab');
+ nodes.forEach(n=>{const d=document.createElement('div');d.className='nl';d.style.borderColor=GC[n.group];
+  d.innerHTML=`<i style="background:${SC[n.status]};box-shadow:0 0 6px ${SC[n.status]};--p:${period(n)}s"></i>${esc(n.label)}<small>${esc(short(n.runs_as))}</small>`;
+  labs.appendChild(d);n._el=d;});
+ const G=ForceGraph3D()(el).backgroundColor('rgba(0,0,0,0)').graphData({nodes,links})
+  .nodeColor(n=>SC[n.status]||SC.unknown).nodeVal(n=>n.id==='coordinator'?60:(n.group==='external'?30:22)).nodeRelSize(3).nodeOpacity(.95).nodeResolution(14)
+  .nodeLabel(tip).warmupTicks(5).cooldownTicks(5)
+  .linkColor(()=>'rgba(120,200,255,.35)').linkWidth(.5).linkOpacity(.5)
+  .linkDirectionalParticles(l=>l.kind==='API'?3:2).linkDirectionalParticleWidth(2).linkDirectionalParticleSpeed(.006)
+  .linkDirectionalParticleColor(l=>GC[(idx[l.target.id||l.target]||{}).group]||'#fff')
+  .onNodeClick(sel).onBackgroundClick(()=>{info.style.display='none'});
+ size(G);addEventListener('resize',()=>size(G));
+ G.controls().autoRotate=false;
+ const mr=Math.max(...nodes.map(n=>Math.hypot(n.x,n.z))),mw=Math.max(...nodes.map(n=>Math.abs(n.x))),asp=window.innerWidth/Math.max(1,window.innerHeight);
+ const dist=Math.max(mw/(0.466*asp)*1.12,mr*1.1);
+ const camSet=()=>G.cameraPosition({x:0,y:dist*.42,z:dist},{x:0,y:0,z:0},0);
+ [100,800,2500].forEach(t=>setTimeout(camSet,t));
+ (function tick(){requestAnimationFrame(tick);const w=window.innerWidth,h=window.innerHeight;
+  nodes.forEach(n=>{const c=G.graph2ScreenCoords(n.x,n.y,n.z);const ok=c&&c.x>-60&&c.x<w+60&&c.y>-20&&c.y<h+20;
+   n._el.style.display=ok?'block':'none';if(ok)n._el.style.transform=`translate(${c.x+8}px,${c.y-8}px)`})})();
+ setTimeout(()=>{if(!document.querySelector('#g canvas'))fail('δεν δημιουργήθηκε canvas')},5000);
+}else{
+ const sc=document.createElement('script');sc.src='https://cdn.jsdelivr.net/npm/force-graph@1.43.5/dist/force-graph.min.js';
+ sc.onload=()=>{try{
+  let ang=0;const proj=()=>{const c=Math.cos(ang),s=Math.sin(ang);nodes.forEach(n=>{n.fx=n.x=(n._x0*c+n._z0*s)*1.0;n.fy=n.y=n._y0+(n._z0*c-n._x0*s)*.25})};
+  nodes.forEach(n=>{n._x0=n.fx;n._y0=n.fy;n._z0=n.fz});proj();
+  const G=ForceGraph()(el).backgroundColor('rgba(0,0,0,0)').graphData({nodes,links}).nodeLabel(tip).cooldownTicks(0)
+   .linkColor(()=>'rgba(120,200,255,.35)').linkWidth(.8)
+   .linkDirectionalParticles(l=>l.kind==='API'?3:2).linkDirectionalParticleWidth(2.5).linkDirectionalParticleSpeed(.006)
+   .linkDirectionalParticleColor(l=>GC[(idx[l.target.id||l.target]||{}).group]||'#fff')
+   .nodeCanvasObject((n,ctx,k)=>{const r=(n.id==='coordinator'?9:6),t=Date.now()/1000,p=period(n),f=(t%p)/p,col=SC[n.status]||SC.unknown;
+     ctx.save();ctx.beginPath();ctx.arc(n.x,n.y,r+f*r*1.8,0,6.2832);ctx.strokeStyle=col;ctx.globalAlpha=.55*(1-f);ctx.lineWidth=1.5/k;ctx.stroke();
+     ctx.globalAlpha=1;ctx.shadowColor=col;ctx.shadowBlur=18;ctx.beginPath();ctx.arc(n.x,n.y,r,0,6.2832);ctx.fillStyle=col;ctx.fill();
+     ctx.shadowBlur=0;ctx.lineWidth=2/k;ctx.strokeStyle=GC[n.group];ctx.stroke();
+     const fs=Math.max(9/k,3);ctx.font=fs+'px sans-serif';ctx.fillStyle='#e6f6ff';ctx.fillText(n.label,n.x+r+3,n.y-1);
+     ctx.font=(fs*.8)+'px sans-serif';ctx.fillStyle='#8fb0c8';ctx.fillText(short(n.runs_as),n.x+r+3,n.y+fs*.9);ctx.restore();})
+   .nodePointerAreaPaint((n,c,ctx)=>{ctx.fillStyle=c;ctx.beginPath();ctx.arc(n.x,n.y,12,0,6.2832);ctx.fill()})
+   .onNodeClick(sel).onBackgroundClick(()=>{info.style.display='none'}).autoPauseRedraw(false);
+  size(G);addEventListener('resize',()=>size(G));
+  setTimeout(()=>G.zoomToFit(300,40),300);setTimeout(()=>G.zoomToFit(300,40),2000);
+  setInterval(()=>{ang=Math.sin(Date.now()/9000)*.35;proj()},60);
+ }catch(e){fail(e&&e.message||e)}};
+ document.head.appendChild(sc);
+}
+}catch(e){fail(e&&e.message||e)}})();
 </script></body></html>"""
 
 
