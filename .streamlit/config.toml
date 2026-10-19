@@ -16,3 +16,8 @@ primaryColor = "#2a78d6"
 
 [client]
 toolbarMode = "minimal"
+
+[global]
+# Never cache ForwardMsgs: with 5 s fragment reruns, cached large messages (3D view) expired after 2 reruns and the
+# browser hit "Cached ForwardMsg MISS". Re-sending them costs a little bandwidth over the tailnet only.
+minCachedMessageSize = 1000000000000
