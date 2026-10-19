@@ -12,7 +12,7 @@ def show(unlocked, pin_form, who="researcher"):
     st.caption("Ολόκληρο το lab ως «σχολή»: κάθε κόμβος είναι πραγματικό στοιχείο (αρχείο, tmux window, cron, k8s object, "
                "τεκμηριωμένος ρόλος). Hover/tap για περιγραφή. Χρώμα πυρήνα = κατάσταση, παλμός = heartbeat, "
                "σωματίδια = ροή. Το «unknown» σημαίνει ότι καμία πηγή δεν το λέει.")
-    components.html(tv.render(inv), height=620)
+    components.html(tv.render(inv), height=960)
     st.button("🔄 Ανανέωση", key="arch_refresh")
     with st.expander("Πίνακας κόμβων (χωρίς WebGL)"):
         st.dataframe(pd.DataFrame(tv.node_table(inv)), hide_index=True, width="stretch")

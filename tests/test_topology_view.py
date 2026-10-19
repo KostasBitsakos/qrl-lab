@@ -51,7 +51,7 @@ def test_k8s_nodes_grouping():
          "status": {"phase": "Pending"}}]}}
     nodes, _ = tv.k8s_nodes(snap)
     pod = [n for n in nodes if n["id"].startswith("pod:")]
-    assert len(pod) == 1 and pod[0]["label"] == "redis" and pod[0]["status"] == "stale"
+    assert len(pod) == 1 and pod[0]["label"] == "redis" and pod[0]["status"] == "stale" and pod[0]["parent"] == "ns:default" and any(n["id"] == "ns:default" for n in nodes)
 
 
 def test_routing_validation_and_pin_gate():
@@ -86,7 +86,15 @@ def test_tailscale_parse():
     assert tv.parse_tailscale(t) == ["443->http://127.0.0.1:8501", "8443->http://127.0.0.1:8502"]
 
 
-if __name__ == "__main__":
+def test_every_node_has_icon_and_shape():
+    inv = tv.build_inventory({"claude_roles": tv.claude_roles(mkroot()), "k8s": None})
+    for n in inv["nodes"]:
+        assert n["icon"] and n["shape"], n["id"]
+    by = {n["id"]: n for n in inv["nodes"]}
+    assert by["engineer"]["shape"] == "hexagon" and by["codex-quick"]["shape"] == "diamond" and by["coordinator"]["icon"] == "♛"
+
+
+if __name__ == "__main__":  # noqa
     for k, v in list(globals().items()):
         if k.startswith("test_"):
             v()

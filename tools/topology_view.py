@@ -36,6 +36,23 @@ GROUPS = {  # key -> (label, neon colour)
 }
 STATUS_COLOR = {"alive": "#39ff88", "idle": "#6c8cff", "stale": "#ffb020", "down": "#ff3b5c", "unknown": "#8a94a6"}
 
+EDGE_CAT = {"task": "control", "request": "control", "restart": "control", "boot": "control", "start": "control", "status": "control",
+            "spawn": "control", "run": "control", "scale": "control", "hosts": "control", "contains": "control",
+            "r/w": "data", "labq": "data", "metrics": "data", "datasource": "data", "workload": "data",
+            "API": "api", "https": "api", "watch": "heartbeat"}
+EDGE_CAT_LABEL = {"control": ("έλεγχος / ανάθεση", "#7aa2ff"), "data": ("δεδομένα", "#39ff88"), "api": ("API / δίκτυο", "#ff2bd6"),
+                  "heartbeat": ("heartbeat / επίβλεψη", "#ffb020")}
+EDGE_MAIN = {"watch", "r/w", "labq", "request", "API", "https", "spawn", "run", "scale", "metrics", "workload"}
+
+# One glyph per node. Plain BMP symbols (render with DejaVu/system fonts everywhere, unlike colour emoji).
+ICONS = {"coordinator": "♛", "engineer": "⚒", "scholar": "§", "writer": "✎", "runner": "▶", "Explore": "⌕",
+         "codex-quick": "⚡", "codex-reviewer": "✔", "codex-researcher": "⚗", "codex-architect": "✦", "codex-deputy": "★",
+         "dashboard": "◔", "health_watch": "♥", "watchdog": "◉", "terminal": "❯", "labdb": "⛁", "launcher": "➚",
+         "boot_recover": "↻", "tailscale": "⌬", "sandbox_runs": "◈", "k8s": "☸", "redis": "⛃", "prometheus": "♨",
+         "grafana": "▤", "simulator": "⚛", "anthropic": "☁", "openai": "☁", "researcher": "☻"}
+GROUP_SHAPE = {"agents": "hexagon", "codex": "diamond", "services": "rounded", "cluster": "square", "external": "circle"}
+GROUP_BORDER = {"agents": "solid", "codex": "dashed", "services": "dotted", "cluster": "double", "external": "solid"}
+
 # Codex roles: models from docs/DECISIONS.md table (parsed when possible; these are the fallbacks)
 CODEX_ROLES = {
     "codex-quick": ("gpt-6-luna", "low", "Γρήγορες απλές ερωτήσεις."),
@@ -197,13 +214,27 @@ def k8s_nodes(snap):
         w["running"] += ph == "Running"
         w["phases"].add(ph)
         w["restarts"] += sum(c.get("restartCount", 0) for c in it.get("status", {}).get("containerStatuses", []) or [])
+    per_ns = {}
+    for (ns, name), w in wl.items():
+        a = per_ns.setdefault(ns, {"wl": 0, "n": 0, "running": 0})
+        a["wl"] += 1
+        a["n"] += w["n"]
+        a["running"] += w["running"]
+    for ns, a in sorted(per_ns.items()):
+        st = "alive" if a["running"] == a["n"] else ("down" if a["running"] == 0 else "stale")
+        nodes.append(_node(f"ns:{ns}", f"ns {ns}", "cluster", f"k8s namespace · {a['wl']} workloads · {a['n']} pods",
+                           f"Namespace {ns}: {a['running']}/{a['n']} pods Running σε {a['wl']} workloads. Κλικ: άνοιγμα/κλείσιμο των pods.",
+                           st, extra="κλικ = άνοιγμα pods"))
+        links.append(("k8s", f"ns:{ns}", "contains"))
     for (ns, name), w in sorted(wl.items()):
         nid = f"pod:{ns}/{name}"
         st = "alive" if w["running"] == w["n"] else ("down" if w["running"] == 0 else "stale")
-        nodes.append(_node(nid, name, "cluster", f"k8s pod ×{w['n']} · ns {ns}",
-                           f"Workload {name} στο namespace {ns}: {w['running']}/{w['n']} Running, restarts {w['restarts']}, φάσεις {sorted(w['phases'])}.",
-                           st, extra="pods"))
-        links.append((f"node:{w['node']}" if w["node"] else "k8s", nid, "runs"))
+        nd = _node(nid, name, "cluster", f"k8s pod ×{w['n']} · ns {ns}",
+                   f"Workload {name} στο namespace {ns}: {w['running']}/{w['n']} Running, restarts {w['restarts']}, φάσεις {sorted(w['phases'])}.",
+                   st, extra="pods")
+        nd["parent"] = f"ns:{ns}"
+        nodes.append(nd)
+        links.append((f"ns:{ns}", nid, "contains"))
     return nodes, links
 
 
@@ -319,10 +350,16 @@ def build_inventory(src):
               "Ο ερευνητής: στέλνει μηνύματα, εγκρίνει, ορίζει routing.", "unknown"),
     ]
     links += [("coordinator", "anthropic", "API"), ("researcher", "tailscale", "https"), ("prometheus", "grafana", "datasource")]
+    for n in nodes:
+        i = n["id"]
+        n["icon"] = ICONS.get(i) or ("▦" if i.startswith("ns:") else "▢" if i.startswith("pod:") else "▣" if i.startswith("node:") else "●")
+        n["shape"] = GROUP_SHAPE.get(n["group"], "circle")
     names = {n["id"] for n in nodes}
-    links = [{"source": s, "target": t, "kind": k} for s, t, k in links if s in names and t in names]
+    links = [{"source": s, "target": t, "kind": k, "cat": EDGE_CAT.get(k, "control"),
+              "main": k in EDGE_MAIN and not (k == "API" and s != "coordinator")}
+             for s, t, k in links if s in names and t in names]
     return {"nodes": nodes, "links": links, "groups": {k: {"label": v[0], "color": v[1]} for k, v in GROUPS.items()},
-            "status_colors": STATUS_COLOR, "now": src.get("now")}
+            "borders": GROUP_BORDER, "status_colors": STATUS_COLOR, "edge_cats": {k: {"label": v[0], "color": v[1]} for k, v in EDGE_CAT_LABEL.items()}, "now": src.get("now")}
 
 
 # ------------------------------------------------------------------ I/O shell
@@ -473,17 +510,22 @@ _PAGE = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport
 html,body{margin:0;height:100%;background:radial-gradient(ellipse at center,#0b1030 0%,#03040c 80%);font-family:system-ui,sans-serif;color:#cfe;overflow:hidden}
 #g{position:absolute;inset:0}
 #lab{position:absolute;inset:0;pointer-events:none;overflow:hidden}
-.nl{position:absolute;left:0;top:0;white-space:nowrap;font-size:11px;line-height:1.15;padding:1px 5px;border-radius:5px;background:#03061acc;border:1px solid;text-shadow:0 0 4px #000;will-change:transform}
+.gb{position:absolute;left:0;top:0;border:1px solid;border-radius:14px;pointer-events:none;will-change:transform}
+.gi{position:absolute;left:0;top:0;pointer-events:none;font:700 15px 'DejaVu Sans',sans-serif;color:#03061a;margin:-9px 0 0 -8px;width:16px;text-align:center;will-change:transform}
+.gt{position:absolute;left:10px;top:6px;font-size:15px;font-weight:700;letter-spacing:.5px;text-shadow:0 0 6px #000}
+#bt{position:absolute;left:8px;top:8px;z-index:6;display:flex;gap:6px}
+#bt button{background:#050818dd;color:#cfe;border:1px solid #3af;border-radius:8px;padding:5px 9px;font-size:12px}
+.nl{position:absolute;left:0;top:0;white-space:nowrap;font-size:12px;line-height:1.15;padding:1px 5px;border-radius:5px;background:#03061acc;border:1px solid;text-shadow:0 0 4px #000;will-change:transform}
 .nl small{display:block;font-size:9px;opacity:.7}
 .nl i{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:4px;animation:hb var(--p,3s) ease-in-out infinite}
 @keyframes hb{0%,100%{transform:scale(1);opacity:.6}50%{transform:scale(1.7);opacity:1}}
-#leg{position:absolute;right:6px;top:6px;background:#050818cc;border:1px solid #234;border-radius:8px;padding:5px 7px;font-size:10px;max-width:42vw;z-index:5}
+#leg{position:absolute;right:6px;top:6px;max-height:70vh;overflow:auto;background:#050818cc;border:1px solid #234;border-radius:8px;padding:5px 7px;font-size:10px;max-width:42vw;z-index:5}
 #leg i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;box-shadow:0 0 6px currentColor}
 #info{position:absolute;left:8px;right:8px;bottom:8px;background:#050818ee;border:1px solid #2a4;border-radius:10px;padding:8px 10px;font-size:12px;z-index:5;display:none}
 #err{position:absolute;inset:0;display:none;align-items:center;justify-content:center;text-align:center;padding:20px;color:#ff8a9c;font-size:15px;z-index:9}
 .tip{background:#050818f0;border:1px solid #3af;border-radius:8px;padding:6px 9px;font-size:12px;max-width:260px;line-height:1.35}
 .tip b{color:#fff}.k{color:#7ad}
-</style></head><body><div id="g"></div><div id="lab"></div><div id="leg"></div><div id="info"></div><div id="err"></div>
+</style></head><body><div id="g"></div><div id="gbx"></div><div id="lab"></div><div id="ico"></div><div id="bt"><button id="bl">Ετικέτες</button><button id="bi">Υπόμνημα</button></div><div id="leg"></div><div id="info"></div><div id="err"></div>
 <script>
 function fail(r){var e=document.getElementById('err');e.style.display='flex';e.innerHTML='<div>Το 3D δεν φόρτωσε: '+String(r).replace(/[<&]/g,' ')+'<br><small>Δες τον πίνακα κόμβων από κάτω.</small></div>';}
 window.addEventListener('error',function(ev){var t=ev.target;if(t&&t.tagName==='SCRIPT')fail('αποτυχία φόρτωσης από CDN ('+t.src+')');else if(ev.message)fail(ev.message);},true);
@@ -494,72 +536,125 @@ window.addEventListener('unhandledrejection',function(ev){fail(ev.reason);});
 (function(){try{
 const D=__DATA__;
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const SC=D.status_colors, GC={};for(const k in D.groups)GC[k]=D.groups[k].color;
+const SC=D.status_colors, GC={}, GL={};for(const k in D.groups){GC[k]=D.groups[k].color;GL[k]=D.groups[k].label}
+const EC=D.edge_cats||{control:{label:'έλεγχος',color:'#7aa2ff'},data:{label:'δεδομένα',color:'#39ff88'},api:{label:'API',color:'#ff2bd6'},heartbeat:{label:'heartbeat',color:'#ffb020'}};
 let gl=false;try{const c=document.createElement('canvas');gl=!!(c.getContext('webgl2')||c.getContext('webgl'))}catch(e){}
 const use3d=gl&&typeof ForceGraph3D!=='undefined';
 if(gl&&!use3d){setTimeout(()=>{if(typeof ForceGraph3D==='undefined')fail('το ForceGraph3D δεν ορίστηκε (CDN μπλοκαρισμένο ή offline)')},4000);return;}
-document.getElementById('leg').innerHTML='<b>Ομάδες</b><br>'+Object.values(D.groups).map(g=>`<i style="color:${g.color};background:${g.color}"></i>${esc(g.label)}`).join('<br>')
+const leg=document.getElementById('leg');
+leg.innerHTML='<b>Ομάδες</b><br>'+Object.values(D.groups).map(g=>`<i style="color:${g.color};background:${g.color}"></i>${esc(g.label)}`).join('<br>')
  +'<br><b>Κατάσταση</b> (χρώμα κόμβου)<br>'+Object.keys(SC).map(s=>`<i style="color:${SC[s]};background:${SC[s]}"></i>${s}`).join(' ')
- +'<br><span style="opacity:.7">περίγραμμα = ομάδα · παλμός = heartbeat · σωματίδια = ροή</span>'
+ +'<br><b>Ακμές</b><br>'+Object.values(EC).map(e=>`<i style="color:${e.color};background:${e.color}"></i>${esc(e.label)}`).join('<br>')
+ +'<br><b>Σχήματα</b>: εξάγωνο = Claude · ρόμβος = Codex · στρογγυλεμένο = υπηρεσίες · τετράγωνο = cluster · κύκλος = εξωτερικά<br><span style="opacity:.7">έντονη = κύρια ροή · αχνή = δευτερεύουσα · παλμός = heartbeat · κλικ στο «ns …» ανοίγει τα pods</span>'
  +(use3d?'':'<br><b style="color:#ffb020">Λειτουργία 2D (χωρίς WebGL) — για 3D ενεργοποίησε το hardware acceleration στον browser</b>');
+leg.style.display='none';
+document.getElementById('bi').onclick=()=>{leg.style.display=leg.style.display==='none'?'block':'none'};
 function tip(n){return `<div class="tip"><b>${esc(n.label)}</b><br>${esc(n.desc)}<br><span class="k">τρέχει ως:</span> ${esc(n.runs_as)}`
  +(n.model?`<br><span class="k">μοντέλο:</span> ${esc(n.model)} / ${esc(n.effort)}${n.override?' <b style="color:#ffb020">(override)</b>':''}`:'')
  +`<br><span class="k">κατάσταση:</span> <span style="color:${SC[n.status]}">${esc(n.status)}</span>`
  +(n.hb!=null?`<br><span class="k">heartbeat:</span> ${n.hb}s`:'')+(n.extra?`<br>${esc(n.extra)}`:'')+'</div>';}
 const nodes=D.nodes.map(n=>Object.assign({},n)), idx={};nodes.forEach(n=>idx[n.id]=n);
-const links=D.links.map(l=>Object.assign({},l));
-const short=s=>{s=String(s).split(/ [·(—]/)[0];return s.length>26?s.slice(0,25)+'…':s};
+const short=s=>{s=String(s).split(/ [·(—]/)[0];return s.length>28?s.slice(0,27)+'…':s};
+const trunc=(s,m)=>s.length>m?s.slice(0,m-1)+'…':s;
 const period=n=>n.hb==null?(n.status==='alive'?2.4:(n.status==='idle'?5:1.2)):Math.min(8,.8+n.hb/30);
-// fixed, clearly separated layout: group anchors on a ring, nodes of a group on a Fibonacci sphere around the anchor
-const keys=Object.keys(D.groups), byg={};nodes.forEach(n=>(byg[n.group]=byg[n.group]||[]).push(n));
-keys.forEach((k,i)=>{const a=i/keys.length*6.2832, g=byg[k]||[], R=40+17*Math.sqrt(g.length), cx=Math.cos(a)*(190+R), cz=Math.sin(a)*(190+R);
- g.forEach((n,j)=>{const m=g.length, y=m>1?1-2*j/(m-1):0, r=Math.sqrt(Math.max(0,1-y*y)), t=j*2.39996;
-  n.fx=cx+Math.cos(t)*r*R;n.fy=y*R*.8;n.fz=cz+Math.sin(t)*r*R;n.x=n.fx;n.y=n.fy;n.z=n.fz});});
-const el=document.getElementById('g'), info=document.getElementById('info');
-const sel=n=>{info.style.display='block';info.innerHTML=tip(n).replace('class="tip"','')};
+const expanded={};
+const keys=Object.keys(D.groups), boxes={};
+const CW=200,CH=56;
+const isVis=n=>!n.parent||expanded[n.parent];
+function layout(){
+ const vis=nodes.filter(isVis), byg={};
+ keys.forEach(k=>byg[k]=[]);
+ vis.filter(n=>!n.parent).forEach(n=>{byg[n.group].push(n);vis.filter(c=>c.parent===n.id).forEach(c=>byg[n.group].push(c))});
+ const gs=keys.filter(k=>byg[k].length).map(k=>{const m=byg[k].length,cols=Math.min(6,Math.max(2,Math.ceil(Math.sqrt(m)))),rows=Math.ceil(m/cols);return{k,cols,rows,w:cols*CW+30,h:rows*CH+64}});
+ const MAXW=1900,GAP=70;let x=0,y=0,rowH=0,W=0;
+ gs.forEach(g=>{if(x>0&&x+g.w>MAXW){x=0;y+=rowH+GAP;rowH=0}g.x=x;g.y=y;x+=g.w+GAP;rowH=Math.max(rowH,g.h);W=Math.max(W,g.x+g.w)});
+ const H=y+rowH;
+ gs.forEach((g,i)=>{boxes[g.k]={x:g.x,y:g.y,w:g.w,h:g.h,z:(i%2?1:-1)*40};
+  byg[g.k].forEach((n,j)=>{const c=j%g.cols,r=Math.floor(j/g.cols);n.fx=g.x+15+c*CW+16;n.fy=g.y+54+r*CH+CH/2;n.fz=boxes[g.k].z;if(use3d)n.fy=-n.fy;n.x=n.fx;n.y=n.fy;n.z=n.fz})});
+ keys.forEach(k=>{if(!byg[k].length)delete boxes[k]});
+ return{W,H,vis}}
+let LAY=layout();
+function visLinks(){const seen={},out=[];const v=id=>{let n=idx[id];if(!n)return null;if(!isVis(n))n=idx[n.parent];return n?n.id:null};
+ D.links.forEach(l=>{const s=v(l.source),t=v(l.target);if(!s||!t||s===t)return;const key=s+'|'+t+'|'+l.kind;if(seen[key])return;seen[key]=1;out.push({source:s,target:t,kind:l.kind,cat:l.cat||'control',main:!!l.main})});return out}
+let LINKS=visLinks();
+let hover=null,sel=null;
+const focus=()=>hover||sel;
+function nb(){const f=focus();if(!f)return null;const s=new Set([f.id]);LINKS.forEach(l=>{const a=l.source.id||l.source,b=l.target.id||l.target;if(a===f.id)s.add(b);if(b===f.id)s.add(a)});return s}
+let NB=null;const lit=n=>!NB||NB.has(n.id);
+const lid=x=>x.id||x;
+const litLink=l=>NB&&(lid(l.source)===focus().id||lid(l.target)===focus().id);
+function mix(c,a){const h=c.replace('#','');const r=parseInt(h.slice(0,2),16),g=parseInt(h.slice(2,4),16),b=parseInt(h.slice(4,6),16);return `rgb(${Math.round(r*a+12*(1-a))},${Math.round(g*a+16*(1-a))},${Math.round(b*a+40*(1-a))})`}
+const linkCol=l=>{const c=EC[l.cat].color,h=c.replace('#','');const rgb=[0,2,4].map(i=>parseInt(h.slice(i,i+2),16)).join(',');const a=NB?(litLink(l)?.95:.05):(l.main?.6:.16);return `rgba(${rgb},${a})`};
+const infoEl=document.getElementById('info'),el=document.getElementById('g');
+function select(n){sel=n;if(n&&n.id.startsWith('ns:')){expanded[n.id]=!expanded[n.id];relayout()}
+ infoEl.style.display=n?'block':'none';if(n)infoEl.innerHTML=tip(n).replace('class="tip"','');NB=nb();restyle()}
 function size(G){G.width(window.innerWidth).height(window.innerHeight)}
+let G,relayout,restyle;
 if(use3d){
- const labs=document.getElementById('lab');
+ const labs=document.getElementById('lab'),icos=document.getElementById('ico'),gbx=document.getElementById('gbx');let showAll=false;
  nodes.forEach(n=>{const d=document.createElement('div');d.className='nl';d.style.borderColor=GC[n.group];
-  d.innerHTML=`<i style="background:${SC[n.status]};box-shadow:0 0 6px ${SC[n.status]};--p:${period(n)}s"></i>${esc(n.label)}<small>${esc(short(n.runs_as))}</small>`;
-  labs.appendChild(d);n._el=d;});
- const G=ForceGraph3D()(el).backgroundColor('rgba(0,0,0,0)').graphData({nodes,links})
-  .nodeColor(n=>SC[n.status]||SC.unknown).nodeVal(n=>n.id==='coordinator'?60:(n.group==='external'?30:22)).nodeRelSize(3).nodeOpacity(.95).nodeResolution(14)
-  .nodeLabel(tip).warmupTicks(5).cooldownTicks(5)
-  .linkColor(()=>'rgba(120,200,255,.35)').linkWidth(.5).linkOpacity(.5)
-  .linkDirectionalParticles(l=>l.kind==='API'?3:2).linkDirectionalParticleWidth(2).linkDirectionalParticleSpeed(.006)
-  .linkDirectionalParticleColor(l=>GC[(idx[l.target.id||l.target]||{}).group]||'#fff')
-  .onNodeClick(sel).onBackgroundClick(()=>{info.style.display='none'});
- size(G);addEventListener('resize',()=>size(G));
+  d.innerHTML=`<i style="background:${SC[n.status]};box-shadow:0 0 6px ${SC[n.status]};--p:${period(n)}s"></i>${esc(trunc(n.label,26))}<small>${esc(short(n.runs_as))}</small>`;
+  labs.appendChild(d);n._el=d;const q=document.createElement('div');q.className='gi';q.textContent=n.icon||'';icos.appendChild(q);n._ic=q;});
+ const gdiv={};keys.forEach(k=>{const d=document.createElement('div');d.className='gb';d.style.borderColor=GC[k];d.style.borderStyle=(D.borders||{})[k]||'solid';if(d.style.borderStyle==='double')d.style.borderWidth='3px';d.style.background=GC[k]+'14';d.innerHTML=`<div class="gt" style="color:${GC[k]}">${esc(GL[k])}</div>`;gbx.appendChild(d);gdiv[k]=d});
+ G=ForceGraph3D()(el).backgroundColor('rgba(0,0,0,0)').graphData({nodes:LAY.vis,links:LINKS})
+  .nodeColor(n=>lit(n)?(SC[n.status]||SC.unknown):mix(SC[n.status]||SC.unknown,.2)).nodeVal(n=>n.id==='coordinator'?70:(n.id.startsWith('ns:')?50:30)).nodeRelSize(5).nodeOpacity(.95).nodeResolution(14)
+  .nodeLabel(tip).warmupTicks(2).cooldownTicks(2)
+  .linkColor(linkCol).linkWidth(l=>NB&&litLink(l)?1.6:.5).linkCurvature(.12).linkOpacity(1)
+  .linkDirectionalParticles(l=>(NB?litLink(l):l.main)?(l.cat==='api'?3:2):0).linkDirectionalParticleWidth(2.2).linkDirectionalParticleSpeed(.006)
+  .linkDirectionalParticleColor(l=>EC[l.cat].color)
+  .onNodeHover(n=>{hover=n;NB=nb();restyle()}).onNodeClick(select).onBackgroundClick(()=>select(null));
+ size(G);addEventListener('resize',()=>{size(G);fit()});
  G.controls().autoRotate=false;
- const mr=Math.max(...nodes.map(n=>Math.hypot(n.x,n.z))),mw=Math.max(...nodes.map(n=>Math.abs(n.x))),asp=window.innerWidth/Math.max(1,window.innerHeight);
- const dist=Math.max(mw/(0.466*asp)*1.12,mr*1.1);
- const camSet=()=>G.cameraPosition({x:0,y:dist*.42,z:dist},{x:0,y:0,z:0},0);
- [100,800,2500].forEach(t=>setTimeout(camSet,t));
- (function tick(){requestAnimationFrame(tick);const w=window.innerWidth,h=window.innerHeight;
-  nodes.forEach(n=>{const c=G.graph2ScreenCoords(n.x,n.y,n.z);const ok=c&&c.x>-60&&c.x<w+60&&c.y>-20&&c.y<h+20;
-   n._el.style.display=ok?'block':'none';if(ok)n._el.style.transform=`translate(${c.x+8}px,${c.y-8}px)`})})();
+ let dist=1000;
+ function fit(){const asp=window.innerWidth/Math.max(1,window.innerHeight),W=LAY.W+80,H=LAY.H+80;
+  dist=Math.max(W/2/(0.466*asp),H/2/0.466)*1.04;const cx=LAY.W/2,cy=-LAY.H/2;G.cameraPosition({x:cx,y:cy+dist*.10,z:dist},{x:cx,y:cy,z:0},0)}
+ restyle=()=>{G.nodeColor(n=>lit(n)?(SC[n.status]||SC.unknown):mix(SC[n.status]||SC.unknown,.2)).linkColor(linkCol)
+  .linkWidth(l=>NB&&litLink(l)?1.6:.5).linkDirectionalParticles(l=>(NB?litLink(l):l.main)?(l.cat==='api'?3:2):0)};
+ relayout=()=>{LAY=layout();LINKS=visLinks();G.graphData({nodes:LAY.vis,links:LINKS});fit()};
+ document.getElementById('bl').onclick=()=>{showAll=!showAll};
+ [100,800,2500].forEach(t=>setTimeout(fit,t));
+ (function tick(){requestAnimationFrame(tick);const w=window.innerWidth,h=window.innerHeight,cam=G.camera().position,tg=G.controls().target;
+  const close=cam.distanceTo(tg)<dist*.62;
+  nodes.forEach(n=>{if(!isVis(n)){n._el.style.display='none';n._ic.style.display='none';return}const c=G.graph2ScreenCoords(n.x,n.y,n.z);
+   const vis=c&&c.x>-30&&c.x<w+30&&c.y>-30&&c.y<h+30;n._ic.style.display=vis?'block':'none';if(vis){n._ic.style.transform=`translate(${c.x}px,${c.y}px)`;n._ic.style.opacity=lit(n)?1:.2}
+   const on=c&&c.x>-80&&c.x<w+80&&c.y>-30&&c.y<h+30&&(showAll||close||(NB&&NB.has(n.id)));
+   n._el.style.display=on?'block':'none';if(on){n._el.style.transform=`translate(${c.x+8}px,${c.y-10}px)`;n._el.style.opacity=lit(n)?1:.25}});
+  keys.forEach(k=>{const b=boxes[k],d=gdiv[k];if(!b){d.style.display='none';return}
+   const P=[[b.x,-b.y],[b.x+b.w,-b.y],[b.x,-(b.y+b.h)],[b.x+b.w,-(b.y+b.h)]].map(q=>G.graph2ScreenCoords(q[0],q[1],b.z));
+   const x0=Math.min(...P.map(q=>q.x)),x1=Math.max(...P.map(q=>q.x)),y0=Math.min(...P.map(q=>q.y)),y1=Math.max(...P.map(q=>q.y));
+   d.style.display='block';d.style.width=(x1-x0)+'px';d.style.height=(y1-y0)+'px';d.style.transform=`translate(${x0}px,${y0}px)`})})();
  setTimeout(()=>{if(!document.querySelector('#g canvas'))fail('δεν δημιουργήθηκε canvas')},5000);
 }else{
+ document.getElementById('bl').style.display='none';
  const sc=document.createElement('script');sc.src='https://cdn.jsdelivr.net/npm/force-graph@1.43.5/dist/force-graph.min.js';
  sc.onload=()=>{try{
-  let ang=0;const proj=()=>{const c=Math.cos(ang),s=Math.sin(ang);nodes.forEach(n=>{n.fx=n.x=(n._x0*c+n._z0*s)*1.0;n.fy=n.y=n._y0+(n._z0*c-n._x0*s)*.25})};
-  nodes.forEach(n=>{n._x0=n.fx;n._y0=n.fy;n._z0=n.fz});proj();
-  const G=ForceGraph()(el).backgroundColor('rgba(0,0,0,0)').graphData({nodes,links}).nodeLabel(tip).cooldownTicks(0)
-   .linkColor(()=>'rgba(120,200,255,.35)').linkWidth(.8)
-   .linkDirectionalParticles(l=>l.kind==='API'?3:2).linkDirectionalParticleWidth(2.5).linkDirectionalParticleSpeed(.006)
-   .linkDirectionalParticleColor(l=>GC[(idx[l.target.id||l.target]||{}).group]||'#fff')
-   .nodeCanvasObject((n,ctx,k)=>{const r=(n.id==='coordinator'?9:6),t=Date.now()/1000,p=period(n),f=(t%p)/p,col=SC[n.status]||SC.unknown;
-     ctx.save();ctx.beginPath();ctx.arc(n.x,n.y,r+f*r*1.8,0,6.2832);ctx.strokeStyle=col;ctx.globalAlpha=.55*(1-f);ctx.lineWidth=1.5/k;ctx.stroke();
-     ctx.globalAlpha=1;ctx.shadowColor=col;ctx.shadowBlur=18;ctx.beginPath();ctx.arc(n.x,n.y,r,0,6.2832);ctx.fillStyle=col;ctx.fill();
-     ctx.shadowBlur=0;ctx.lineWidth=2/k;ctx.strokeStyle=GC[n.group];ctx.stroke();
-     const fs=Math.max(9/k,3);ctx.font=fs+'px sans-serif';ctx.fillStyle='#e6f6ff';ctx.fillText(n.label,n.x+r+3,n.y-1);
-     ctx.font=(fs*.8)+'px sans-serif';ctx.fillStyle='#8fb0c8';ctx.fillText(short(n.runs_as),n.x+r+3,n.y+fs*.9);ctx.restore();})
-   .nodePointerAreaPaint((n,c,ctx)=>{ctx.fillStyle=c;ctx.beginPath();ctx.arc(n.x,n.y,12,0,6.2832);ctx.fill()})
-   .onNodeClick(sel).onBackgroundClick(()=>{info.style.display='none'}).autoPauseRedraw(false);
-  size(G);addEventListener('resize',()=>size(G));
-  setTimeout(()=>G.zoomToFit(300,40),300);setTimeout(()=>G.zoomToFit(300,40),2000);
-  setInterval(()=>{ang=Math.sin(Date.now()/9000)*.35;proj()},60);
+  const poly=(ctx,x,y,r,m,rot)=>{ctx.beginPath();for(let i=0;i<m;i++){const a=rot+i*6.2832/m;ctx[i?'lineTo':'moveTo'](x+r*Math.cos(a),y+r*Math.sin(a))}ctx.closePath()};
+  const shapePath=(ctx,n,r)=>{const sh=n.shape;if(sh==='hexagon')poly(ctx,n.x,n.y,r*1.1,6,0);else if(sh==='diamond')poly(ctx,n.x,n.y,r*1.3,4,0);
+   else if(sh==='rounded'||sh==='square'){const q=r*(sh==='square'?.95:.9);ctx.beginPath();ctx.moveTo(n.x-q+(sh==='square'?1:5),n.y-q);ctx.arcTo(n.x+q,n.y-q,n.x+q,n.y+q,sh==='square'?1:5);ctx.arcTo(n.x+q,n.y+q,n.x-q,n.y+q,sh==='square'?1:5);ctx.arcTo(n.x-q,n.y+q,n.x-q,n.y-q,sh==='square'?1:5);ctx.arcTo(n.x-q,n.y-q,n.x+q,n.y-q,sh==='square'?1:5);ctx.closePath()}
+   else{ctx.beginPath();ctx.arc(n.x,n.y,r,0,6.2832)}};
+  const fit2d=()=>{const k=Math.min(window.innerWidth/(LAY.W+90),window.innerHeight/(LAY.H+90));G.zoom(k,0);G.centerAt(LAY.W/2,LAY.H/2,0)};
+  const rr=(ctx,x,y,w,h,r)=>{ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()};
+  G=ForceGraph()(el).backgroundColor('rgba(0,0,0,0)').graphData({nodes:LAY.vis,links:LINKS}).nodeLabel(tip).cooldownTicks(0)
+   .linkColor(linkCol).linkWidth(l=>NB&&litLink(l)?2.2:1).linkCurvature(.14).linkLineDash(l=>l.cat==='api'?[6,4]:(l.cat==='heartbeat'?[2,3]:null))
+   .linkDirectionalParticles(l=>(NB?litLink(l):l.main)?(l.cat==='api'?3:2):0).linkDirectionalParticleWidth(3).linkDirectionalParticleSpeed(.006)
+   .linkDirectionalParticleColor(l=>EC[l.cat].color)
+   .onRenderFramePre((ctx,k)=>{keys.forEach(kk=>{const b=boxes[kk];if(!b)return;ctx.save();rr(ctx,b.x,b.y,b.w,b.h,18);ctx.fillStyle=GC[kk]+'12';ctx.fill();ctx.strokeStyle=GC[kk]+'99';ctx.lineWidth=1.5/k;const bs=(D.borders||{})[kk];ctx.setLineDash(bs==='dashed'?[10/k,6/k]:bs==='dotted'?[2/k,5/k]:[]);if(bs==='double')ctx.lineWidth=3/k;ctx.stroke();if(bs==='double'){ctx.setLineDash([]);rr(ctx,b.x+6,b.y+6,b.w-12,b.h-12,13);ctx.lineWidth=1/k;ctx.stroke()}
+     ctx.font='bold '+Math.min(26,Math.max(15,15/k))+'px sans-serif';ctx.fillStyle=GC[kk];ctx.fillText(GL[kk],b.x+14,b.y+30);ctx.restore()})})
+   .nodeCanvasObject((n,ctx,k)=>{const r=n.id==='coordinator'?13:(n.id.startsWith('ns:')?11:10),t=Date.now()/1000,p=period(n),f=(t%p)/p,col=SC[n.status]||SC.unknown,on=lit(n);
+     ctx.save();ctx.globalAlpha=on?1:.22;shapePath(ctx,n,r+f*r*1.5);ctx.strokeStyle=col;ctx.globalAlpha=(on?.55:.1)*(1-f);ctx.lineWidth=1.5/k;ctx.stroke();
+     ctx.globalAlpha=on?1:.22;ctx.shadowColor=col;ctx.shadowBlur=on?16:0;shapePath(ctx,n,r);ctx.fillStyle=col;ctx.fill();
+     ctx.shadowBlur=0;ctx.lineWidth=2/k;ctx.strokeStyle=GC[n.group];ctx.stroke();ctx.font="700 "+(r*1.25)+"px 'DejaVu Sans',sans-serif";ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle='#03061a';ctx.fillText(n.icon||'',n.x,n.y+.5);ctx.textAlign='left';ctx.textBaseline='alphabetic';
+     const fs=Math.min(14,Math.max(7,12/k)),t1=trunc(n.label,24)+(n.id.startsWith('ns:')?(expanded[n.id]?' ▾':' ▸'):''),t2=short(n.runs_as);
+     ctx.font=fs+'px sans-serif';const w1=ctx.measureText(t1).width;ctx.font=(fs*.78)+'px sans-serif';const w2=ctx.measureText(t2).width,bw=Math.min(CW-36,Math.max(w1,w2)+8);
+     ctx.fillStyle='rgba(3,6,26,.82)';rr(ctx,n.x+r+3,n.y-fs*.9,bw,fs*2.1,3);ctx.fill();
+     ctx.font=fs+'px sans-serif';ctx.fillStyle='#e6f6ff';ctx.fillText(t1,n.x+r+6,n.y+fs*.1);
+     ctx.font=(fs*.78)+'px sans-serif';ctx.fillStyle='#8fb0c8';ctx.fillText(t2,n.x+r+6,n.y+fs*.95);ctx.restore();})
+   .nodePointerAreaPaint((n,c,ctx)=>{ctx.fillStyle=c;ctx.fillRect(n.x-14,n.y-16,CW-26,32)})
+   .onNodeHover(n=>{hover=n;NB=nb();restyle()}).onNodeClick(select).onBackgroundClick(()=>select(null)).autoPauseRedraw(false);
+  size(G);addEventListener('resize',()=>{size(G);fit2d()});
+  restyle=()=>{G.linkColor(linkCol).linkWidth(l=>NB&&litLink(l)?2.2:1).linkDirectionalParticles(l=>(NB?litLink(l):l.main)?(l.cat==='api'?3:2):0)};
+  relayout=()=>{LAY=layout();LINKS=visLinks();G.graphData({nodes:LAY.vis,links:LINKS});setTimeout(fit2d,200)};
+  setTimeout(fit2d,300);setTimeout(fit2d,2000);
  }catch(e){fail(e&&e.message||e)}};
  document.head.appendChild(sc);
 }
