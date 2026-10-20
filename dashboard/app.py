@@ -408,6 +408,16 @@ if _recent_denied:
 refresh = 5
 st.html("<style>@media (min-width:769px){[data-testid=stSidebar][aria-expanded=true]{min-width:350px!important;"
         "width:350px!important}}</style>")
+# Tabs wrap onto extra rows instead of scrolling sideways on narrow screens (researcher, M-20261020-009). The sliding
+# Streamlit 1.66 tabs are react-aria: [data-testid=stTabs] [role=tablist] > [data-testid=stTab].
+st.html("<style>[data-testid=stTabs] [role=tablist]{flex-wrap:wrap!important;overflow-x:visible!important;"
+        "row-gap:2px;column-gap:14px}"
+        "@media (max-width:768px){.block-container{padding-left:.6rem!important;padding-right:.6rem!important}"
+        "[data-testid=stTabs] [role=tablist]{column-gap:8px}[data-testid=stTab]{font-size:.85rem}"
+        "[data-testid=stHorizontalBlock]{flex-wrap:wrap!important}"
+        "[data-testid=stHorizontalBlock]>[data-testid=stColumn]{min-width:calc(50% - 1rem)!important}"
+        "[data-testid=stDataFrame],[data-testid=stTable],iframe{max-width:100%!important}"
+        ".stMarkdown table{display:block;overflow-x:auto}}</style>")
 
 
 @st.fragment(run_every=refresh)
