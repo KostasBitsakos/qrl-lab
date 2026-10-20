@@ -12,6 +12,7 @@ The accepted decisions of `docs/DECISIONS.md` (dated log) are kept here as activ
 | [security.md](security.md) | settings, read-only paths, approvals |
 | [paused.md](paused.md) | paused items (not dropped) with their revive condition |
 | [archive.md](archive.md) | superseded entries and history/environment facts, verbatim, newest first |
+| [../tuning_experiments.md](../tuning_experiments.md) | log of what the tuning loop tried and what worked (M-20261020-038); winners move into these rule files at the end |
 
 ## Precedence
 - A later dated decision wins over an earlier one.
