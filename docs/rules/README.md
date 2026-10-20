@@ -26,7 +26,11 @@ conflict to the researcher (dashboard, with both texts and file:line) and wait f
 Splitting the rules into several md files that reference each other is allowed if it keeps them clearer.
 Format used in these files: one line per rule, with date + source id (M-/R-/D-) and expiry if any.
 
-## Open conflicts (awaiting researcher)
+## Resolved conflicts (researcher «ναι συνέχισε», 2026-10-20, M-20261020-025, on the proposals in M-20261020-024)
+Resolutions: C1 later wins (env/reward variants allowed); C2 later wins (reward may change, original DInos reward stays
+as reference arm); C3 stage B not required for sim results, calibration stays paused; C4 now W0 and its variants, W1
+deferred; C5 closeness % is a progress indicator, not a paper result; C6 engineer on Opus for research/simulator code,
+Sonnet only for small dashboard changes. The original texts:
 - **C1** Tuning sandbox guardrails (2026-10-17, M-20261017-137): "tune agents (...), not the simulator/reward/SLO (those
   change only from calibration evidence)" vs 2026-10-20 M-20261020-013 (env variants allowed) and M-20261020-015
   (inputs, reward, layers, simulator need not be accurate to the real cluster). → experiments.md
