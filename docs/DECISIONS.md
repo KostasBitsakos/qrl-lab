@@ -1,140 +1,30 @@
-# Accepted decisions
+# Accepted decisions — dated log
 
-Newest first. Each entry: date, who decided, source, decision.
+Newest first, one or two lines per decision. The rules themselves live in [`docs/rules/`](rules/README.md)
+(index, precedence, contradiction-check procedure, open conflicts). Codex role table: [`docs/rules/models.md`](rules/models.md).
+Before adding a decision, follow the procedure in `docs/rules/README.md` (M-20261020-021).
 
-## 2026-10-17 — Mutual fallback and priorities (decided by: researcher; source: M-20261017-005/006/007)
-
-- **Fallback, both directions:** when Claude or Codex hits a usage limit, the other one takes over temporarily, and they communicate through the dashboard thread and `.lab/deputy_queue.jsonl`.
-  - When Codex leads, it hands tasks to its own cheaper models (luna/sol). Crucial work stays with the specialist agent that owns it.
-  - When Codex is limited, Codex roles fall back to Claude agents (reviewer → Claude Sonnet).
-- **Limit messages:** the dashboard shows exact limit messages for both Claude and Codex, with the reset time.
-- **Sudo tab:** sudo requests are approved from a dashboard tab.
-- **Priority:** simulation experiments first, real hardware (cluster calibration) after.
-  - First run the researcher's own input load (W0: sine + noise + spike) with the latest models plus the F2/F3 fixes.
-  - Then Poisson + noise + spikes (W1).
-- **Environment work:** improve the env per the researcher's description, and read literature on how input load affects the other metrics (latency, CPU, memory) in real systems.
-
-## 2026-10-16 — Calibration setup (decided by: researcher; source: R-20261016-018, changes requested)
-
-The calibration uses a **stateless Deployment**, as in the original 2025 setup, not a StatefulSet. Pod start-up and removal must stay fast.
-- Losing test data in the calibration Redis is explicitly acceptable. The goal is to show optimal scaling decisions.
-- The coordinator's implementation: a copy of the researcher's Deployment in an isolated namespace `qrl-calib`. The `default` namespace is untouched, and rollback means deleting the namespace.
-- After each scale event the cluster is repaired with `redis-cli --cluster fix` and rebalance. The recovery time is measured and becomes part of the Sim v2 parameters d, δ and k.
-
-## 2026-10-16 — Model routing and more OpenAI agents (decided by: researcher; source: R-20261016-016, option 2)
-
-**Rule:** every task uses the cheapest model that does it well.
-- Claude side: Explore → Haiku; engineer → Sonnet; Opus only for simulator or circuit design; scripts for repetitive work.
-- Codex roles, all through the ChatGPT subscription via the Codex CLI. No API keys.
-  - Models from `codex debug models`; luna and 6.1-sol were tested with one call each on 2026-10-16.
-
-| Role | Model / effort |
-|---|---|
-| codex-quick (simple questions) | `gpt-6-luna` / low |
-| codex-reviewer (code/results review) | `gpt-6.1-sol` / medium |
-| codex-researcher (literature/venues second opinion, read-only, verified sources) | `gpt-6.1-sol` / medium |
-| codex-architect (council: simulator, models, paper claims) | `gpt-6-astra` / high, with the reason logged |
-
-- **2026-10-16 (researcher, M-20261016-078):** use the ChatGPT/Codex agents more, not only Claude agents. The researcher has ChatGPT Plus. Default to Codex roles for every review, second opinion, literature or venue cross-check, and draft that does not need file edits. Claude agents handle file edits and runs.
-- The researcher also runs ChatGPT app tools by hand (Deep Research, agent mode) and uploads the results to the dashboard (📎). The coordinator then integrates them.
-
-## 2026-10-16 — D2 Sim v2 design (decided by: researcher; source: R-20261016-013, council C-20261016-01)
-
-Option 1 of `.lab/council/C-20261016-01/card.md`: build Sim v2 now with provisional, labelled parameters.
-- Design: transient fluid/cohort queue, 1–30 pods, startup delay, rebalance loss, calibrated capacity curve C(c).
-- Reward: −α·pod-seconds − β·SLO failures − γ·scaling changes.
-- Gates frozen before any agent run.
-- A calibration pilot up to 30 pods on the real cluster follows, under a separate approval.
-- SLO and weights are set by the researcher before agents are evaluated.
-
-## 2026-10-16 — D9 IBM Quantum (decided by: researcher; source: R-20261016-001)
-
-The researcher has an IBM Quantum account. No IBM jobs for now. Real-hardware tests come only once the quantum
-models are ready, and each job still needs per-job approval with estimated QPU seconds (PLAN §6).
-
-## 2026-10-16 — standing rules (decided by: researcher; source: docs/handoffs/HANDOFF_2026-10-16_planning-chat.md §3)
-
-1. **The dashboard is the only channel.** The terminal and phone app are fallbacks for permission prompts and emergencies.
-2. **Dashboard changes are requested in the dashboard.** The `engineer` implements them. Before applying, run
-   `tests/test_lab.py` and add tests for the new feature, then commit. If the dashboard breaks, revert with git at once.
-   Tell the researcher to press F5 after each change.
-3. **When the researcher asks for Codex, Codex must actually be consulted.** Its answer is shown as Codex
-   (`--author codex`). Never substitute your own answer or only offer to ask.
-4. **Never overwrite settings the researcher or tools changed.** Merge edits into `.claude/settings.json`, keep
-   plugins at user scope, and put project-only toggles in `.claude/settings.local.json`.
-5. Write to the researcher in Greek, short and direct.
-
-## 2026-10-16 — environment facts (recorded by: researcher; source: same handoff §1)
-
-- VM: `ubuntu@10.0.1.28`, hostname `kbitsak-very-large`. The earlier "10.1.1.28" was a typo.
-- Kubernetes: the kubeconfig API server (`10.0.1.28:6443`) is this VM and refuses connections, so the cluster is
-  stopped (PLAN F7). Bringing it up needs per-item approval (D11).
-- Researcher access is through VS Code Remote-SSH only. The dashboard is reached as a VS Code Ports forward of
-  8501 → `http://localhost:8501`, so it is visible only while VS Code is connected. Files reach the VM by drag & drop
-  into the VS Code Explorer.
-- Claude Code 2.1.300 on the VM. Node comes through nvm (user-local). codex-cli is logged in with device auth.
-- The `codex@openai-codex` plugin is at **user** scope. At project scope, kit v0.2's `unzip -o` overwrote
-  `.claude/settings.json` and silently disabled it (see rule 4). `agent-memory`, `small-business` and
-  `aws-startups` are disabled for this project (local scope).
-- pyright-lsp is not installed because git 2.25.1 fails on `sparse-checkout`. Optional fix: a newer git from
-  `ppa:git-core/ppa`, which needs sudo and per-item approval.
-- The tmux session `lab` died once (cause unknown) and was restarted with `tools/start-coordinator.sh`. If it
-  happens again, record `uptime`, `last -x | head`, and the end of the coordinator's terminal output.
-- Original research directories are read-only for agents: `~/simulations` (git `redisk8s`), `~/redis`
-  (git `autoscaling-redis-cluster-hpa-kubernetes`), `~/k8s`, `~/prometheus-grafana`. Archive: `~/all.zip` (2024-04).
-
-## 2026-10-16 — D12 (decided by: researcher)
-
-ChatGPT handoff adopted: codex mcp-server dropped, approvals enforced in the launcher, acceptance tests A1–A8.
-
-## 2026-10-17 — D5 quantum candidates (R-20261017-006, approved by the researcher)
-Screen QC4 (quantum fine-tuning head on a frozen sim-pretrained classical encoder; control: classical frozen-encoder
-head with matched parameters) and QC1 (full VQC Q-function with data re-uploading; control: parameter-matched
-classical model), about one week; keep the better one for the paper. Final choice after screening (PLAN §8.4–§8.5).
-
-## 2026-10-17 — D8 old simulator (R-20261017-007, researcher's own option)
-The paper does not mention the old simulator's issue (F1) at all, and the DInos claims are not changed. Sim v2 is
-presented simply as the simulator used here. Consequence kept in force: the paper does not restate DInos
-simulation numbers as comparison points (claims discipline); comparisons use our own runs only.
-
-## 2026-10-17 — D3 workloads (R-20261017-008, researcher chose option 1)
-W0 + W1 for training, W2 (public production trace, scaled) for testing only, W3 (regime shift) for adaptation,
-as in PLAN §8.2. W0 runs first (sim-first priority, 2026-10-17).
-
-## 2026-10-17 — IBM Quantum in this paper (R-20261017-011, researcher chose option 1)
-Yes, inference only: the final trained model is evaluated on IBM hardware with a few QPU-seconds; training stays in
-simulation; no speed-up claims. Each job still needs its own approval (D9).
-
-## 2026-10-17 — W0 exploratory study (R-20261017-014, researcher chose option 1)
-Both Sim v2.1 gates failed and remain failed; PLAN §8.1 amended (see there) to allow a bounded exploratory W0 study
-with unchanged provisional parameters, a disclosed Kubernetes-HPA comparator, development-range evaluation seeds,
-final test seeds untouched; calibration prepared in parallel. Researcher also asked (M-20261017-068) that the HPA be
-reverse-engineered from the official Kubernetes docs/source.
-
-## 2026-10-17 — Venues always carry tier and acceptance rate (M-20261017-114/117)
-Every venue in `docs/deadlines.json` / `docs/VENUES.md`, now and in future updates, includes the CORE tier (source and
-year) and the acceptance rate of the last 3 editions from official sources (proceedings front matter in IEEE Xplore /
-ACM DL, conference or steering-committee pages). Rates that cannot be found are marked as not found, never estimated.
-
-## 2026-10-17 — Reward = researcher's DInos reward on Sim v2; classical scope; calibration in parallel (R-20261017-017, council C-20261017-02)
-- Training reward: r = 3·L − 5·D − 10·N − 0.5·U − 0.5·M (coefficients from ~/simulations/.../Quantum/environment.py:90-94),
-  through a documented adapter frozen before any training: L = 10·λ/μ_ref, D = p95 over ALL requests (timed-out/dropped
-  counted at the 60 s timeout) / SLO, N = ready+pending pods, U = CPU % points, M = memory % (constant per pod until
-  measured in calibration stage B; disclosed). Sim v2 cost/SLA quantities are reported metrics only.
-- Methods: K8s HPA, DERP, DInos (no transfer), DInos+T. Quantum work paused (D5 deferred).
-- Realism: literature review + calibration stage B (multi-pod sweeps; separate approval) before any final result.
-- Isolation: sim runs pinned to dedicated cores + one busy/quiet determinism check; real-cluster runs in a quiet window.
-- Exploratory W0 R-20261017-015 (old reward) finishes as a pipeline test only; its numbers are not used for claims.
-
-## 2026-10-17 — SLO for the DInos reward from calibration (R-20261017-018)
-SLO = 2 × measured single-pod p95 latency at 50 % offered load (calibration stage B), frozen before any training. Agent
-training under reward=dinos waits for that measurement; 11.98 ms (params.py, model-derived) is not used for results.
-
-## 2026-10-17 — Tuning sandbox for DInos results (M-20261017-137)
-The researcher gives the team full freedom, without per-step approvals, to try anything in the code on a new branch
-`dinos-tuning` (from qrl-dev) until the classical comparison (HPA, DERP, DInos, DInos+T) gives good results close to
-the picture published for DInos; if it does not work, we return to qrl-dev. Guardrails kept by the coordinator:
-tune agents (hyper-parameters, training, architecture, features, bug fixes), not the simulator/reward/SLO (those change
-only from calibration evidence); tuning on train/dev seeds only; final test seeds 20000+ run once with frozen configs.
-Runs go through a one-time "sandbox" approval in launch_run (branch, scope sim, seed ranges, CPU-hour budget).
-Absolute numbers of the old simulator (F1) are not a target; the target is the same qualitative ranking and curves.
+- 2026-10-20 — R-20261020-001 (researcher): DECISIONS.md split into `docs/rules/`; conflicts C1–C6 listed there, awaiting researcher.
+- 2026-10-20 — M-20261020-021 (researcher): contradiction check before adding rules; several cooperating md files allowed. → rules/README.md
+- 2026-10-20 — M-20261020-015 (researcher): wider design latitude (inputs, reward, layers; sim need not match the real cluster), core of the work kept. → rules/experiments.md (C1, C2, C3)
+- 2026-10-20 — M-20261020-013 (researcher): env variants allowed; tuning-loop implementation by engineer with opus, cross-checked. → rules/experiments.md, rules/models.md (C1, C4, C6)
+- 2026-10-19 — M-20261019-048 (researcher): focus on reproducing the DInos picture; no quantum for now. → rules/research.md, rules/paused.md
+- 2026-10-19 — M-20261019-044 (researcher): Sofia paper as a source; DInos wins on disagreement. → rules/research.md
+- 2026-10-19 — M-20261019-037 (researcher): stronger models for the tuning loop, until 2026-10-21. → rules/models.md
+- 2026-10-19 — M-20261019-029 (researcher): per-cycle closeness report. → rules/experiments.md (C5)
+- 2026-10-17 — M-20261017-137 (researcher): tuning sandbox on `dinos-tuning` with guardrails. → rules/experiments.md (C1, C5)
+- 2026-10-17 — R-20261017-018: SLO = 2 × single-pod p95 at 50 % load from calibration stage B. → rules/paused.md (C3)
+- 2026-10-17 — R-20261017-017, council C-20261017-02: training reward = researcher's DInos reward via frozen adapter; classical scope; D5 paused. → rules/experiments.md, rules/paused.md (C2, C3)
+- 2026-10-17 — M-20261017-114/117: venues always carry CORE tier and last-3 acceptance rates. → rules/research.md
+- 2026-10-17 — M-20261017-005/006/007: mutual Claude/Codex fallback; limit messages and sudo tab in dashboard; simulation first, W0 then W1. → rules/models.md, rules/dashboard.md, rules/experiments.md (C4)
+- 2026-10-17 — R-20261017-014: bounded exploratory W0 study; HPA reverse-engineered (M-20261017-068). → rules/archive.md, rules/experiments.md
+- 2026-10-17 — R-20261017-011: IBM Quantum in this paper, inference only. → rules/paused.md
+- 2026-10-17 — R-20261017-008 (D3): workloads W0+W1 train, W2 test, W3 adaptation. → rules/experiments.md (C4)
+- 2026-10-17 — R-20261017-007 (D8): F1 not mentioned in the paper; no DInos sim numbers as comparison points. → rules/research.md
+- 2026-10-17 — R-20261017-006 (D5): screen QC4 + QC1 (paused). → rules/paused.md
+- 2026-10-16 — R-20261016-018: calibration with a stateless Deployment in namespace `qrl-calib` (paused). → rules/paused.md
+- 2026-10-16 — R-20261016-016 + M-20261016-078: model routing, Codex roles, more OpenAI agents. → rules/models.md (C6)
+- 2026-10-16 — R-20261016-013 (D2): Sim v2 design, option 1 of C-20261016-01. → rules/experiments.md, rules/archive.md
+- 2026-10-16 — R-20261016-001 (D9): IBM account exists; no jobs for now. → rules/paused.md
+- 2026-10-16 — handoff standing rules 1–5 and environment facts (D13). → rules/dashboard.md, rules/models.md, rules/security.md, rules/archive.md
+- 2026-10-16 — D12: ChatGPT handoff adopted. → rules/security.md, rules/archive.md
