@@ -27,3 +27,9 @@ Legend: **kept** = carried forward; **dropped** = did not help; **open** = still
   40-60; `P/HPA/environment.py` cpu 30-75, memory 40-65), so his HPA is close to a random walk. That is why it scores
   far below everything. We report it as-is and also a load-based HPA tuned on validation (fair baseline).
 - Closeness % is a progress indicator (rules C5), not a paper result.
+- Naming (researcher, M-20261020-048): `derp` = **his original DERP** — verified one 6-feature observation, no history
+  (`P/dense/doubledeep.py:11,14`, `P/dense/doubledeepfinal.py:29,159`), his network and mechanics (ported verbatim,
+  `tuning/legacy/ddqnagent.py`). `derp_hist10` = **enhanced DERP** (same agent, 10-step flattened history). Both are in
+  every cycle since 9. `mlp_hist10` = dense control with the LSTM's training mechanics (cycle 10b).
+- Researcher, M-20261020-048: keep tuning everything after Claude+Codex discussion; reject what does not produce
+  numbers similar to his.
