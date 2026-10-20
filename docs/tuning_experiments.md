@@ -17,9 +17,9 @@ Legend: **kept** = carried forward; **dropped** = did not help; **open** = still
 | 8 | Conditioning: reward/210, observation scaling, linear-10k epsilon | collapse fixed; DInos+T 490k ~ LSTM 489k > fixed 478k > DERP 461k ~ HPA 459k; 28% (c8_brief.md) | **kept** (conditioning) |
 | 9a | His original `environment.py` (2024-07-16, reward min(capacity,load) - 3 VMs) + variants noise15, multispike, spike300, noise15+multispike | first clear LSTM > DERP >> HPA (orig 87k / 75k / 6.5k) (c9_brief.md) | **kept** (his env) |
 | 9b | Confirmation orig -> spike300 transfer, fresh seeds + traces, pre-registered | DInos+T 100.3k > LSTM 97.5k > DERP-hist 90.4k > DERP 81.5k > HPA-demand 61.4k > his HPA 9.8k; 5/5 criteria; 31% (ratio 1.23x vs 17x) (c9_codex_verdict.md) | **kept** |
-| 9b2 | Robustness: transfer noise15+multispike -> orig | running | open |
-| 10a | Pod startup delay D=5/10 (anticipation matters), 7th feature pending pods, DERP-hist10 | running | open |
-| 10b | Matched dense control (MLP, same mechanics and size as the LSTM), fresh traces 8000-8019 | ready, waits for 10a | open |
+| 9b2 | Robustness: transfer noise15+multispike -> orig, 3 seeds, test6 | DInos+T 96.2k > LSTM 94.9k > DERP-hist 91.5k > DERP 85.7k > HPA-demand 56.9k; transfer-DERP +10.5k, DERP-HPA +28.8k support; transfer-scratch inconclusive (c9b2_summary.json) | **kept** |
+| 10a | Pod startup delay D=5/10 (anticipation matters), 7th feature pending pods, DERP-hist10; screen 3 seeds, test5 | DERP collapses with delay (orig_d10 22.6k, spike300_d10 18.6k) while LSTM holds (62.9k / 59.8k): LSTM/DERP 2.8-3.2x at D=10; orig_d5 LSTM 85.4k > causal_be 68.0k, DERP 68.9k; his HPA negative (c10a_summary.json) | **kept** (orig_d5, orig_d10 to 10b) |
+| 10b | Confirmation on orig_d5 + orig_d10: LSTM, DInos+T, matched MLP, DERP, DERP-hist10, fresh traces 8000-8019, pre-registered (cycles/c10b_prereg.md) | running | open |
 
 ## Notes
 - His HPA (`P/HPA/simpleagent.py:9-14`, verified 2026-10-20): scale up if CPU > 50 **or** memory > 50, else scale down.
