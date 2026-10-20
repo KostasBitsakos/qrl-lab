@@ -50,6 +50,8 @@ import outage  # noqa: E402
 import term_prompt  # noqa: E402
 import banners  # noqa: E402
 import sandbox_view  # noqa: E402
+import res_view  # noqa: E402
+import token_savings  # noqa: E402
 import topology_ui  # noqa: E402
 import changes_view  # noqa: E402
 import models_view  # noqa: E402
@@ -1334,6 +1336,43 @@ if _tab_live(tab_res):  # lazy: hidden tabs do no work
                 st.caption("GPU: δεν υπάρχει NVIDIA GPU στο VM.")
         resources()
         st.caption("Kubernetes: δες την καρτέλα ☸️ Kubernetes.")
+        st.divider()
+        st.subheader("Ποιος χρησιμοποιεί το μηχάνημα")
+
+        @st.cache_data(ttl=20, show_spinner="μέτρηση…")
+        def _usage_snapshot():
+            dd = db()
+            runs = dd.runs(limit=300)
+            return res_view.collect(ROOT, [r for r in runs if r.get("status") == "running"])
+
+        try:
+            snap = _usage_snapshot()
+        except Exception as e:  # noqa: BLE001 - read-only view
+            snap = None
+            st.warning(f"Η ανάλυση δεν είναι διαθέσιμη ({type(e).__name__}).")
+        if snap:
+            its, tot = snap["items"], snap["totals"]
+            df = pd.DataFrame([{"όνομα": i["name"], "κατηγορία": i["category"],
+                                "CPU %": None if i.get("unavailable") else round(i["cpu"], 1),
+                                "μνήμη MiB": None if i.get("unavailable") else round(i["mem"] / 2**20, 1),
+                                "δίσκος MiB": round(i["disk"] / 2**20, 1), "λεπτομέρεια": i.get("detail", "")} for i in its])
+            pc = st.columns(3)
+            for col, (ttl, key, total, unit) in zip(pc, (("CPU", "cpu", tot["cpu"], 1), ("Μνήμη", "mem", tot["mem"], 2**30),
+                                                         ("Δίσκος", "disk", tot["disk"], 2**30))):
+                sh = {k: v for k, v in res_view.shares(its, key).items() if v > 0}
+                meas = sum(sh.values())
+                if key == "disk":   # 'other' = used - measured; free from the filesystem
+                    sh["other"] = sh.get("other", 0) + max(0, tot["disk_used"] - meas)
+                    sh["free"] = max(0, tot["disk"] - tot["disk_used"])
+                else:
+                    sh["free"] = max(0, total - meas)
+                fig = go.Figure(go.Pie(labels=list(sh), values=[v / unit for v in sh.values()], hole=0.35, sort=False))
+                fig.update_layout(title=ttl, height=300, margin=dict(l=0, r=0, t=40, b=0))
+                col.plotly_chart(fig, width="stretch")
+            st.dataframe(df.sort_values(["κατηγορία", "CPU %"], ascending=[True, False]), hide_index=True, width="stretch")
+            for n_ in snap["notes"]:
+                st.caption(n_)
+            st.caption("Τα args των εντολών κρύβονται αν μοιάζουν με token/key/password. Cache ~20 s.")
 
 # ================================================================ files (read-only; NOT in a fragment)
 with tab_files:
@@ -2122,6 +2161,32 @@ if _tab_live(tab_ext):  # lazy: hidden tabs do no work
         for _i in range(0, len(_inst), 3):
             for _col, _it in zip(st.columns(3), _inst[_i:_i + 3]):
                 _col.markdown(installed_view.card_html(_it), unsafe_allow_html=True)
+        st.divider()
+        st.subheader("Εξοικονόμηση tokens (τελευταίες 6 ώρες) — εκτίμηση")
+        st.caption("ΕΚΤΙΜΗΣΗ, όχι μέτρηση. Πραγματικά δεδομένα: πλήθος γεγονότων στο `.lab/events.jsonl` και στα sandbox ledgers. "
+                   "Τα tokens ανά γεγονός είναι **παραδοχές** (πίνακας από κάτω, αποθηκεύονται στο `dashboard/token_savings.json`). "
+                   "Μοντέλο: εξοικονόμηση = Σ γεγονότα × (χωρίς σύστημα − με σύστημα).")
+        _tsp = os.path.join(ROOT, "dashboard", "token_savings.json")
+        _ass = token_savings.load_assumptions(_tsp)
+        _cnt = token_savings.count_events(os.path.join(ROOT, ".lab", "events.jsonl"),
+                                          sandbox_view.ledger_paths(os.path.join(ROOT, ".lab", "sandbox")), time.time() - 6 * 3600)
+        _ts = token_savings.compute(_cnt, _ass)
+        _m = st.columns(3)
+        _m[0].metric("Με το σύστημα (εκτίμηση)", f"{_ts['with']:,}")
+        _m[1].metric("Χωρίς (εκτίμηση)", f"{_ts['without']:,}")
+        _m[2].metric("Εξοικονόμηση (εκτίμηση)", f"{_ts['saved']:,}", f"≈{_ts['pct']:.0f}%")
+        st.dataframe(pd.DataFrame([{"κατηγορία": r["label"], "γεγονότα 6ω": r["n"], "χωρίς (εκτ.)": r["without"],
+                                    "με (εκτ.)": r["with"], "εξοικ. (εκτ.)": r["saved"]} for r in _ts["rows"]]),
+                     hide_index=True, width="stretch")
+        with st.expander("Παραδοχές (tokens ανά γεγονός) — επεξεργάσιμες"):
+            _ed = st.data_editor(pd.DataFrame([{"key": k, "κατηγορία": a["label"], "χωρίς": a["without"], "με": a["with"], "αιτιολόγηση": a["why"]}
+                                               for k, a in _ass.items()]), hide_index=True, width="stretch",
+                                 disabled=["key", "κατηγορία", "αιτιολόγηση"], key="tok_assump")
+            if st.button("Αποθήκευση παραδοχών", key="tok_save"):
+                json.dump({r["key"]: {"without": int(r["χωρίς"]), "with": int(r["με"]), "why": r["αιτιολόγηση"]}
+                           for r in _ed.to_dict("records")}, open(_tsp, "w", encoding="utf-8"), indent=1, ensure_ascii=False)
+                st.rerun()
+        st.caption("Κλήσεις Codex μέσω wrapper (`codex:codex-rescue`) δεν προσμετρώνται διπλά.")
         st.divider()
         st.markdown("Προτάσεις skills/plugins/MCP **μόνο** από το αρχείο `.lab/extensions_catalog.json`, που το γεμίζει "
                     "ο συντονιστής μετά από αναζήτηση. Τίποτα δεν εγκαθίσταται από εδώ· το «Πρόσθεσε» στέλνει αίτημα έγκρισης.")

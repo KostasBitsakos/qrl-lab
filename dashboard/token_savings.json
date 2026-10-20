@@ -1,0 +1,27 @@
+{
+ "subagents": {
+  "without": 6000,
+  "with": 600,
+  "why": "work kept out of the coordinator context; only a ~600-token summary returns"
+ },
+ "codex": {
+  "without": 8000,
+  "with": 800,
+  "why": "review/research done by Codex instead of Claude; Claude only posts and synthesises"
+ },
+ "skills": {
+  "without": 600,
+  "with": 150,
+  "why": "a stored protocol replaces re-explaining the procedure in prompts"
+ },
+ "sandbox_runs": {
+  "without": 1500,
+  "with": 100,
+  "why": "drive_chunks/sum_*.py collect and summarise results instead of an LLM polling loop"
+ },
+ "health_events": {
+  "without": 400,
+  "with": 0,
+  "why": "a script watches health; an LLM check would cost a few hundred tokens"
+ }
+}
