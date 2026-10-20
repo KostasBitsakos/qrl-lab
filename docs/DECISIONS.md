@@ -4,6 +4,7 @@ Newest first, one or two lines per decision. The rules themselves live in [`docs
 (index, precedence, contradiction-check procedure, resolved conflicts). Codex role table: [`docs/rules/models.md`](rules/models.md).
 Before adding a decision, follow the procedure in `docs/rules/README.md` (M-20261020-021).
 
+- 2026-10-20 — M-20261020-027 (researcher): engineer on Opus only until the loop ends 2026-10-21; then routing by resources/task as before. → rules/models.md
 - 2026-10-20 — M-20261020-025 (researcher): conflicts C1–C6 resolved as proposed in M-20261020-024 (later entries win; calibration paused; W1 deferred; closeness = progress indicator; engineer Opus for research code). → rules/README.md
 - 2026-10-20 — R-20261020-001 (researcher): DECISIONS.md split into `docs/rules/`; conflicts C1–C6 listed there, awaiting researcher.
 - 2026-10-20 — M-20261020-021 (researcher): contradiction check before adding rules; several cooperating md files allowed. → rules/README.md
