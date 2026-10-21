@@ -134,6 +134,8 @@ def choose_model(thread):
     else:
         model, effort = SOL_MODEL, SOL_EFFORT
     selected = request.get("req_model")
+    if isinstance(selected, str) and selected.startswith("coordinator:"):
+        selected = selected[len("coordinator:"):]
     legacy = {"haiku": (LUNA_MODEL, LUNA_EFFORT), "sonnet": (SOL_MODEL, SOL_EFFORT),
               "opus": ("gpt-6-astra", "high"),
               "claude-haiku-5-5": (LUNA_MODEL, LUNA_EFFORT), "claude-sonnet-5-5": (SOL_MODEL, SOL_EFFORT),

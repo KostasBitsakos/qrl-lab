@@ -28,10 +28,43 @@ MODEL_CHOICES = {None: AUTO_LABEL, "haiku": "Γρήγορο · Haiku", "sonnet":
                  **{m: f"Claude · {m}" for m in CLAUDE_MODELS},
                  **{m: f"Codex · {m}" for m in ("gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol", "gpt-6-astra",
                                                 "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna")}}
+COORD_PREFIX = "coordinator:"
+COORD_CLAUDE = {"claude-opus-5-5": "Claude Opus 5.5", "claude-sonnet-5-5": "Claude Sonnet 5.5",
+                "claude-haiku-5-5": "Claude Haiku 5.5", "claude-fable-5-1": "Claude Fable 5.1"}
+COORD_CODEX = {"gpt-6-luna": "Codex luna", "gpt-6-sol": "Codex sol", "gpt-6-astra": "Codex astra"}
+COORD_CHOICES = {COORD_PREFIX + k: f"Πάρις με {v}" for k, v in {**COORD_CLAUDE, **COORD_CODEX}.items()}
+MODEL_CHOICES.update(COORD_CHOICES)
+COORD_HELP = ("Το μοντέλο της τρέχουσας συνεδρίας του συντονιστή αλλάζει μόνο από το τερματικό του (/model). "
+              "Αν διαλέξεις «Πάρις με …», ο Πάρις παραλαμβάνει το μήνυμα, δρομολογεί την απάντηση σε εκείνο το "
+              "μοντέλο και το δηλώνει στην απάντηση.")
 CODEX_EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
 
 
+def split_coordinator(model):
+    """('coordinator:x') -> 'x'; anything else unchanged."""
+    m = str(model or "")
+    return m[len(COORD_PREFIX):] if m.startswith(COORD_PREFIX) else model
+
+
+def coordinator_label(identity=None):
+    """Dynamic default option label showing which model the coordinator currently is (pure, from coordinator_identity)."""
+    identity = identity or {}
+    mdl = identity.get("model") or ""
+    if not mdl:
+        return "Πάρις · συντονιστής (τώρα: άγνωστο)"
+    if identity.get("role") == "codex-deputy":
+        return f"Πάρις · συντονιστής (τώρα: Codex {mdl}, αναπληρωτής)"
+    pretty = COORD_CLAUDE.get(mdl) or (mdl if mdl.lower().startswith(("claude", "gpt")) else f"Claude {mdl}")
+    return f"Πάρις · συντονιστής (τώρα: {pretty})"
+
+
+def model_choices(identity=None):
+    """MODEL_CHOICES with the dynamic default label."""
+    return {**MODEL_CHOICES, None: coordinator_label(identity)}
+
+
 def effort_choices(model):
+    model = split_coordinator(model)
     """Explicit Codex routing supports extended efforts; legacy Claude/auto keep their existing choices."""
     if model == "codex" or str(model).startswith("gpt-"):
         return CODEX_EFFORTS[:-1] if model == "codex" or str(model).endswith("-luna") else CODEX_EFFORTS

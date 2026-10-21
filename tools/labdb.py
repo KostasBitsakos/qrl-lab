@@ -28,6 +28,7 @@ CODEX_MODEL_EFFORTS = {model: CODEX_EFFORTS[:-1] if model.endswith("luna") else 
 # Keep historical values readable/sendable while accepting explicit Codex routing.
 CLAUDE_MODELS = ("claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-1")
 REQ_MODELS = ("haiku", "sonnet", "opus", "codex") + CLAUDE_MODELS + CODEX_MODELS
+REQ_MODELS = REQ_MODELS + tuple("coordinator:" + m for m in CLAUDE_MODELS + ("gpt-6-luna", "gpt-6-sol", "gpt-6-astra"))
 REQ_EFFORTS = CODEX_EFFORTS + ("med",)
 PAPER_THREAD_TITLE = "Paper — συγγραφή"
 VENUES_THREAD_TITLE = "Συζήτηση συνεδρίων"
@@ -237,7 +238,8 @@ class LabDB:
             raise LabError(f"Άγνωστο μοντέλο: {req_model}")
         if req_effort is not None and req_effort not in REQ_EFFORTS:
             raise LabError(f"Άγνωστη ένταση: {req_effort}")
-        effective_model = "gpt-6-luna" if req_model == "haiku" else req_model
+        effective_model = req_model[len("coordinator:"):] if str(req_model).startswith("coordinator:") else req_model
+        effective_model = "gpt-6-luna" if effective_model == "haiku" else effective_model
         if effective_model in CODEX_MODEL_EFFORTS and req_effort == "ultra" and req_effort not in CODEX_MODEL_EFFORTS[effective_model]:
             raise LabError(f"Η ένταση ultra δεν υποστηρίζεται από το {req_model}.")
         for given, allowed, what in ((req_writers, PAPER_WRITERS, "συγγραφέας"), (req_reviewers, PAPER_REVIEWERS, "reviewer")):

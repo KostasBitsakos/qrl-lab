@@ -773,7 +773,9 @@ def render_message(m, key="chat"):
             si, sl = MSG_STATUS.get(m["status"], ("", m["status"]))
             extra = f" · {si} {sl}"
         if m["author"] == "researcher" and (m.get("req_model") or m.get("req_effort") not in (None, "med")):
-            extra += f" · 🎛️ {m.get('req_model') or 'auto'}/{m.get('req_effort') or 'med'}"
+            _rm = m.get("req_model") or "auto"
+            _rm = (MODEL_CHOICES.get(_rm) or _rm) if str(_rm).startswith("coordinator:") else _rm
+            extra += f" · 🎛️ {_rm}/{m.get('req_effort') or 'med'}"
         label = f"{name} · {m['model']}" if m.get("model") else name
         st.caption(f"**{label}** · {fmt_ts(m['ts'])} · {KIND_LABEL.get(m['kind'], m['kind'])}"
                    f"{extra} · `{m['id']}`")
@@ -1062,8 +1064,21 @@ with tab_chat:
     kind = st.segmented_control("Τύπος μηνύματος", ["message", "proposal", "code_question"],
                                 format_func=lambda k: KIND_LABEL[k], default="message", key="composer_kind")
     sel_l, sel_r, _sp = st.columns([2, 2, 4])
-    req_model = sel_l.selectbox("Μοντέλο", list(MODEL_CHOICES), format_func=MODEL_CHOICES.get, key="req_model_sel",
-                                help="Ποιο μοντέλο απαντά σε αυτό το μήνυμα. Πάρις = αποφασίζει ο συντονιστής. Η επιλογή αποθηκεύεται "
+    _c = st.session_state.get("_coord_choices")
+    if not _c or time.time() - _c[0] > 30:
+        try:
+            _ev = read_events(400)
+            _dd = db()
+            _cm = [m for t in _dd.threads(8) for m in _dd.thread(t["thread_id"])[-6:] if m["author"] == "codex"]
+            _dd.close()
+            _c = (time.time(), agent_models.model_choices(agent_models.coordinator_identity(_ev, read_health(), messages=_cm)))
+        except Exception:
+            _c = (time.time(), agent_models.model_choices(None))
+        st.session_state["_coord_choices"] = _c
+    _choices = _c[1]
+    req_model = sel_l.selectbox("Μοντέλο", list(_choices), format_func=_choices.get, key="req_model_sel",
+                                help=agent_models.COORD_HELP + " "
+                                     "Ποιο μοντέλο απαντά σε αυτό το μήνυμα. Πάρις = αποφασίζει ο συντονιστής. Η επιλογή αποθηκεύεται "
                                      "μαζί με το μήνυμα (req_model/req_effort).")
     efforts = agent_models.effort_choices(req_model)
     previous_effort = st.session_state.get("req_effort_sel", "medium")
