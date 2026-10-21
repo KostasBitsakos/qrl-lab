@@ -26,8 +26,9 @@ Legend: **kept** = carried forward; **dropped** = did not help; **open** = still
 | 13a | Replication of spike300_d5, 2 fresh seeds (28,29), fresh test9 (cycles/c13a_prereg.md) | DInos+T 88.2k > MLP 86.8k ~ LSTM 86.4k > DERP-hist 74.9k > DERP 58.8k > HPA-demand 47.5k; passes all acceptance; ratio 1.50x (c13_brief.md, c13_codex.md) | **kept** (replicates at n=2) |
 | 14 | Robustness: spike300_d7 (3 seeds), multispike_d5 (2 seeds), test9 reused (cycles/c14_prereg.md) | d7: DInos+T 79.1k > LSTM 77.7k ~ MLP 76.4k > DERP-hist 53.0k > HPA 42.5k > DERP 31.6k; multispike: MLP 99.4k > DInos+T 94.5k > LSTM 90.7k > DERP-hist 68.6k > HPA 62.9k ~ DERP 59.0k; both fail acceptance (iii) (c14_brief.md) | **dropped**; accepted picture is narrow |
 | 15 | 5 seeds per condition, pooled (cycles/c15_prereg.md), test9 | spike300_d5: DInos+T 86.7k > LSTM 82.9k > MLP 79.5k > DERP-hist 69.3k > DERP 64.1k > HPA 47.5k, passes all acceptance (ratio 1.35x, 33%); spike300_d7, multispike_d5 fail (iii) (c15_brief.md) | **kept** spike300_d5 = B1 candidate |
-| 16 | Noise gap: noise15_d5, noise5_d5 (original spike), 3 seeds (cycles/c16_prereg.md) | DERP drops to HPA level (38k/42k), DInos+T 78k/84k, ratio 2.0x, 40%/42%; both fail (iii), noise15 also (i) (c16_brief.md) | open (17 brings both to 5 seeds) |
-| 17 | Last cycle: noise5_d5, noise15_d5 +2 seeds each (cycles/c17_prereg.md) | running | open |
+| 16 | Noise gap: noise15_d5, noise5_d5 (original spike), 3 seeds (cycles/c16_prereg.md) | DERP drops to HPA level, ratio ~2x; both fail (iii) (c16_brief.md) | superseded by 17 |
+| 17 | Noise at n=5 (cycles/c17_prereg.md) | noise5: DInos+T 82.7k, DERP 43.1k ~ HPA 43.3k (inconclusive); noise15: 79.5k vs 38.3k, LSTM ~ fixed; both REJECTED; ratio 1.9-2.1x (c17_brief.md) | **dropped** for B1; noise = stated limit |
+| 18 | Dinos V.2 search, two branches (Opus / astra), successive halving (strategy.md, C-20261021-02/03) | running | open |
 
 ## Notes
 - His HPA (`P/HPA/simpleagent.py:9-14`, verified 2026-10-20): scale up if CPU > 50 **or** memory > 50, else scale down.
