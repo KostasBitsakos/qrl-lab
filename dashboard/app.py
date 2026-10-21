@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 import modreload  # noqa: E402
 import importlib  # noqa: E402
 _LOCAL_MODS = ["labdb", "file_view", "replytext", "k8s_view", "prom_view", "web_terminal", "sudo_ui", "race_view", "brain_view",
-               "perm_store", "ext_catalog", "summarize_runs", "agent_models", "paper_plots", "paper_build", "uploads", "installed_view", "access", "outage", "models_view", "banners", "sandbox_view", "topology_view", "topology_ui", "exp_view", "exp_figs"]
+               "perm_store", "ext_catalog", "summarize_runs", "agent_models", "paper_plots", "paper_build", "uploads", "installed_view", "access", "outage", "models_view", "banners", "sandbox_view", "topology_view", "topology_ui", "exp_view", "exp_figs", "usage_limits"]
 for _n in _LOCAL_MODS:  # first import so they are in sys.modules, then reload those whose file changed
     importlib.import_module(_n)
 modreload.reload_changed(_LOCAL_MODS)
@@ -60,6 +60,7 @@ import paper_plots  # noqa: E402
 import paper_build  # noqa: E402
 import exp_view  # noqa: E402
 import agent_models  # noqa: E402
+import usage_limits  # noqa: E402
 import exp_figs  # noqa: E402
 from uploads import UploadError, attachment_paths  # noqa: E402
 
@@ -411,7 +412,39 @@ HOME_TAB = "💬 Συνομιλία"
 # page load is deliberate: it is the one mechanism that works for every client (phone, tailnet) and clears all params.
 st.sidebar.markdown(f'<a href="./" target="_self" title="Αρχική" style="display:block;width:100%;max-width:250px;'
                     f'margin:0 auto 6px;cursor:pointer">{LOGO_SVG}</a>', unsafe_allow_html=True)
-st.sidebar.markdown("### 🧪 QRL-Lab")
+
+
+@st.cache_resource(show_spinner=False)
+def _claude_scanner():
+    return usage_limits.ClaudeScanner()
+
+
+@st.fragment(run_every=60)
+def usage_rings():
+    """Title + usage-limit rings from local logs only (tools/usage_limits.py); «—» when there is no source."""
+    now = time.time()
+    try:
+        cx = usage_limits.latest_codex(now)
+        cl = _claude_scanner().scan(now)
+    except Exception:  # noqa: BLE001 - a broken log must not break the sidebar
+        cx, cl = [], None
+    a = usage_limits.provider_ring("claude", [cl], now)
+    b = usage_limits.provider_ring("codex", cx, now)
+    st.html('<div style="display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:0 0 4px">'
+            '<span style="font-size:1.35rem;font-weight:700">🧪 QRL-Lab</span>'
+            + usage_limits.ring_html("Claude", a[0], a[1], a[2], "#d97757")
+            + usage_limits.ring_html("ChatGPT/Codex", b[0], b[1], b[2], "#10a37f") + "</div>")
+    offers = usage_limits.load_offers(os.path.join(ROOT, "docs", "free_offers.json"))
+    with st.expander("δωρεάν resets / προσφορές"):
+        for o in offers:
+            st.markdown(f"- **{o['provider']}** · [{o['title']}]({o['url']}) · {o['as_of']}" + (f" — {o['note']}" if o["note"] else ""))
+        if not offers:
+            st.caption("Καμία επαληθευμένη εγγραφή.")
+        st.caption("Οι εγγραφές προστίθενται από τον συντονιστή μετά από επαλήθευση (`docs/free_offers.json`).")
+
+
+with st.sidebar:
+    usage_rings()
 _recent_denied = access.recent(1, max_age=3600)
 if _recent_denied:
     st.sidebar.error(f"🛡️ Απορρίφθηκε πρόσβαση ({_recent_denied[0].get('reason')}) · login: "
