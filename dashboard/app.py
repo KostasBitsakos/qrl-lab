@@ -1592,8 +1592,8 @@ if _tab_live(tab_runs):  # lazy: hidden tabs do no work
                 st.caption("Δεν βρέθηκαν παράμετροι θορύβου/spike για αυτό το variant (άγνωστο).")
         @st.fragment(run_every=3)
         def exp_live():
-            for _col, (_b, _bn, _rel) in zip(st.columns(2), exp_view.BRANCHES):
-                with _col:
+            for _b, _bn, _rel in exp_view.BRANCHES:   # stacked, full width (researcher M-20261021-054)
+                with st.container():
                     exp_live_col(_b, _bn, os.path.join(ROOT, _rel))
         exp_live()
 
