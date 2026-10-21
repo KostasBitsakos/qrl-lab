@@ -33,13 +33,14 @@ GROUPS = {  # key -> (label, neon colour)
     "services": ("Υπηρεσίες lab", "#7CFF4F"),
     "cluster": ("Cluster / έρευνα", "#ffb300"),
     "external": ("Εξωτερικά API / δίκτυο", "#b388ff"),
+    "networks": ("Δίκτυα συστήματος", "#4dd0e1"),
 }
 STATUS_COLOR = {"alive": "#39ff88", "idle": "#6c8cff", "stale": "#ffb020", "down": "#ff3b5c", "unknown": "#8a94a6"}
 
 EDGE_CAT = {"task": "control", "request": "control", "restart": "control", "boot": "control", "start": "control", "status": "control",
             "spawn": "control", "run": "control", "scale": "control", "hosts": "control", "contains": "control",
             "r/w": "data", "labq": "data", "metrics": "data", "datasource": "data", "workload": "data",
-            "API": "api", "https": "api", "watch": "heartbeat"}
+            "API": "api", "https": "api", "watch": "heartbeat", "net": "api"}
 EDGE_CAT_LABEL = {"control": ("έλεγχος / ανάθεση", "#7aa2ff"), "data": ("δεδομένα", "#39ff88"), "api": ("API / δίκτυο", "#ff2bd6"),
                   "heartbeat": ("heartbeat / επίβλεψη", "#ffb020")}
 EDGE_MAIN = {"watch", "r/w", "labq", "request", "API", "https", "spawn", "run", "scale", "metrics", "workload"}
@@ -50,8 +51,11 @@ ICONS = {"coordinator": "♛", "engineer": "⚒", "scholar": "§", "writer": "�
          "dashboard": "◔", "health_watch": "♥", "watchdog": "◉", "terminal": "❯", "labdb": "⛁", "launcher": "➚",
          "boot_recover": "↻", "tailscale": "⌬", "sandbox_runs": "◈", "k8s": "☸", "redis": "⛃", "prometheus": "♨",
          "grafana": "▤", "simulator": "⚛", "anthropic": "☁", "openai": "☁", "researcher": "☻"}
-GROUP_SHAPE = {"agents": "hexagon", "codex": "diamond", "services": "rounded", "cluster": "square", "external": "circle"}
-GROUP_BORDER = {"agents": "solid", "codex": "dashed", "services": "dotted", "cluster": "double", "external": "solid"}
+GROUP_SHAPE = {"agents": "hexagon", "codex": "diamond", "services": "rounded", "cluster": "square", "external": "circle",
+               "networks": "circle"}
+GROUP_BORDER = {"agents": "solid", "codex": "dashed", "services": "dotted", "cluster": "double", "external": "solid",
+                "networks": "dashed"}
+UNKNOWN_GR = "άγνωστο"
 
 # Codex roles: models from docs/DECISIONS.md table (parsed when possible; these are the fallbacks)
 CODEX_ROLES = {
@@ -238,6 +242,218 @@ def k8s_nodes(snap):
     return nodes, links
 
 
+# ------------------------------------------------------------------ edges: why / how (M-20261021-012)
+CODEX_PLUGIN = "~/.claude/plugins/marketplaces/openai-codex/plugins/codex/scripts"
+
+
+def _ts_target(src, local):
+    """'443->http://127.0.0.1:8501' entries whose target contains `local` -> 'https :443 → http://127.0.0.1:8501'."""
+    hits = [x for x in (src.get("tailscale") or []) if local in x]
+    return "; ".join("tailnet https :" + h.replace("->", " → proxy ") for h in hits)
+
+
+def edge_info(s, t, kind, src, groups):
+    """(why, how) of one edge, from what the code/config shows; «άγνωστο» where it does not say. groups: id -> group."""
+    gs, gt = groups.get(s), groups.get(t)
+    if s == "coordinator" and gt == "agents":
+        return ("Ο συντονιστής αναθέτει εργασία (υλοποίηση, έρευνα, runs, κείμενο) στον υπο-πράκτορα.",
+                "Agent tool μέσα στη διεργασία του Claude Code CLI (tmux lab:coordinator)· ο υπο-πράκτορας καλεί το "
+                "Anthropic API μέσω HTTPS.")
+    if s == "coordinator" and gt == "codex":
+        if t == "codex-deputy":
+            return ("Αναπληρωτής όταν το Claude είναι σε όριο χρήσης.",
+                    "tools/deputy.py → subprocess `codex exec --sandbox read-only` (tools/deputy.py:147).")
+        return ("Δεύτερη γνώμη / review / council από το Codex.",
+                "Agent tool (subagent codex:codex-rescue) → node codex-companion.mjs → broker μέσω Unix socket "
+                f"(JSON-RPC, {CODEX_PLUGIN}/lib/app-server.mjs:288) → `codex app-server` με stdin/stdout JSON-RPC "
+                "(app-server.mjs:190).")
+    if gs == "codex" and t == "openai":
+        return ("Το Codex CLI εκτελεί το μοντέλο στο backend της OpenAI (συνδρομή ChatGPT).",
+                "HTTPS από το Codex CLI προς την OpenAI· ακριβές endpoint: άγνωστο.")
+    table = {
+        ("coordinator", "anthropic"): ("Το μοντέλο του συντονιστή τρέχει στο Anthropic.", "HTTPS από το Claude Code CLI."),
+        ("health_watch", "coordinator"): ("Εντοπίζει permission prompts, όρια χρήσης και αδράνεια του συντονιστή.",
+                                          "`tmux capture-pane -p` του παραθύρου lab:coordinator (tools/health_watch.py:107)· "
+                                          "γράφει .lab/health.json και heartbeat στον δίσκο."),
+        ("dashboard", "labdb"): ("Μηνύματα, αποφάσεις, εγκρίσεις, runs.", "SQLite αρχείο .lab/lab.db στον δίσκο (tools/labdb.py)."),
+        ("coordinator", "labdb"): ("Ο συντονιστής διαβάζει/απαντά στα μηνύματα του ερευνητή.",
+                                   "subprocess `python3 tools/labq.py` → SQLite .lab/lab.db."),
+        ("watchdog", "dashboard"): ("Επανεκκίνηση αν το dashboard πέσει.",
+                                    "cron κάθε λεπτό → tools/watchdog.sh → verify_services.py (έλεγχος HTTP) και "
+                                    "`tmux new-window` (tools/watchdog.sh:34)."),
+        ("watchdog", "health_watch"): ("Επανεκκίνηση αν λείπει ή είναι stale.", "`tmux new-window` (tools/watchdog.sh:31)."),
+        ("boot_recover", "watchdog"): ("Μετά από reboot ξαναστήνει το lab.",
+                                       "cron @reboot → tools/boot_recover.sh → tools/start-coordinator.sh (tmux session lab)."),
+        ("tailscale", "dashboard"): ("Πρόσβαση του ερευνητή στο dashboard από browser/κινητό.",
+                                     _ts_target(src, "127.0.0.1:8501") or "tailscale serve → 127.0.0.1:8501 (status: άγνωστο)"),
+        ("tailscale", "terminal"): ("Web terminal από το tailnet.",
+                                    _ts_target(src, "127.0.0.1:8502") or "tailscale serve → 127.0.0.1:8502 (status: άγνωστο)"),
+        ("dashboard", "terminal"): ("Ο ερευνητής ανοίγει shell από το dashboard.",
+                                    "`tmux new-window … tools/web_terminal.py` (tools/web_terminal.py:43)· HTTP/websocket "
+                                    "στο 127.0.0.1:8502 με token."),
+        ("coordinator", "launcher"): ("Εκκίνηση εγκεκριμένων πειραμάτων.",
+                                      "subprocess `python3 tools/launch_run.py` · έλεγχος έγκρισης στο .lab/lab.db."),
+        ("dashboard", "launcher"): ("Κατάσταση sandbox / runs στην καρτέλα Πειράματα.",
+                                    "import launch_run μέσα στη διεργασία του dashboard (sandbox_status) · ανάγνωση .lab/lab.db."),
+        ("launcher", "sandbox_runs"): ("Τα runs των πειραμάτων.",
+                                       "subprocess.Popen με sched_setaffinity σε αποκλειστικούς πυρήνες (tools/launch_run.py, supervise)."),
+        ("launcher", "simulator"): ("Τα πειράματα τρέχουν τον κώδικα προσομοίωσης.", "subprocess (η εντολή του εγκεκριμένου run spec)."),
+        ("simulator", "redis"): ("Ο autoscaler αλλάζει τα pods του Redis.", UNKNOWN_GR),
+        ("prometheus", "simulator"): ("Μετρήσεις προς τον agent.", UNKNOWN_GR),
+        ("researcher", "tailscale"): ("Ο ερευνητής μπαίνει στο lab.", "HTTPS μέσα στο tailnet (WireGuard, διεπαφή tailscale0)."),
+        ("prometheus", "grafana"): ("Το Grafana δείχνει μετρήσεις του Prometheus.",
+                                    "άγνωστο (η ρύθμιση datasource του Grafana δεν βρίσκεται στο ~/qrl-lab)."),
+    }
+    if (s, t) in table:
+        return table[(s, t)]
+    if kind in ("hosts", "contains"):
+        return ("Ιεραρχία αντικειμένων Kubernetes.", "Kubernetes API · `kubectl get` read-only (tools/k8s_view.py:64).")
+    if kind in ("workload", "metrics"):
+        return ("Το workload τρέχει σε αυτό το pod.", "Kubernetes pod (cluster network Calico).")
+    return (kind, UNKNOWN_GR)
+
+
+# ------------------------------------------------------------------ networks of this machine (read-only `ip`)
+def parse_ip_brief(text):
+    """`ip -brief addr` -> [{name, state, addrs}] (veth '@ifN' suffix removed)."""
+    out = []
+    for ln in (text or "").splitlines():
+        p = ln.split()
+        if len(p) >= 2:
+            out.append({"name": p[0].split("@")[0], "state": p[1], "addrs": p[2:]})
+    return out
+
+
+def parse_ip_route(text):
+    """`ip route` -> [{dst, dev, via, src, type}] (type 'blackhole'/'unicast')."""
+    out = []
+    for ln in (text or "").splitlines():
+        p = ln.split()
+        if not p:
+            continue
+        typ = "unicast"
+        if p[0] in ("blackhole", "unreachable", "prohibit"):
+            typ, p = p[0], p[1:]
+        r = {"dst": p[0] if p else "", "type": typ, "dev": None, "via": None, "src": None}
+        for k in ("dev", "via", "src"):
+            if k in p and p.index(k) + 1 < len(p):
+                r[k] = p[p.index(k) + 1]
+        out.append(r)
+    return out
+
+
+def _v4(addrs):
+    return [a for a in addrs if re.fullmatch(r"\d+\.\d+\.\d+\.\d+/\d+", a)]
+
+
+def _in_net(ip, cidr):
+    import ipaddress
+    try:
+        return ipaddress.ip_address(ip) in ipaddress.ip_network(cidr, strict=False)
+    except ValueError:
+        return False
+
+
+def iface_of_ip(ifaces, ip):
+    """Name of the interface whose own IPv4 address (or subnet) holds ip, else None."""
+    for f in ifaces:
+        for a in _v4(f["addrs"]):
+            if a.split("/")[0] == ip:
+                return f["name"]
+    for f in ifaces:
+        for a in _v4(f["addrs"]):
+            if _in_net(ip, a) and not a.endswith("/32"):
+                return f["name"]
+    return None
+
+
+def network_nodes(ifaces, routes, k8s_snap=None, ts=None):
+    """Nodes for the networks of this machine + (s, t, kind, why, how) edges to the components that use them.
+    Calico veths (cali*) and tunl0 are one 'Calico' node; Kubernetes Service ClusterIPs (from the read-only snapshot,
+    if any) one node. Nothing is guessed: a link exists only when an address/port in code, config or `ip` output ties
+    the component to that interface."""
+    if not ifaces:
+        return [], []
+    nodes, links = [], []
+    by = {f["name"]: f for f in ifaces}
+    defaults = sorted({r["dev"] for r in routes if r["dst"] == "default" and r["dev"]})
+    cali = [f for f in ifaces if f["name"].startswith("cali")]
+    blocks = [r["dst"] for r in routes if r["type"] == "blackhole" and r["dst"].startswith("10.")]
+    for f in ifaces:
+        n = f["name"]
+        if n.startswith("cali") or n == "tunl0":
+            continue
+        v4 = _v4(f["addrs"])
+        desc = {"lo": "Loopback: υπηρεσίες που ακούν μόνο τοπικά.", "tailscale0": "Tailscale (WireGuard) tailnet.",
+                "docker0": "Docker bridge."}.get(n, "Διεπαφή δικτύου της VM.")
+        if n in defaults:
+            desc += " Προεπιλεγμένη διαδρομή (internet) μέσω " + ", ".join(
+                r["via"] for r in routes if r["dst"] == "default" and r["dev"] == n and r["via"]) + "."
+        nodes.append(_node(f"net:{n}", n, "networks", f"{', '.join(v4) or 'χωρίς IPv4'} · {f['state']}", desc,
+                           "down" if f["state"] == "DOWN" else "alive"))
+    if cali or "tunl0" in by:
+        t4 = _v4(by.get("tunl0", {}).get("addrs", []))
+        nodes.append(_node("net:calico", f"Calico ({len(cali)} veth)", "networks",
+                           "pod network · block " + (", ".join(blocks) or UNKNOWN_GR) + (f" · tunl0 {t4[0]}" if t4 else ""),
+                           "Δίκτυο pods του Kubernetes (Calico CNI: διεπαφές cali*, IPIP tunl0, block από `ip route` proto bird).",
+                           "alive"))
+    import ipaddress
+    items = ((k8s_snap or {}).get("data") or {}).get("items", [])
+    svc_ips, svc_names = [], []
+    for it in items:
+        if it.get("kind") == "Service":
+            ip = (it.get("spec") or {}).get("clusterIP")
+            if ip and ip != "None":
+                svc_ips.append(ip)
+                svc_names.append((it.get("metadata") or {}).get("name", ""))
+    if svc_ips:
+        srt = sorted(svc_ips, key=ipaddress.ip_address)
+        nodes.append(_node("net:k8s-svc", f"k8s Services ({len(svc_ips)})", "networks",
+                           f"ClusterIP {srt[0]} … {srt[-1]} (CIDR: άγνωστο)",
+                           "Εικονικές διευθύνσεις Services (kube-proxy)· το service CIDR δεν φαίνεται χωρίς τη ρύθμιση του apiserver.",
+                           "alive"))
+    ids = {n["id"] for n in nodes}
+
+    def L(s, t, why, how):
+        if t in ids:
+            links.append((s, t, "net", why, how))
+    L("dashboard", "net:lo", "Το dashboard ακούει μόνο τοπικά.", "Streamlit 127.0.0.1:8501 (.streamlit/config.toml).")
+    L("terminal", "net:lo", "Το web terminal ακούει μόνο τοπικά.", "HTTP/websocket 127.0.0.1:8502 (tools/web_terminal.py:18-19).")
+    L("tailscale", "net:tailscale0", "Το tailnet περνά από τη διεπαφή tailscale0.",
+      "tailscaled· serve: " + ("; ".join(ts or []) or UNKNOWN_GR))
+    L("researcher", "net:tailscale0", "Ο ερευνητής φτάνει στη VM μέσω tailnet.", "WireGuard (Tailscale) → tailscale0.")
+    pr = iface_of_ip(ifaces, "10.0.1.28")
+    if pr:
+        L("prometheus", f"net:{pr}", "Το dashboard και το tailscale serve διαβάζουν το Prometheus.",
+          "NodePort http://10.0.1.28:30000 (tools/prom_view.py:17; tailscale serve :8445).")
+        L("grafana", f"net:{pr}", "Το tailscale serve δημοσιεύει το Grafana.", "NodePort http://10.0.1.28:32000 (tailscale serve :8444).")
+    L("grafana", "net:lo", "Το iframe του dashboard.", "http://localhost:32000 (QRL_GRAFANA_URL default, dashboard/app.py).")
+    for it in ((k8s_snap or {}).get("data") or {}).get("items", []):
+        if it.get("kind") == "Node":
+            nm = it["metadata"]["name"]
+            for a in (it.get("status") or {}).get("addresses", []):
+                if a.get("type") == "InternalIP":
+                    f = iface_of_ip(ifaces, a.get("address", ""))
+                    if f:
+                        L(f"node:{nm}", f"net:{f}", "Η InternalIP του Kubernetes node.",
+                          f"InternalIP {a['address']} (διεπαφή {f}, `kubectl get nodes`).")
+    pod_nets = blocks + [r["dst"] for r in routes if (r["dev"] or "").startswith("cali")]
+    for nid in ("redis", "prometheus", "grafana"):
+        ips = sorted({(it.get("status") or {}).get("podIP") for it in items if it.get("kind") == "Pod"
+                      and nid in (it.get("metadata") or {}).get("name", "").lower()} - {None})
+        onp = [ip for ip in ips if any(_in_net(ip, c) for c in pod_nets)]
+        if onp:
+            L(nid, "net:calico", "Τα pods του επικοινωνούν στο pod network.",
+              f"Calico CNI · pod IP {', '.join(onp[:4])}{' …' if len(onp) > 4 else ''} (`kubectl get pods`, `ip route`).")
+    rs = [n for n in svc_names if n.startswith("redis")]
+    if rs:
+        L("redis", "net:k8s-svc", "Οι clients βρίσκουν το Redis μέσω Service.", "ClusterIP Services " + ", ".join(rs) + ".")
+    for d in defaults:
+        L("anthropic", f"net:{d}", "Έξοδος προς το internet.", f"προεπιλεγμένη διαδρομή μέσω {d} (`ip route`).")
+        L("openai", f"net:{d}", "Έξοδος προς το internet.", f"προεπιλεγμένη διαδρομή μέσω {d} (`ip route`).")
+    return nodes, links
+
+
 def build_inventory(src):
     """src keys (all optional, missing = unknown): claude_roles, decisions_roles, routing, active (set of roles),
     coord_alive(bool|None), health{state,checked,codex}, hb_age, dashboard_ok, terminal_ok, cron_lines, tmux_windows,
@@ -350,14 +566,24 @@ def build_inventory(src):
               "Ο ερευνητής: στέλνει μηνύματα, εγκρίνει, ορίζει routing.", "unknown"),
     ]
     links += [("coordinator", "anthropic", "API"), ("researcher", "tailscale", "https"), ("prometheus", "grafana", "datasource")]
+    nnodes, nlinks = network_nodes(src.get("ifaces") or [], src.get("routes") or [], src.get("k8s"), src.get("tailscale"))
+    nodes += nnodes
+    links += nlinks
     for n in nodes:
         i = n["id"]
         n["icon"] = ICONS.get(i) or ("▦" if i.startswith("ns:") else "▢" if i.startswith("pod:") else "▣" if i.startswith("node:") else "●")
         n["shape"] = GROUP_SHAPE.get(n["group"], "circle")
     names = {n["id"] for n in nodes}
-    links = [{"source": s, "target": t, "kind": k, "cat": EDGE_CAT.get(k, "control"),
-              "main": k in EDGE_MAIN and not (k == "API" and s != "coordinator")}
-             for s, t, k in links if s in names and t in names]
+    groups = {n["id"]: n["group"] for n in nodes}
+    out = []
+    for ln in links:
+        s, t, k = ln[:3]
+        if s not in names or t not in names:
+            continue
+        why, how = ln[3:5] if len(ln) >= 5 else edge_info(s, t, k, src, groups)
+        out.append({"source": s, "target": t, "kind": k, "cat": EDGE_CAT.get(k, "control"), "why": why, "how": how,
+                    "main": k in EDGE_MAIN and not (k == "API" and s != "coordinator")})
+    links = out
     return {"nodes": nodes, "links": links, "groups": {k: {"label": v[0], "color": v[1]} for k, v in GROUPS.items()},
             "borders": GROUP_BORDER, "status_colors": STATUS_COLOR, "edge_cats": {k: {"label": v[0], "color": v[1]} for k, v in EDGE_CAT_LABEL.items()}, "now": src.get("now")}
 
@@ -470,6 +696,10 @@ def collect_sources(root=None, now=None):
         rc2, o = _run(["tailscale", "serve", "status"])
         return parse_tailscale(o) if rc2 == 0 else []
     src["tailscale"] = _cached("ts", 60, ts, now)
+    rc3, o3 = _cached("ipa", 60, lambda: _run(["ip", "-brief", "addr"]), now)
+    src["ifaces"] = parse_ip_brief(o3) if rc3 == 0 else []
+    rc4, o4 = _cached("ipr", 60, lambda: _run(["ip", "route"]), now)
+    src["routes"] = parse_ip_route(o4) if rc4 == 0 else []
     runs = []
     for p in sorted(glob.glob(os.path.join(lab, "sandbox", "*.ledger.jsonl")))[-3:]:
         state = {}
@@ -509,21 +739,23 @@ _PAGE = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport
 <style>
 html,body{margin:0;height:100%;background:radial-gradient(ellipse at center,#0b1030 0%,#03040c 80%);font-family:system-ui,sans-serif;color:#cfe;overflow:hidden}
 #g{position:absolute;inset:0}
-#lab{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+#lab{position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:1}
+.scene-tooltip,.float-tooltip-kap,.graph-tooltip{z-index:20!important}
 .gb{position:absolute;left:0;top:0;border:1px solid;border-radius:14px;pointer-events:none;will-change:transform}
 .gi{position:absolute;left:0;top:0;pointer-events:none;font:700 15px 'DejaVu Sans',sans-serif;color:#03061a;margin:-9px 0 0 -8px;width:16px;text-align:center;will-change:transform}
 .gt{position:absolute;left:10px;top:6px;font-size:15px;font-weight:700;letter-spacing:.5px;text-shadow:0 0 6px #000}
 #bt{position:absolute;left:8px;top:8px;z-index:6;display:flex;gap:6px}
 #bt button{background:#050818dd;color:#cfe;border:1px solid #3af;border-radius:8px;padding:5px 9px;font-size:12px}
-.nl{position:absolute;left:0;top:0;white-space:nowrap;font-size:12px;line-height:1.15;padding:1px 5px;border-radius:5px;background:#03061acc;border:1px solid;text-shadow:0 0 4px #000;will-change:transform}
+.nl{position:absolute;left:0;top:0;white-space:nowrap;font-size:12px;line-height:1.15;padding:1px 5px;border-radius:5px;background:#03061aee;border:1px solid;text-shadow:0 0 4px #000;will-change:transform}
 .nl small{display:block;font-size:9px;opacity:.7}
+.nl.cmp small{display:none}
 .nl i{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:4px;animation:hb var(--p,3s) ease-in-out infinite}
 @keyframes hb{0%,100%{transform:scale(1);opacity:.6}50%{transform:scale(1.7);opacity:1}}
 #leg{position:absolute;right:6px;top:6px;max-height:70vh;overflow:auto;background:#050818cc;border:1px solid #234;border-radius:8px;padding:5px 7px;font-size:10px;max-width:42vw;z-index:5}
 #leg i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;box-shadow:0 0 6px currentColor}
 #info{position:absolute;left:8px;right:8px;bottom:8px;background:#050818ee;border:1px solid #2a4;border-radius:10px;padding:8px 10px;font-size:12px;z-index:5;display:none}
 #err{position:absolute;inset:0;display:none;align-items:center;justify-content:center;text-align:center;padding:20px;color:#ff8a9c;font-size:15px;z-index:9}
-.tip{background:#050818f0;border:1px solid #3af;border-radius:8px;padding:6px 9px;font-size:12px;max-width:260px;line-height:1.35}
+.tip{background:#050818f0;border:1px solid #3af;border-radius:8px;padding:6px 9px;font-size:12px;max-width:340px;line-height:1.35;white-space:normal}
 .tip b{color:#fff}.k{color:#7ad}
 </style></head><body><div id="g"></div><div id="gbx"></div><div id="lab"></div><div id="ico"></div><div id="bt"><button id="bl">Ετικέτες</button><button id="bi">Υπόμνημα</button></div><div id="leg"></div><div id="info"></div><div id="err"></div>
 <script>
@@ -545,7 +777,7 @@ const leg=document.getElementById('leg');
 leg.innerHTML='<b>Ομάδες</b><br>'+Object.values(D.groups).map(g=>`<i style="color:${g.color};background:${g.color}"></i>${esc(g.label)}`).join('<br>')
  +'<br><b>Κατάσταση</b> (χρώμα κόμβου)<br>'+Object.keys(SC).map(s=>`<i style="color:${SC[s]};background:${SC[s]}"></i>${s}`).join(' ')
  +'<br><b>Ακμές</b><br>'+Object.values(EC).map(e=>`<i style="color:${e.color};background:${e.color}"></i>${esc(e.label)}`).join('<br>')
- +'<br><b>Σχήματα</b>: εξάγωνο = Claude · ρόμβος = Codex · στρογγυλεμένο = υπηρεσίες · τετράγωνο = cluster · κύκλος = εξωτερικά<br><span style="opacity:.7">έντονη = κύρια ροή · αχνή = δευτερεύουσα · παλμός = heartbeat · κλικ στο «ns …» ανοίγει τα pods</span>'
+ +'<br><b>Σχήματα</b>: εξάγωνο = Claude · ρόμβος = Codex · στρογγυλεμένο = υπηρεσίες · τετράγωνο = cluster · κύκλος = εξωτερικά<br><span style="opacity:.7">έντονη = κύρια ροή · αχνή = δευτερεύουσα · παλμός = heartbeat · κλικ στο «ns …» ανοίγει τα pods · δείκτης πάνω σε ακμή = γιατί/πώς επικοινωνούν</span>'
  +(use3d?'':'<br><b style="color:#ffb020">Λειτουργία 2D (χωρίς WebGL) — για 3D ενεργοποίησε το hardware acceleration στον browser</b>');
 leg.style.display='none';
 document.getElementById('bi').onclick=()=>{leg.style.display=leg.style.display==='none'?'block':'none'};
@@ -554,6 +786,9 @@ function tip(n){return `<div class="tip"><b>${esc(n.label)}</b><br>${esc(n.desc)
  +`<br><span class="k">κατάσταση:</span> <span style="color:${SC[n.status]}">${esc(n.status)}</span>`
  +(n.hb!=null?`<br><span class="k">heartbeat:</span> ${n.hb}s`:'')+(n.extra?`<br>${esc(n.extra)}`:'')+'</div>';}
 const nodes=D.nodes.map(n=>Object.assign({},n)), idx={};nodes.forEach(n=>idx[n.id]=n);
+function ltip(l){const a=l.source.id||l.source,b=l.target.id||l.target,s=idx[a]||{},t=idx[b]||{};
+ return `<div class="tip"><b>${esc(s.label||a)} → ${esc(t.label||b)}</b> <span class="k">(${esc(l.kind)})</span>`
+ +`<br><span class="k">γιατί:</span> ${esc(l.why||'άγνωστο')}<br><span class="k">πώς:</span> ${esc(l.how||'άγνωστο')}</div>`}
 const short=s=>{s=String(s).split(/ [·(—]/)[0];return s.length>28?s.slice(0,27)+'…':s};
 const trunc=(s,m)=>s.length>m?s.slice(0,m-1)+'…':s;
 const period=n=>n.hb==null?(n.status==='alive'?2.4:(n.status==='idle'?5:1.2)):Math.min(8,.8+n.hb/30);
@@ -575,7 +810,7 @@ function layout(){
  return{W,H,vis}}
 let LAY=layout();
 function visLinks(){const seen={},out=[];const v=id=>{let n=idx[id];if(!n)return null;if(!isVis(n))n=idx[n.parent];return n?n.id:null};
- D.links.forEach(l=>{const s=v(l.source),t=v(l.target);if(!s||!t||s===t)return;const key=s+'|'+t+'|'+l.kind;if(seen[key])return;seen[key]=1;out.push({source:s,target:t,kind:l.kind,cat:l.cat||'control',main:!!l.main})});return out}
+ D.links.forEach(l=>{const s=v(l.source),t=v(l.target);if(!s||!t||s===t)return;const key=s+'|'+t+'|'+l.kind;if(seen[key])return;seen[key]=1;out.push({source:s,target:t,kind:l.kind,cat:l.cat||'control',main:!!l.main,why:l.why,how:l.how})});return out}
 let LINKS=visLinks();
 let hover=null,sel=null;
 const focus=()=>hover||sel;
@@ -601,7 +836,7 @@ if(use3d){
   .nodeLabel(tip).warmupTicks(2).cooldownTicks(2)
   .linkColor(linkCol).linkWidth(l=>NB&&litLink(l)?1.6:.5).linkCurvature(.12).linkOpacity(1)
   .linkDirectionalParticles(l=>(NB?litLink(l):l.main)?(l.cat==='api'?3:2):0).linkDirectionalParticleWidth(2.2).linkDirectionalParticleSpeed(.006)
-  .linkDirectionalParticleColor(l=>EC[l.cat].color)
+  .linkDirectionalParticleColor(l=>EC[l.cat].color).linkLabel(ltip).linkHoverPrecision(6)
   .onNodeHover(n=>{hover=n;NB=nb();restyle()}).onNodeClick(select).onBackgroundClick(()=>select(null));
  size(G);addEventListener('resize',()=>{size(G);fit()});
  G.controls().autoRotate=false;
@@ -615,10 +850,22 @@ if(use3d){
  [100,800,2500].forEach(t=>setTimeout(fit,t));
  (function tick(){requestAnimationFrame(tick);const w=window.innerWidth,h=window.innerHeight,cam=G.camera().position,tg=G.controls().target;
   const close=cam.distanceTo(tg)<dist*.62;
+  const cand=[],placed=[],f=focus();
   nodes.forEach(n=>{if(!isVis(n)){n._el.style.display='none';n._ic.style.display='none';return}const c=G.graph2ScreenCoords(n.x,n.y,n.z);
-   const vis=c&&c.x>-30&&c.x<w+30&&c.y>-30&&c.y<h+30;n._ic.style.display=vis?'block':'none';if(vis){n._ic.style.transform=`translate(${c.x}px,${c.y}px)`;n._ic.style.opacity=lit(n)?1:.2}
+   const vis=c&&c.x>-30&&c.x<w+30&&c.y>-30&&c.y<h+30;n._ic.style.display=vis?'block':'none';if(vis){n._ic.style.transform=`translate(${c.x}px,${c.y}px)`;n._ic.style.opacity=lit(n)?1:.2;placed.push({x:c.x-8,y:c.y-9,w:16,h:18,id:n.id})}
    const on=c&&c.x>-80&&c.x<w+80&&c.y>-30&&c.y<h+30&&(showAll||close||(NB&&NB.has(n.id)));
-   n._el.style.display=on?'block':'none';if(on){n._el.style.transform=`translate(${c.x+8}px,${c.y-10}px)`;n._el.style.opacity=lit(n)?1:.25}});
+   if(on)cand.push({n,c});else n._el.style.display='none'});
+  // labels never overlap (M-20261021-012): focus first, then highlighted, then the rest; each tries 6 positions around
+  // its node and is hidden if all collide; while hovering, neighbours show only their name (role line hidden)
+  const pri=n=>n===f?3:(NB&&NB.has(n.id)?2:1);cand.sort((a,b)=>pri(b.n)-pri(a.n));
+  cand.forEach(({n,c})=>{const el=n._el,cmp=!!(f&&n!==f&&NB);if(el._cmp!==cmp||el._w==null){el.classList.toggle('cmp',cmp);el._cmp=cmp;el.style.display='block';el._w=el.offsetWidth;el._h=el.offsetHeight}
+   const W=el._w,H=el._h,offs=[[8,-10],[8,9],[-W-8,-10],[-W/2,-H-11],[-W/2,11],[-W-8,9]];let ok=null;
+   for(const pass of [0,1]){for(const o of offs){const r={x:c.x+o[0],y:c.y+o[1],w:W,h:H};
+     if(!pass&&(r.x<2||r.x+W>w-2||r.y<2||r.y+H>h-2))continue;
+     if(!placed.some(p=>p.id!==n.id&&r.x<p.x+p.w&&r.x+r.w>p.x&&r.y<p.y+p.h&&r.y+r.h>p.y)){ok=r;break}}if(ok)break}
+   if(!ok&&n===f)ok={x:c.x+8,y:c.y-10,w:W,h:H};
+   if(!ok){el.style.display='none';return}
+   placed.push(ok);el.style.display='block';el.style.transform=`translate(${ok.x}px,${ok.y}px)`;el.style.opacity=lit(n)?1:.25;el.style.zIndex=n===f?3:(lit(n)?2:1)});
   keys.forEach(k=>{const b=boxes[k],d=gdiv[k];if(!b){d.style.display='none';return}
    const P=[[b.x,-b.y],[b.x+b.w,-b.y],[b.x,-(b.y+b.h)],[b.x+b.w,-(b.y+b.h)]].map(q=>G.graph2ScreenCoords(q[0],q[1],b.z));
    const x0=Math.min(...P.map(q=>q.x)),x1=Math.max(...P.map(q=>q.x)),y0=Math.min(...P.map(q=>q.y)),y1=Math.max(...P.map(q=>q.y));
@@ -637,7 +884,7 @@ if(use3d){
   G=ForceGraph()(el).backgroundColor('rgba(0,0,0,0)').graphData({nodes:LAY.vis,links:LINKS}).nodeLabel(tip).cooldownTicks(0)
    .linkColor(linkCol).linkWidth(l=>NB&&litLink(l)?2.2:1).linkCurvature(.14).linkLineDash(l=>l.cat==='api'?[6,4]:(l.cat==='heartbeat'?[2,3]:null))
    .linkDirectionalParticles(l=>(NB?litLink(l):l.main)?(l.cat==='api'?3:2):0).linkDirectionalParticleWidth(3).linkDirectionalParticleSpeed(.006)
-   .linkDirectionalParticleColor(l=>EC[l.cat].color)
+   .linkDirectionalParticleColor(l=>EC[l.cat].color).linkLabel(ltip).linkHoverPrecision(6)
    .onRenderFramePre((ctx,k)=>{keys.forEach(kk=>{const b=boxes[kk];if(!b)return;ctx.save();rr(ctx,b.x,b.y,b.w,b.h,18);ctx.fillStyle=GC[kk]+'12';ctx.fill();ctx.strokeStyle=GC[kk]+'99';ctx.lineWidth=1.5/k;const bs=(D.borders||{})[kk];ctx.setLineDash(bs==='dashed'?[10/k,6/k]:bs==='dotted'?[2/k,5/k]:[]);if(bs==='double')ctx.lineWidth=3/k;ctx.stroke();if(bs==='double'){ctx.setLineDash([]);rr(ctx,b.x+6,b.y+6,b.w-12,b.h-12,13);ctx.lineWidth=1/k;ctx.stroke()}
      ctx.font='bold '+Math.min(26,Math.max(15,15/k))+'px sans-serif';ctx.fillStyle=GC[kk];ctx.fillText(GL[kk],b.x+14,b.y+30);ctx.restore()})})
    .nodeCanvasObject((n,ctx,k)=>{const r=n.id==='coordinator'?13:(n.id.startsWith('ns:')?11:10),t=Date.now()/1000,p=period(n),f=(t%p)/p,col=SC[n.status]||SC.unknown,on=lit(n);

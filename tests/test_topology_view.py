@@ -94,6 +94,73 @@ def test_every_node_has_icon_and_shape():
     assert by["engineer"]["shape"] == "hexagon" and by["codex-quick"]["shape"] == "diamond" and by["coordinator"]["icon"] == "♛"
 
 
+IP_BRIEF = """lo               UNKNOWN        127.0.0.1/8 ::1/128
+ens4             UP             10.0.1.28/16 fe80::1/64
+tailscale0       UNKNOWN        100.98.24.6/32 fd7a::1/128
+docker0          DOWN           172.17.0.1/16
+calia951c370842@if3 UP             fe80::ecee:eeff:feee:eeee/64
+tunl0@NONE       UNKNOWN        10.244.37.128/32
+"""
+IP_ROUTE = """default via 10.0.0.10 dev ens4 proto dhcp src 10.0.1.28 metric 100
+10.0.0.0/16 dev ens4 proto kernel scope link src 10.0.1.28
+blackhole 10.244.37.128/26 proto bird
+10.244.37.168 dev calia951c370842 scope link
+172.17.0.0/16 dev docker0 proto kernel scope link src 172.17.0.1 linkdown
+"""
+K8S = {"up": True, "context": "ctx", "data": {"items": [
+    {"kind": "Node", "metadata": {"name": "n1"}, "status": {"conditions": [{"type": "Ready", "status": "True"}],
+                                                          "addresses": [{"type": "InternalIP", "address": "100.98.24.6"}]}},
+    {"kind": "Pod", "metadata": {"name": "grafana-6d8f9c7b5d-abcde", "namespace": "monitoring"},
+     "status": {"phase": "Running", "podIP": "10.244.37.168"}, "spec": {"nodeName": "n1"}},
+    {"kind": "Service", "metadata": {"name": "redis-cluster-service"}, "spec": {"clusterIP": "10.109.35.136"}},
+    {"kind": "Service", "metadata": {"name": "kubernetes"}, "spec": {"clusterIP": "10.96.0.1"}},
+    {"kind": "Service", "metadata": {"name": "headless"}, "spec": {"clusterIP": "None"}}]}}
+
+
+def test_ip_parsers():
+    f = tv.parse_ip_brief(IP_BRIEF)
+    assert [x["name"] for x in f] == ["lo", "ens4", "tailscale0", "docker0", "calia951c370842", "tunl0"]
+    r = tv.parse_ip_route(IP_ROUTE)
+    assert r[0] == {"dst": "default", "type": "unicast", "dev": "ens4", "via": "10.0.0.10", "src": "10.0.1.28"}
+    assert r[2]["type"] == "blackhole" and r[2]["dst"] == "10.244.37.128/26" and r[2]["dev"] is None
+    assert tv.iface_of_ip(f, "10.0.1.28") == "ens4" and tv.iface_of_ip(f, "10.0.5.5") == "ens4"
+    assert tv.iface_of_ip(f, "100.98.24.6") == "tailscale0" and tv.iface_of_ip(f, "8.8.8.8") is None
+
+
+def test_network_nodes_and_links():
+    f, r = tv.parse_ip_brief(IP_BRIEF), tv.parse_ip_route(IP_ROUTE)
+    nodes, links = tv.network_nodes(f, r, K8S, ["443->http://127.0.0.1:8501"])
+    ids = {n["id"] for n in nodes}
+    assert ids == {"net:lo", "net:ens4", "net:tailscale0", "net:docker0", "net:calico", "net:k8s-svc"}
+    by = {n["id"]: n for n in nodes}
+    assert by["net:docker0"]["status"] == "down" and "10.244.37.128/26" in by["net:calico"]["runs_as"]
+    assert "10.96.0.1 … 10.109.35.136" in by["net:k8s-svc"]["runs_as"]      # numeric, not string, order
+    L = {(s, t): (why, how) for s, t, k, why, how in links}
+    assert ("dashboard", "net:lo") in L and "127.0.0.1:8501" in L[("dashboard", "net:lo")][1]
+    assert ("node:n1", "net:tailscale0") in L and ("grafana", "net:calico") in L
+    assert ("redis", "net:calico") not in L            # no redis pod in the snapshot -> no guessed link
+    assert ("redis", "net:k8s-svc") in L and "redis-cluster-service" in L[("redis", "net:k8s-svc")][1]
+    assert ("openai", "net:ens4") in L and ("openai", "net:docker0") not in L
+    assert tv.network_nodes([], [], None) == ([], [])
+
+
+def test_every_edge_has_why_and_how():
+    src = {"claude_roles": tv.claude_roles(mkroot()), "k8s": K8S, "ifaces": tv.parse_ip_brief(IP_BRIEF),
+           "routes": tv.parse_ip_route(IP_ROUTE), "tailscale": ["443->http://127.0.0.1:8501"]}
+    inv = tv.build_inventory(src)
+    assert any(n["group"] == "networks" for n in inv["nodes"])
+    for l in inv["links"]:
+        assert l["why"] and l["how"], l
+    by = {(l["source"], l["target"]): l for l in inv["links"]}
+    assert "443 → proxy http://127.0.0.1:8501" in by[("tailscale", "dashboard")]["how"]
+    assert by[("tailscale", "terminal")]["how"].endswith("(status: άγνωστο)")
+    assert by[("simulator", "redis")]["how"] == "άγνωστο"
+    assert "Unix socket" in by[("coordinator", "codex-reviewer")]["how"]
+    assert "codex exec" in by[("coordinator", "codex-deputy")]["how"]
+    page = tv.render(inv)
+    assert "linkLabel(ltip)" in page and "classList.toggle('cmp'" in page
+
+
 if __name__ == "__main__":  # noqa
     for k, v in list(globals().items()):
         if k.startswith("test_"):
