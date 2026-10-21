@@ -1430,6 +1430,14 @@ def _sandbox_ledgers():
             for pth in paths]
 
 
+def _runs_all():
+    _d = db()
+    try:
+        return _d.runs()
+    finally:
+        _d.close()
+
+
 def _exp_overview():
     """Gauge: latest cycle closeness, forecast, runs left in the loop (reads files; launcher status read-only)."""
     hist = exp_view.load_history(EXP_HISTORY) or exp_view.SEED_HISTORY
@@ -1515,46 +1523,6 @@ if _tab_live(tab_runs):  # lazy: hidden tabs do no work
             st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch",
                          column_config={"πρόοδος": st.column_config.ProgressColumn("πρόοδος", min_value=0, max_value=1,
                                                                                    format="percent")})
-            # metrics
-            ids = [r["run_id"] for r in runs]
-            chosen = st.multiselect("Σύγκριση runs (μέχρι 8)", ids, default=ids[:2], max_selections=8, key="runs_sel")
-            series = {}
-            keys = set()
-            for rid in chosen:
-                run = next(r for r in runs if r["run_id"] == rid)
-                path = os.path.join(run["run_dir"], "metrics.jsonl")
-                if os.path.exists(path):
-                    recs = []
-                    with open(path, encoding="utf-8") as f:
-                        for line in f:
-                            try:
-                                recs.append(json.loads(line))
-                            except json.JSONDecodeError:
-                                pass
-                    if recs:
-                        df = pd.DataFrame(recs)
-                        series[rid] = df
-                        keys |= {c for c in df.columns if c not in ("step", "ts") and pd.api.types.is_numeric_dtype(df[c])}
-            if not series:
-                st.caption("Τα επιλεγμένα runs δεν έχουν ακόμη `metrics.jsonl`.")
-                return
-            mlist = sorted(keys)
-            metric = st.selectbox("Μετρική", mlist, index=mlist.index("reward") if "reward" in mlist else 0,
-                                  key="runs_metric")
-            palette = [v[1] for v in AGENTS.values()]
-            fig = go.Figure()
-            for rid in chosen:  # colour by position in the run list (stable), never by rank of the value
-                if rid in series and metric in series[rid]:
-                    df = series[rid]
-                    x = df["step"] if "step" in df else df.index
-                    fig.add_trace(go.Scatter(x=x, y=df[metric], mode="lines", name=rid,
-                                             line=dict(width=2, color=palette[ids.index(rid) % len(palette)])))
-            fig.update_layout(height=380, margin=dict(l=10, r=10, t=10, b=30), hovermode="x unified",
-                              legend=dict(orientation="h", y=-0.2), plot_bgcolor="rgba(0,0,0,0)",
-                              paper_bgcolor="rgba(0,0,0,0)", xaxis_title="step", yaxis_title=metric)
-            fig.update_xaxes(gridcolor="rgba(137,135,129,0.25)")
-            fig.update_yaxes(gridcolor="rgba(137,135,129,0.25)")
-            st.plotly_chart(fig, theme="streamlit", width="stretch", config={"displayModeBar": False})
         runs_view()
 
         st.markdown("##### 📡 Live: φορτίο και pods του run που τρέχει τώρα")
@@ -1564,7 +1532,7 @@ if _tab_live(tab_runs):  # lazy: hidden tabs do no work
             cands = exp_view.live_candidates(EXP_RESULTS, time.time())
             if not cands:
                 st.info("Κανένα run με live καταγραφή αυτή τη στιγμή — ενεργοποιείται από τον επόμενο κύκλο. "
-                        "Μέχρι τότε δες τον πίνακα και το γράφημα μετρικών ακριβώς από πάνω.", icon="📡")
+                        "Μέχρι τότε δες τον πίνακα runs από πάνω.", icon="📡")
                 return
             paths = [p for p, _ in cands]
             ages = dict(cands)
@@ -1649,6 +1617,33 @@ if _tab_live(tab_runs):  # lazy: hidden tabs do no work
                                    f"{100 * _fs['derp']:.0f}%, DInos {100 * _fs['dinos']:.0f}%, λόγος {100 * _fs['ratio_part']:.0f}% "
                                    f"(λόγος {_fs['ratio']:.2f}×, στόχος 17.3×) · "
                                    f"{_PAPER_NOTE}.")
+                if _run:  # metrics of the selected run only (metrics.jsonl telemetry)
+                    _rr = next((r for r in _runs_all() if r["run_id"] == _run[0]), None)
+                    _mp = os.path.join(_rr["run_dir"], "metrics.jsonl") if _rr else ""
+                    _recs = []
+                    if _mp and os.path.exists(_mp):
+                        with open(_mp, encoding="utf-8") as _f:
+                            for _ln in _f:
+                                try:
+                                    _recs.append(json.loads(_ln))
+                                except json.JSONDecodeError:
+                                    pass
+                    if _recs:
+                        _mdf = pd.DataFrame(_recs)
+                        _ml = sorted(c for c in _mdf.columns if c not in ("step", "ts") and pd.api.types.is_numeric_dtype(_mdf[c]))
+                        if _ml:
+                            _mm = st.selectbox("Μετρική του run", _ml, index=_ml.index("reward") if "reward" in _ml else 0,
+                                               key="runs_metric")
+                            _mf = go.Figure(go.Scatter(x=_mdf["step"] if "step" in _mdf else _mdf.index, y=_mdf[_mm],
+                                                       mode="lines", name=_run[0], line=dict(width=2)))
+                            _mf.update_layout(height=320, margin=dict(l=10, r=10, t=10, b=30), plot_bgcolor="rgba(0,0,0,0)",
+                                              paper_bgcolor="rgba(0,0,0,0)", xaxis_title="step", yaxis_title=_mm)
+                            _mf.update_xaxes(gridcolor="rgba(137,135,129,0.25)")
+                            _mf.update_yaxes(gridcolor="rgba(137,135,129,0.25)")
+                            st.plotly_chart(_mf, theme="streamlit", width="stretch", config={"displayModeBar": False},
+                                            key="runs_metric_chart")
+                    else:
+                        st.caption("Το run δεν έχει `metrics.jsonl` με αριθμητικές μετρικές.")
                 with st.spinner("Παράμετροι agent (κατασκευή μοντέλου χωρίς εκπαίδευση, CPU 0-7)…"):
                     _intro = _introspect(exp_view.intro_key(_res)) if _res.get("agent") in ("derp", "lstm_scratch", "dinos_t") else None
                 if _intro is None:
