@@ -1207,13 +1207,14 @@ if _tab_live(tab_agents):  # lazy: hidden tabs do no work (M-20261021-023)
                 sub = ev[(ev["agent"] == k) & (ev["event"].isin(["PreToolUse", "PostToolUse", "SubagentStart"]))]
                 name, color, icon = AGENTS.get(k, (k, OTHER_COLOR, "🛠️"))
                 if k == "coordinator":
-                    name = identity["label"]
+                    name = identity["card"]
+                    if identity["provider"] == "Claude" and not identity["model"] and coord_m != agent_models.UNKNOWN:
+                        name = f"🧭 Συντονιστής (Claude) · μοντέλο {coord_m}"
                     if identity["role"] == "codex-deputy":
                         sub = ev[(ev["agent_id"] == identity["agent_id"]) & (ev["event"] == "SubagentStart")]
                 with cols[i % len(cols)].container(border=True):
-                    st.markdown(f"{icon} **{name}**")
+                    st.markdown(name if k == "coordinator" else f"{icon} **{name}**")
                     if k == "coordinator":
-                        st.caption(f"μοντέλο: {coord_m}")
                         st.caption(f"ρόλος: {identity['role']} · effort: {identity['effort'] or '—'}")
                     else:
                         ids_k = [r["agent_id"] for r in raw_ev if r.get("hook_event_name") == "SubagentStart"

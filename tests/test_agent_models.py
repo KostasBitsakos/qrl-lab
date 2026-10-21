@@ -82,7 +82,7 @@ def test_deputy_identity_and_race_use_actual_model():
     assert lanes[0]["model"] == "gpt-6-astra" and lanes[0]["status"] == "running"
     assert len(lanes) == 1 and lanes[0]["reasons"] == []
     rendered = race_view.render(lanes, 100)
-    assert "Codex" in rendered and "codex-deputy" in rendered and "gpt-6-astra" in rendered
+    assert "Codex αναπληρωτής" in rendered and "gpt-6-astra" in rendered
     assert "claude-opus" not in rendered and "Πάρις" not in rendered
     stopped = events + [{"hook_event_name": "SubagentStop", "ts": 101, "agent_id": "log-d"}]
     assert not am.coordinator_identity(stopped, health, 102)["active"]
@@ -114,6 +114,25 @@ def test_latest_actor_and_card():
     assert i["card"] == "🧭 Συντονιστής (Codex αναπληρωτής) · μοντέλο gpt-6.1-sol" and not i["active"]
     ev.append({"hook_event_name": "PreToolUse", "ts": 45, "tool_name": "Bash"})  # Claude acted later again
     assert am.coordinator_identity(ev, ok, 50, messages=[msg])["provider"] == "Claude"
+
+
+def test_race_lane_label_uses_card():
+    ev = [{"hook_event_name": "SessionStart", "ts": 10, "model": "claude-opus-5-5"},
+          {"hook_event_name": "PreToolUse", "ts": 20, "tool_name": "Bash", "summary": "x"}]
+    ln = race_view.lanes(ev, now=30, health={"claude": {"state": "ok"}})
+    assert ln[0]["name"] == "🧭 Συντονιστής (Claude) · μοντέλο claude-opus-5-5"
+    html = race_view.render(ln, 30)
+    assert "🧭 Συντονιστής (Claude) · μοντέλο claude-opus-5-5" in html and html.count("claude-opus-5-5") == 1
+    dep = ev + [{"hook_event_name": "SubagentStart", "ts": 25, "agent_id": "log-d", "agent_type": "codex-deputy",
+                 "model": "gpt-6.1-sol", "effort": "low"}]
+    h2 = race_view.render(race_view.lanes(dep, now=30, health={"claude": {"state": "limit"}}), 30)
+    assert "Συντονιστής (Codex αναπληρωτής) · μοντέλο gpt-6.1-sol" in h2 and "Συντονιστής (Claude)" not in h2
+
+
+def test_agents_tab_card_wiring():
+    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "dashboard", "app.py"),
+               encoding="utf-8").read()
+    assert 'name = identity["card"]' in src and 'identity["label"]' not in src
 
 
 def test_selector_options():

@@ -13,13 +13,14 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from agent_log import PREFIX as PREFIX_RE, STOPWORDS, clean_label, task_word  # noqa: E402
+import agent_models  # noqa: E402
 
 KIT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 # Typical duration (seconds) per role, used only to place a car; roles not listed run a looping animation.
 # These are rough display defaults, not measurements.
 TYPICAL_SECONDS = {"engineer": 600, "scholar": 300, "Explore": 90, "runner": 300, "writer": 420,
                    "codex-quick": 60, "codex-reviewer": 240, "codex-researcher": 300, "codex-architect": 400,
-                   "codex-deputy": 120, "codex:codex-rescue": 240}
+                   "codex-deputy": 120, "codex-engineer": 600, "codex:codex-rescue": 240}
 GAP_SECONDS = 300  # coordinator actions further apart than this belong to different tasks
 LOOKBACK = 120     # the coordinator's Agent-tool call precedes the SubagentStart by at most this long
 DEFAULT_COLOR = "#898781"
@@ -221,6 +222,7 @@ def lanes(events, now=None, roles=None, window=6 * 3600, max_lanes=16, health=No
     coordinator lane's model text.
     """
     now = time.time() if now is None else now
+    identity = agent_models.coordinator_identity(events, health, now)
     roles = roles or {}
     ann = annotate(events)
     runs, order = {}, []
@@ -230,6 +232,7 @@ def lanes(events, now=None, roles=None, window=6 * 3600, max_lanes=16, health=No
             continue
         if e.get("hook_event_name") == "SubagentStart":
             runs[aid] = {"role": _atype(e), "model": (models or {}).get(aid) or e.get("model") or "", "label": lab,
+                         "effort": e.get("effort") or "",
                          "start": float(e["ts"]),
                          "end": None, "status": "running",
                          "task": str(e.get("task") or e.get("summary") or "").strip()}
@@ -252,20 +255,33 @@ def lanes(events, now=None, roles=None, window=6 * 3600, max_lanes=16, health=No
     n_rec = sum(1 for e, _ in coord if now - float(e["ts"]) <= RECENT)
     last = float(coord[-1][0]["ts"]) if coord else now
     busy = n_rec > 0
-    cstate = (health or {}).get("claude", {}).get("state")
+    side = "codex" if identity["provider"] == "Codex" else "claude"
+    cstate = ((health or {}).get(side) or {}).get("state")
     # live two-word description from the coordinator's latest action summary (e.g. "Launch W0", "Fix toggle")
     ctask = next((str(e.get("summary") or "") for e, _ in reversed(coord)
                   if e.get("hook_event_name") == "PreToolUse" and e.get("tool_name") not in ("Agent", "Task")
                   and e.get("summary")), "")
-    out.insert(0, {"role": "coordinator", "model": coord_model or "", "label": "", "task": ctask, "start": last,
+    if identity["role"] == "codex-deputy":
+        # The deputy occupies the coordinator lane, rather than appearing twice as a worker and a coordinator.
+        out = [r for r in out if not (r["role"] == "codex-deputy" and r["start"] == identity["ts"])]
+        busy, last, ctask = identity["active"], identity["ts"], identity["task"]
+        n_rec = 1 if busy else 0
+    elif not identity["active"]:
+        busy = False
+    out.insert(0, {"role": "coordinator", "coordinator_role": identity["role"], "provider": identity["provider"],
+                   "model": identity["model"] or (coord_model if identity["provider"] == "Claude" else "") or "",
+                   "effort": identity["effort"], "label": "", "task": ctask, "start": last,
                    "end": None if busy else last, "status": "running" if busy else "idle", "coord": True,
                    "activity": min(1.0, 0.25 + 0.75 * min(1.0, n_rec / 20.0)) if busy else 0.0,
-                   "reasons": ["Claude: " + HEALTH_GREEK[cstate]] if busy and cstate in HEALTH_GREEK else [], "final": False})
+                   "reasons": [identity["provider"] + ": " + HEALTH_GREEK[cstate]] if busy and cstate in HEALTH_GREEK else [], "final": False})
     out[0]["obstacles"] = len(out[0]["reasons"])
     for r in out:
         name, color = (roles.get(r["role"]) or (r["role"] or "agent", DEFAULT_COLOR))[:2]
         if r.get("coord"):
-            name, color = "Συντονιστής (Πάρις)", (roles.get("coordinator") or ("", "#ff2a6d"))[1]
+            card = identity["card"]
+            if not identity["model"] and identity["provider"] == "Claude" and coord_model:
+                card = f"🧭 Συντονιστής (Claude) · μοντέλο {coord_model}"
+            name, color = card, (roles.get("coordinator") or ("", "#ff2a6d"))[1]
         r["name"], r["color"] = name, color
         r["desc"] = two_words(r.get("label"), r.get("task"), "" if r.get("coord") else r["role"])
         end = r["end"] or now
@@ -364,7 +380,9 @@ def render(lane_list, now=None):
         parts.append(f'<div class="road" style="--h:{TRACK_H}px">')
     for idx, r in enumerate(lane_list):
         color = r["color"] if str(r.get("color", "")).startswith("#") and len(r["color"]) in (4, 7) else DEFAULT_COLOR
-        who = esc(r["name"] if not r["model"] else f'{r["name"].split(" · ")[0]} · {r["model"]}')
+        display_name = r["name"] if r.get("coord") else r["name"].split(" · ")[0]
+        who = esc(display_name if (not r["model"] or r.get("coord")) else f'{display_name} · {r["model"]}'
+                  + (f" · {r['effort']}" if r.get("effort") else ""))
         word = esc(r.get("desc") or r.get("label") or "")
         reasons = r.get("reasons") or []
         why = esc(" · ".join(reasons))
