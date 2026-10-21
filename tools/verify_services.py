@@ -124,7 +124,8 @@ def restart(name, dry=None):
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         import web_terminal
         return web_terminal.start(wait=25.0)[0]
-    cmd = {"dashboard": "./.venv/bin/streamlit run dashboard/app.py; exec bash",
+    # cores: 0-3 dashboard, 4-7 agents/tests, 8-39 experiments (researcher, 2026-10-21)
+    cmd = {"dashboard": "taskset -c 0-3 ./.venv/bin/streamlit run dashboard/app.py; exec bash",
            "health": "python3 tools/health_watch.py; exec bash"}[name]
     _tmux("kill-window", "-t", f"{SESSION}:{name}")
     rc, _ = _tmux("new-window", "-d", "-t", SESSION, "-n", name, "-c", ROOT, cmd)
