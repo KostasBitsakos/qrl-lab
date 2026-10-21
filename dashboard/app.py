@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 import modreload  # noqa: E402
 import importlib  # noqa: E402
 _LOCAL_MODS = ["labdb", "file_view", "replytext", "k8s_view", "prom_view", "web_terminal", "sudo_ui", "race_view", "brain_view",
-               "perm_store", "ext_catalog", "summarize_runs", "paper_plots", "paper_build", "uploads", "installed_view", "access", "outage", "models_view", "banners", "sandbox_view", "topology_view", "topology_ui"]
+               "perm_store", "ext_catalog", "summarize_runs", "paper_plots", "paper_build", "uploads", "installed_view", "access", "outage", "models_view", "banners", "sandbox_view", "topology_view", "topology_ui", "exp_view", "exp_figs"]
 for _n in _LOCAL_MODS:  # first import so they are in sys.modules, then reload those whose file changed
     importlib.import_module(_n)
 modreload.reload_changed(_LOCAL_MODS)
@@ -58,6 +58,8 @@ import models_view  # noqa: E402
 import summarize_runs  # noqa: E402
 import paper_plots  # noqa: E402
 import paper_build  # noqa: E402
+import exp_view  # noqa: E402
+import exp_figs  # noqa: E402
 from uploads import UploadError, attachment_paths  # noqa: E402
 
 LAB = os.path.join(ROOT, ".lab")
@@ -1102,9 +1104,231 @@ with tab_agents:
                                        "περίληψη": tail["summary"]}), hide_index=True, width="stretch")
     agents_view(hours, race_on)
 
+
+# ---------------------------------------------------------------- experiments tab helpers (M-20261021-008)
+EXP_RESULTS = os.path.join(ROOT, exp_view.RESULTS_REL)
+EXP_HISTORY = os.path.join(ROOT, exp_view.HISTORY_REL)
+INTRO_CACHE = os.path.join(LAB, "tuning", "agent_introspect_cache.json")
+_PAPER_NOTE = "δείκτης προόδου, όχι αποτέλεσμα paper"
+_NO_TRAJ = "δεν υπάρχει καταγραφή για αυτό το run (ενεργοποιείται από τον επόμενο κύκλο)"
+
+
+@st.cache_resource(show_spinner=False, max_entries=3000)
+def _res_load(path, mtime):  # noqa: ARG001 - mtime is part of the cache key (reload when the file changes); read-only
+    return exp_view.read_json(path)
+
+
+def _res_folder(cycle):
+    out = []
+    for p in sorted(glob.glob(os.path.join(EXP_RESULTS, cycle, "*.json"))):
+        if exp_view.is_main_result(p):
+            try:
+                r = _res_load(p, os.path.getmtime(p))
+            except OSError:
+                continue
+            if isinstance(r, dict):
+                out.append((p, r))
+    return out
+
+
+def _res_folders():
+    ds = [d for d in glob.glob(os.path.join(EXP_RESULTS, "*")) if os.path.isdir(d)]
+    return [os.path.basename(d) for d in sorted(ds, key=os.path.getmtime, reverse=True)]
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _out_to_run():
+    dd = db()
+    try:
+        rs = dd.runs(limit=100000)
+    finally:
+        dd.close()
+    out = {}
+    for r in rs:
+        o = exp_view.out_path_of(r.get("cmd"), r.get("cwd"))
+        if o and o not in out:
+            out[o] = (r["run_id"], r["status"])
+    return out
+
+
+def _introspect(key):
+    """tools/agent_introspect.py on CPUs 0-7 (builds the agent, no training), cached per key + legacy-code mtime."""
+    mt = max((os.path.getmtime(f) for f in glob.glob(os.path.join(ROOT, "code-tuning", "tuning", "legacy", "*.py"))), default=0)
+    k = "|".join(map(str, key)) + f"|{mt:.0f}"
+    cache = exp_view.read_json(INTRO_CACHE) or {}
+    if k in cache:
+        return cache[k]
+    cmd = ["taskset", "-c", "0-7", os.path.join(ROOT, ".venv", "bin", "python"),
+           os.path.join(ROOT, "tools", "agent_introspect.py")] + exp_view.intro_args(key)
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=120,
+                           env=dict(os.environ, OMP_NUM_THREADS="1", MKL_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1"))
+        d = json.loads(r.stdout.strip().splitlines()[-1])
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+        return None
+    cache[k] = d
+    try:
+        tmp = INTRO_CACHE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(cache, f)
+        os.replace(tmp, INTRO_CACHE)
+    except OSError:
+        pass
+    return d
+
+
+def _arm_ck_means(items, variant, arm, split):
+    """{checkpoint: mean over seeds of the split mean return} for one arm/variant of a folder."""
+    acc = {}
+    for _, r in items:
+        if r.get("arm") == arm and exp_view.variant_of(r) == variant:
+            for c in exp_view.checkpoints(r):
+                m = exp_view.ck_mean(r, c, split)
+                if m is not None:
+                    acc.setdefault(c, []).append(m)
+    return {c: sum(v) / len(v) for c, v in acc.items()}
+
+
+def _baselines(cycle, variant, split):
+    b = exp_view.read_json(os.path.join(EXP_RESULTS, cycle, f"baselines-{variant}.json"))
+    sp = (b or {}).get(split)
+    return {k: v for k, v in sp.items() if isinstance(v, dict) and "mean_ret" in v} if isinstance(sp, dict) else {}
+
+
+def _paper_figures(path, res, items, cycle):
+    """Figures analogous to the DInos paper (Fig.5-8), drawn now from this run's JSON and its folder."""
+    split = exp_view.test_split(res)
+    variant, arm = exp_view.variant_of(res), res.get("arm")
+    ck_sel = exp_view.select_ck(res)
+    st.caption(f"Όλα από `{os.path.relpath(path, ROOT)}` και τον φάκελο `{cycle}` · split **{split}** · "
+               "«Total Accumulated Reward» = 5 × μέσο reward επεισοδίου (το paper αθροίζει 5 επεισόδια των 5000 ticks).")
+    # Fig.5: checkpoints
+    st.markdown("**Σαν Fig.5 — συνολικό reward ανά checkpoint εκπαίδευσης**")
+    mine = [(f"{arm} trained for {c // 1000}k steps", None if exp_view.ck_mean(res, c, split) is None
+             else 5 * exp_view.ck_mean(res, c, split)) for c in exp_view.checkpoints(res)]
+    other = "derp"
+    if arm == "derp":
+        tr_arms = sorted({r.get("arm") for _, r in items if r.get("agent") == "dinos_t" and exp_view.variant_of(r) == variant})
+        other = tr_arms[0] if tr_arms else None
+    panels = [(f"{arm} (αυτό το run, seed {res.get('seed')})", mine, exp_figs.GREEN if arm == "derp" else exp_figs.PURPLE)]
+    om = _arm_ck_means(items, variant, other, split) if other else {}
+    if om:
+        panels.append((f"{other} (μ.ό. seeds του φακέλου)", [(f"{other} trained for {c // 1000}k steps", 5 * v)
+                                                              for c, v in sorted(om.items())],
+                       exp_figs.GREEN if other == "derp" else exp_figs.PURPLE))
+    st.plotly_chart(exp_figs.checkpoint_bars(panels), width="stretch", config={"displayModeBar": False}, key="xf5")
+    # Fig.6 / Fig.7 right: per-tick behaviour
+    def _traj(c):
+        return (((res.get("checkpoint_results") or {}).get(str(c)) or {}).get(split) or {}).get("trajectory")
+    ck_t = ck_sel if _traj(ck_sel) else next((c for c in reversed(exp_view.checkpoints(res)) if _traj(c)), ck_sel)
+    st.markdown(f"**Σαν Fig.6 / Fig.7 (δεξιά) — load, μνήμη, CPU, latency και pods στο χρόνο** (checkpoint {ck_t}"
+                + ("" if ck_t == ck_sel else f"· το επιλεγμένο {ck_sel} δεν έχει καταγραφή") + ")")
+    traj = _traj(ck_t)
+    if traj and traj.get("episodes"):
+        eps = traj["episodes"]
+        i = st.selectbox("Επεισόδιο (eval seed)", range(len(eps)), format_func=lambda j: f"seed {eps[j].get('seed')}",
+                         key="xf_ep")
+        st.plotly_chart(exp_figs.metrics_over_time(eps[i]), width="stretch", config={"displayModeBar": False}, key="xf6")
+        st.markdown("**Σαν Fig.7 (αριστερά, ως καμπύλη) — σωρευτικό reward**")
+        st.plotly_chart(exp_figs.cumulative_reward([(f"seed {e.get('seed')}", e.get("reward", []), None) for e in eps]),
+                        width="stretch", config={"displayModeBar": False}, key="xf7c")
+    else:
+        st.info(_NO_TRAJ, icon="🕳️")
+    # Fig.7 left / Fig.8: totals of every method of this variant (folder means + baselines)
+    st.markdown(f"**Σαν Fig.7 (αριστερά) / Fig.8 — συνολικό reward ανά μέθοδο** ({variant}, {split})")
+    am = exp_view.folder_arm_means([r for _, r in items])
+    rows, bars = [], []
+    for (v, a), m in sorted(am.items(), key=lambda kv: -kv[1]["mean"]):
+        if v != variant:
+            continue
+        lat = [e.get("mean_latency") for _, r in items if r.get("arm") == a and exp_view.variant_of(r) == v
+               for e in (((r.get("checkpoint_results") or {}).get(str(m["ck"])) or {}).get(m["split"]) or {}).get("episodes", [])]
+        lat = [x for x in lat if x is not None]
+        rows.append({"μέθοδος": a, "περιβάλλον": f"sim {v}", "accumulated reward (5×μ.ό.)": round(5 * m["mean"]),
+                     "μ.ό. pods": round(sum(((((r.get("checkpoint_results") or {}).get(str(m["ck"])) or {}).get(m["split"]) or {})
+                                            .get("mean_pods", 0) for _, r in items if r.get("arm") == a
+                                            and exp_view.variant_of(r) == v)) / m["n_seeds"], 3),
+                     "μ.ό. latency": f"{sum(lat) / len(lat):.3f}" if lat else exp_view.UNKNOWN,
+                     "μ.ό. CPU / μνήμη": "—", "seeds": str(m["n_seeds"]), "checkpoint": str(m["ck"])})
+        bars.append((a, 5 * m["mean"], exp_figs.PURPLE if a == arm else None))
+    for name, b in _baselines(cycle, variant, split).items():
+        rows.append({"μέθοδος": f"baseline {name}", "περιβάλλον": f"sim {variant}",
+                     "accumulated reward (5×μ.ό.)": round(5 * b["mean_ret"]), "μ.ό. pods": round(b.get("mean_pods", 0), 3),
+                     "μ.ό. latency": exp_view.UNKNOWN, "μ.ό. CPU / μνήμη": "—", "seeds": "-", "checkpoint": "-"})
+        bars.append((f"baseline {name}", 5 * b["mean_ret"], exp_figs.GREY))
+    if traj and traj.get("episodes"):
+        cpu = [x for e in traj["episodes"] for x in e.get("cpu", [])]
+        mem = [x for e in traj["episodes"] for x in e.get("mem", [])]
+        for rw in rows:
+            if rw["μέθοδος"] == arm and cpu:
+                rw["μ.ό. CPU / μνήμη"] = f"{sum(cpu) / len(cpu):.1f} / {sum(mem) / len(mem):.1f} (μόνο αυτό το run, {len(traj['episodes'])} επεισόδια)"
+    if bars:
+        st.plotly_chart(exp_figs.total_bars(sorted(bars, key=lambda b: b[1])), width="stretch",
+                        config={"displayModeBar": False}, key="xf7")
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+        st.caption("CPU/μνήμη: μόνο από καταγεγραμμένη τροχιά (--record-traj)· «—» = " + _NO_TRAJ + ". "
+                   "Latency baselines: δεν αποθηκεύεται μέσος όρος στο baselines JSON (μόνο p95).")
+
+
+def _exp_overview():
+    """Gauge: latest cycle closeness, forecast, runs left in the loop (reads files; launcher status read-only)."""
+    hist = exp_view.load_history(EXP_HISTORY) or exp_view.SEED_HISTORY
+    ser = exp_view.primary_series(hist)
+    vals = [float(e["closeness"]) for e in ser]
+    running, run_err = 0, []
+    dd = db()
+    try:
+        import launch_run
+        for rid in exp_view.LOOP_REQUESTS:
+            try:
+                v = launch_run.sandbox_status(dd, rid)["running"]
+                running += len(v) if isinstance(v, (list, tuple)) else int(v)
+            except Exception as e:  # noqa: BLE001 - read-only view
+                run_err.append(f"{rid}: {type(e).__name__}")
+    finally:
+        dd.close()
+    rem = exp_view.remaining_runs(os.path.join(LAB, "tuning"), os.path.join(ROOT, "code-tuning"), running,
+                                  exp_view.driver_files(exp_view.proc_cmdlines()))
+    fc = exp_view.forecast(vals, steps=1)
+    hl = exp_view.hours_left(dt.datetime.now(dt.timezone.utc))
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        last = ser[-1]
+        st.plotly_chart(exp_figs.gauge(last["closeness"], "Πόσο κοντά είμαστε στους στόχους",
+                                       ref=vals[-2] if len(vals) > 1 else None),
+                        width="stretch", config={"displayModeBar": False}, key="xg_gauge")
+        st.caption(f"Τελευταίος κύκλος **{last['cycle']}** ({last['variant']}), λόγος DInos+T/DERP {last.get('ratio')}× "
+                   f"(στόχος 17.3×) · πηγή `{last['source']}` · {_PAPER_NOTE}.")
+    with c2:
+        if fc:
+            st.metric(f"Εκτίμηση μετά τα {rem['total']} υπόλοιπα runs", f"{fc['pred']:.0f}%",
+                      f"{fc['lo']:.0f}–{fc['hi']:.0f}%", delta_color="off")
+            st.caption(f"**εκτίμηση**: ευθεία ελαχίστων τετραγώνων στους τελευταίους {fc['n']} κύκλους "
+                       f"(κλίση {fc['slope']:+.1f} μονάδες/κύκλο), προέκταση κατά 1 κύκλο (τα υπόλοιπα runs ≈ ένας "
+                       f"ακόμη κύκλος)· ζώνη ±{fc['band']:.1f} = max(2, 2×τυπική απόκλιση υπολοίπων)· όρια 0–100. "
+                       "Δεν είναι πρόβλεψη αποτελέσματος.")
+    with c3:
+        st.metric("Runs μέχρι το τέλος του loop", rem["total"], f"{rem['running']} τρέχουν · {rem['queued']} στην ουρά",
+                  delta_color="off")
+        st.metric("Χρόνος μέχρι 21/10 23:59 UTC", f"{max(hl, 0):.1f} ώρες" if hl > 0 else "έληξε")
+        st.caption("Ουρά = εγγραφές `.lab/tuning/*_entries.json` μετά τον μετρητή `.launched` (μοναδικά ονόματα)· "
+                   f"τρέχουν = sandbox-status {', '.join(exp_view.LOOP_REQUESTS)}."
+                   + (f" Επιπλέον {rem['orphan']} έτοιμες εγγραφές χωρίς driver/αποτέλεσμα (ίσως δεν τρέξουν)." if rem["orphan"] else "")
+                   + (f" Σφάλμα ανάγνωσης: {'; '.join(run_err)}" if run_err else ""))
+    with st.expander("Ιστορικό closeness ανά κύκλο"):
+        st.plotly_chart(exp_figs.history_line([e["cycle"] for e in ser], vals, fc), width="stretch",
+                        config={"displayModeBar": False}, key="xg_hist")
+        st.dataframe(pd.DataFrame(hist), hide_index=True, width="stretch")
+        st.caption(f"Αρχείο `{os.path.relpath(EXP_HISTORY, ROOT)}` · closeness = code-tuning/tuning/closeness.py "
+                   "score(5×μ.ό. DInos+T, 5×μ.ό. DERP), μέσος όρος τριών μερών (DERP, DInos, λόγος) · " + _PAPER_NOTE + ".")
+        if rem["files"]:
+            st.dataframe(pd.DataFrame(rem["files"]), hide_index=True, width="stretch")
+
+
 # ================================================================ runs
 if _tab_live(tab_runs):  # lazy: hidden tabs do no work
     with tab_runs:
+        st.fragment(run_every=30)(_exp_overview)()
         @st.fragment(run_every=refresh)
         def runs_view():
             dd = db()
@@ -1175,6 +1399,109 @@ if _tab_live(tab_runs):  # lazy: hidden tabs do no work
             fig.update_yaxes(gridcolor="rgba(137,135,129,0.25)")
             st.plotly_chart(fig, theme="streamlit", width="stretch", config={"displayModeBar": False})
         runs_view()
+
+        st.markdown("##### 📡 Live: φορτίο και pods του run που τρέχει τώρα")
+
+        @st.fragment(run_every=3)
+        def exp_live():
+            cands = exp_view.live_candidates(EXP_RESULTS, time.time())
+            if not cands:
+                st.info("Κανένα run με live καταγραφή αυτή τη στιγμή — ενεργοποιείται από τον επόμενο κύκλο. "
+                        "Μέχρι τότε δες τον πίνακα και το γράφημα μετρικών ακριβώς από πάνω.", icon="📡")
+                return
+            paths = [p for p, _ in cands]
+            ages = dict(cands)
+            pick = st.selectbox("Live run", paths, key="live_pick",
+                                format_func=lambda p: f"{os.path.relpath(p, EXP_RESULTS)} · ενημέρωση πριν {ages.get(p, 0):.0f} s")
+            d = exp_view.read_live(pick)
+            if not d or not d["columns"].get("t"):
+                st.caption("Το live αρχείο δεν διαβάζεται αυτή τη στιγμή (γράφεται)· ξαναδοκιμάζω σε 3 s.")
+                return
+            ph = {"pretrain": "προεκπαίδευση (source)", "train": "εκπαίδευση", "eval": "αξιολόγηση (greedy)"}
+            st.markdown(f"**{d.get('arm')}** · {d.get('variant')} · seed {d.get('seed')} · φάση "
+                        f"**{ph.get(d.get('phase'), d.get('phase'))}** {d.get('label') or ''} · tick {d.get('t'):,} "
+                        f"(εκπαίδευση {d.get('total_ticks', '?'):,} + αξιολογήσεις)" + (" · ✅ τελείωσε" if d.get("done") else ""))
+            st.plotly_chart(exp_figs.live_figure(d["columns"]), width="stretch", config={"displayModeBar": False},
+                            key="live_chart")
+            st.caption("Μπλε: load (είσοδος) · κόκκινο: pods · πορτοκαλί: pods σε εκκίνηση (startup delay) · "
+                       "γκρι φόντο: επεισόδια αξιολόγησης. Τελευταία ~600 ticks, ανανέωση κάθε 3 s.")
+        exp_live()
+
+        st.markdown("##### 🔎 Λεπτομέρειες run (παράμετροι, απόσταση από στόχους, γραφήματα σε στυλ paper)")
+        _ss = st.session_state
+        _folders = _res_folders()
+        if not _folders:
+            st.caption(f"Δεν υπάρχουν αποτελέσματα στο `{os.path.relpath(EXP_RESULTS, ROOT)}`.")
+        else:
+            _c1, _c2 = st.columns(2)
+            _cyc = _c1.selectbox("Κύκλος (φάκελος αποτελεσμάτων)", _folders, key="xd_cycle")
+            _items = _res_folder(_cyc)
+            _arms = sorted({str(r.get("arm")) for _, r in _items})
+            _armf = _c2.multiselect("Arm", _arms, key="xd_arm")
+            _C = exp_view.load_closeness(ROOT)
+            _o2r = _out_to_run()
+            _shown = [(p, r) for p, r in _items if not _armf or str(r.get("arm")) in _armf]
+            _rows = []
+            for _p, _r in _shown:
+                _ck = exp_view.select_ck(_r)
+                _sp = exp_view.test_split(_r)
+                _m = exp_view.ck_mean(_r, _ck, _sp)
+                _cl = exp_view.run_closeness(_C, _r, _ck, _sp)
+                _rows.append({"run": (_o2r.get(os.path.normpath(_p)) or ("—",))[0], "arm": _r.get("arm"),
+                              "variant": exp_view.variant_of(_r), "seed": _r.get("seed"), "checkpoint": _ck,
+                              "split": _sp, "μ.ό. reward": None if _m is None else round(_m),
+                              "μέρος closeness": None if _cl.get("part") is None else f"{100 * _cl['part']:.0f}%",
+                              "CPU (s)": None if _r.get("cpu_s") is None else round(_r["cpu_s"]),
+                              "τροχιά": "ναι" if _r.get("record_traj") else "όχι"})
+            if _rows:
+                _ss["xd_paths"] = [p for p, _ in _shown]
+
+                def _xd_pick():
+                    sel = _ss["xd_table"].selection.rows
+                    if sel:
+                        _ss["xd_sel"] = _ss["xd_paths"][sel[0]]
+                st.dataframe(pd.DataFrame(_rows), hide_index=True, width="stretch", on_select=_xd_pick,
+                             selection_mode="single-row", key="xd_table")
+                st.caption("Πάτησε μια γραμμή για όλες τις παραμέτρους. checkpoint = το καλύτερο στο validation "
+                           "(όπως επιλέγει το loop), split = το τελικό test split του run.")
+            _sel = _ss.get("xd_sel")
+            if _sel and _sel in [p for p, _ in _items]:
+                _res = dict(_items)[_sel]
+                _run = _o2r.get(os.path.normpath(_sel))
+                st.markdown(f"**{exp_view.run_label(_res)}** · `{os.path.relpath(_sel, ROOT)}`"
+                            + (f" · run `{_run[0]}` ({_run[1]})" if _run else ""))
+                # closeness
+                _cl = exp_view.run_closeness(_C, _res)
+                _am = exp_view.folder_arm_means([r for _, r in _items])
+                _fs = exp_view.folder_scores(_C, _am).get(exp_view.variant_of(_res))
+                _t1, _t2 = st.columns(2)
+                with _t1:
+                    if _cl.get("part") is not None:
+                        st.metric(f"Μέρος «{_cl['kind']}» του closeness", f"{100 * _cl['part']:.0f}%")
+                        st.caption(f"x = 5 × {_cl['mean_ret']:,.0f} = {_cl['x']:,.0f} (checkpoint {_cl['checkpoint']}, "
+                                   f"{_cl['split']}) έναντι στόχου {_cl['target']:,.0f} · μέρος = 1 − |log10(x / στόχος)| "
+                                   f"(closeness.part) · {_PAPER_NOTE}.")
+                    else:
+                        st.caption(f"Το arm `{_res.get('arm')}` δεν έχει στόχο στο paper (στόχοι μόνο για DERP 2.2e5 και "
+                                   f"DInos+T 3.8e6)· 5 × μ.ό. = {(_cl['x'] or 0):,.0f}.")
+                with _t2:
+                    if _fs:
+                        st.metric(f"Closeness κύκλου {_cyc} · {exp_view.variant_of(_res)}", f"{100 * _fs['total']:.0f}%")
+                        st.caption(f"score(5×{_fs['dinos_mean']:,.0f} DInos+T, 5×{_fs['derp_mean']:,.0f} DERP), όπως το loop "
+                                   f"(μ.ό. seeds {_fs['n_seeds']}, split {_fs['split']}): μέσος όρος των μερών DERP "
+                                   f"{100 * _fs['derp']:.0f}%, DInos {100 * _fs['dinos']:.0f}%, λόγος {100 * _fs['ratio_part']:.0f}% "
+                                   f"(λόγος {_fs['ratio']:.2f}×, στόχος 17.3×) · "
+                                   f"{_PAPER_NOTE}.")
+                with st.spinner("Παράμετροι agent (κατασκευή μοντέλου χωρίς εκπαίδευση, CPU 0-7)…"):
+                    _intro = _introspect(exp_view.intro_key(_res)) if _res.get("agent") in ("derp", "lstm_scratch", "dinos_t") else None
+                if _intro is None:
+                    st.caption("Η ενδοσκόπηση του agent δεν ήταν διαθέσιμη· ό,τι δεν είναι στο JSON φαίνεται «άγνωστο».")
+                st.dataframe(pd.DataFrame(exp_view.param_rows(_res, _intro, _sel)), hide_index=True, width="stretch",
+                             height=420)
+                if st.button("📊 Γραφήματα σε στυλ paper (Fig.5–8) για αυτό το run", key="xd_figs"):
+                    _ss["xd_figs_for"] = _sel
+                if _ss.get("xd_figs_for") == _sel:
+                    _paper_figures(_sel, _res, _items, _cyc)
 
         st.markdown("##### Εικόνες αποτελεσμάτων run")
         _d = db()
