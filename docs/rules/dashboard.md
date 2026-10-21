@@ -7,3 +7,4 @@ Dashboard protocol (pending messages, replies, statuses, decisions): see CLAUDE.
 - The dashboard shows exact limit messages for both Claude and Codex, with the reset time. (2026-10-17, M-20261017-005/006/007)
 - Sudo requests are approved from a dashboard tab. (2026-10-17, M-20261017-005/006/007)
 - Write to the researcher in Greek, short and direct: see CLAUDE.md golden rule 8. (2026-10-16, handoff standing rule 5)
+- Chat model selector (2026-10-21, M-20261021-072/088): honour req_model/req_effort from `labq take`. `coordinator:<model>` = the coordinator handles the message but delegates the answer to that model (Claude subagent or Codex) and says in the reply which model answered; a plain model id = answer from that model directly; default = coordinator's own model.
