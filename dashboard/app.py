@@ -421,26 +421,37 @@ def _claude_scanner():
 
 @st.fragment(run_every=60)
 def usage_rings():
-    """Title + usage-limit rings from local logs only (tools/usage_limits.py); «—» when there is no source."""
+    """Title + usage rings (tap = popover per window). Claude: statusLine file (tools/claude_statusline.py), else
+    log rejections; Codex: rollout logs. «—» when there is no source or the window has reset since the reading."""
     now = time.time()
     try:
         cx = usage_limits.latest_codex(now)
         cl = _claude_scanner().scan(now)
     except Exception:  # noqa: BLE001 - a broken log must not break the sidebar
         cx, cl = [], None
-    a = usage_limits.provider_ring("claude", [cl], now)
-    b = usage_limits.provider_ring("codex", cx, now)
-    st.html('<div style="display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:0 0 4px">'
-            '<span style="font-size:1.35rem;font-weight:700">🧪 QRL-Lab</span>'
-            + usage_limits.ring_html("Claude", a[0], a[1], a[2], "#d97757")
-            + usage_limits.ring_html("ChatGPT/Codex", b[0], b[1], b[2], "#10a37f") + "</div>")
+    cw = usage_limits.claude_windows(usage_limits.load_claude_status(), cl, now)
+    xw = usage_limits.codex_windows(cx, now)
+    st.html(usage_limits.RING_CSS
+            + '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:0 0 4px">'
+            '<span style="font-size:1.35rem;font-weight:700;margin-right:auto">🧪 QRL-Lab</span>'
+            + usage_limits.ring_html("Claude", cw, "#d97757", now)
+            + usage_limits.ring_html("Codex", xw, "#10a37f", now) + "</div>")
     offers = usage_limits.load_offers(os.path.join(ROOT, "docs", "free_offers.json"))
-    with st.expander("δωρεάν resets / προσφορές"):
+    seen = st.session_state.setdefault("_offers_seen", now - 86400)   # first view: last 24 h count as new
+    n_new = sum(usage_limits.offer_is_new(o, seen) for o in offers)
+    with st.expander("δωρεάν resets / προσφορές" + (f" · {n_new} νέα" if n_new else "")):
         for o in offers:
-            st.markdown(f"- **{o['provider']}** · [{o['title']}]({o['url']}) · {o['as_of']}" + (f" — {o['note']}" if o["note"] else ""))
+            badge = " :red-badge[νέα]" if usage_limits.offer_is_new(o, seen) else ""
+            src = f" · [πηγή]({o['source']})" if o["source"] else ""
+            st.markdown(f"- **{o['provider']}** · [{o['title']}]({o['url']}){badge} · as_of {o['as_of']}{src}"
+                        + (f" — {o['note']}" if o["note"] else ""))
         if not offers:
             st.caption("Καμία επαληθευμένη εγγραφή.")
-        st.caption("Οι εγγραφές προστίθενται από τον συντονιστή μετά από επαλήθευση (`docs/free_offers.json`).")
+        if n_new and st.button("Τα είδα", key="offers_seen_btn"):
+            st.session_state["_offers_seen"] = now
+            st.rerun(scope="fragment")
+        st.caption("Μόνο επίσημες πηγές (https, anthropic/claude/openai/chatgpt), μέσω `tools/offers_check.py` "
+                   "→ `docs/free_offers.json`.")
 
 
 with st.sidebar:

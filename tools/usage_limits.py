@@ -2,6 +2,8 @@
 """Usage-limit state of Claude and Codex from LOCAL logs only (sidebar rings, M-20261021-016). Never estimates.
 
 Sources (read-only; credential files are never opened):
+  claude  PRIMARY (M-20261021-021): .lab/usage/claude.json, written by tools/claude_statusline.py from the official
+          statusLine stdin (rate_limits.five_hour / seven_day: used_percentage, resets_at). Fallback below.
   codex   ~/.codex/sessions/**/rollout-*.jsonl, records {"type": "event_msg", "payload": {"type": "token_count",
           "rate_limits": {"primary"|"secondary": {used_percent, window_minutes, resets_at}, "plan_type"}}} written by
           the Codex CLI after each turn. The latest record gives used % per window AS OF its timestamp.
@@ -15,6 +17,7 @@ already past is reported as reset (value no longer known), not as 0 %.
 import datetime as dt
 import glob
 import json
+import math
 import os
 import time
 
@@ -194,33 +197,137 @@ def provider_ring(provider, entries, now):
     return None, None, " | ".join(tips)
 
 
-def ring_html(name, pct, window, tip, color):
-    """Small progress ring (inline SVG) with the provider name; hover (title) = tip. pct None -> «—»."""
+RESET_TIP = "έγινε reset, αναμονή νέας μέτρησης"
+LABELS = {"5h": "5ω", "7d": "7ημ", "five_hour": "5ω", "seven_day": "7ημ"}
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CLAUDE_STATUS = os.path.join(ROOT, ".lab", "usage", "claude.json")   # written by tools/claude_statusline.py
+AMBER, RED = "#f59e0b", "#dc2626"
+
+
+def load_claude_status(path=None):
+    """Official Claude source (statusLine stdin, saved by tools/claude_statusline.py); None if missing/malformed."""
+    path = path or os.environ.get("QRL_CLAUDE_USAGE_FILE") or CLAUDE_STATUS
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return d if isinstance(d, dict) else None
+
+
+def _win(label, pct, resets_at, now, source=""):
+    """One window for the popover: pct None (shown «—») when its resets_at has passed (value no longer known)."""
+    stale = resets_at is not None and resets_at <= now
+    return {"label": label, "pct": None if stale else pct, "resets_at": resets_at, "stale": stale, "source": source}
+
+
+def claude_windows(status, rejection, now):
+    """Claude windows: statusLine file first (five_hour, seven_day); else an active log rejection (100 %); else []."""
+    out = []
+    if isinstance(status, dict):
+        for key in ("five_hour", "seven_day"):
+            w = status.get(key)
+            if isinstance(w, dict) and isinstance(w.get("used_percentage"), (int, float)):
+                r = w.get("resets_at")
+                out.append(_win(LABELS[key], float(w["used_percentage"]),
+                                float(r) if isinstance(r, (int, float)) else None, now, "statusline"))
+    if out:
+        return out
+    if rejection and rejection.get("resets_at") and rejection["resets_at"] > now:
+        return [_win(LABELS.get(rejection["window"], rejection["window"]), 100.0, rejection["resets_at"], now, "log")]
+    return []
+
+
+def codex_windows(entries, now):
+    """Codex windows from the latest rollout record (5ω, 7ημ); a window whose resets_at passed -> «—»."""
+    return [_win(LABELS.get(e["window"], e["window"]), e["used_percent"], e.get("resets_at"), now, "log")
+            for e in (entries or []) if e]
+
+
+def left_text(resets_at, now):
+    if resets_at is None:
+        return "άγνωστο"
+    left = max(0.0, resets_at - now)
+    return f"{int(left // 3600)}ω {int(left % 3600 // 60)}λ"
+
+
+def win_line(w, now):
+    """Popover text of one window: «<P>% χρησιμοποιημένο · reset σε <Hω Mλ>», or «—» + RESET_TIP after a reset."""
+    if w["pct"] is None:
+        return "— · " + RESET_TIP
+    return f"{w['pct']:.0f}% χρησιμοποιημένο · reset σε {left_text(w['resets_at'], now)}"
+
+
+def headline(wins):
+    """Ring value = the most-used window still valid (the binding limit); None if none is valid."""
+    vals = [w["pct"] for w in wins if w["pct"] is not None]
+    return max(vals) if vals else None
+
+
+def ring_color(pct, base):
+    if pct is None:
+        return base
+    return RED if pct >= 90 else AMBER if pct >= 75 else base
+
+
+RING_CSS = ("<style>.qrl-ring{position:relative;display:inline-block}"
+            ".qrl-ring>summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:3px;"
+            "outline:none;-webkit-tap-highlight-color:transparent}"
+            ".qrl-ring>summary::-webkit-details-marker{display:none}.qrl-ring>summary::marker{content:''}"
+            ".qrl-ring>summary:focus-visible svg{outline:2px solid #888;border-radius:50%}"
+            ".qrl-pop{position:absolute;top:calc(100% + 4px);right:0;z-index:1000;min-width:190px;max-width:260px;"
+            "padding:6px 8px;border-radius:8px;font-size:.72rem;line-height:1.35;background:var(--background-color,#fff);"
+            "color:inherit;border:1px solid rgba(137,135,129,.45);box-shadow:0 4px 14px rgba(0,0,0,.18)}"
+            ".qrl-pop b{display:block;font-size:.7rem;opacity:.75;margin-bottom:2px}"
+            ".qrl-pop div{white-space:nowrap}</style>")
+
+
+def ring_html(name, wins, color, now, empty_tip=NO_SOURCE):
+    """Small usage ring (SVG stroke-dasharray arc over a grey track, provider colour, amber >=75 %, red >=90 %).
+    Tap/click opens a <details> popover with one «P% χρησιμοποιημένο · reset σε Hω Mλ» line per window. No JS."""
     import html
-    r, c = 13.0, 2 * 3.14159 * 13.0
+    pct = headline(wins)
+    col = ring_color(pct, color)
+    r = 11.0
+    c = 2 * math.pi * r
     frac = 0.0 if pct is None else max(0.0, min(100.0, float(pct))) / 100.0
-    val = "—" if pct is None else f"{pct:.0f}%"
-    arc = (f'<circle cx="16" cy="16" r="{r}" fill="none" stroke="{color}" stroke-width="3.2" stroke-linecap="round" '
-           f'stroke-dasharray="{c * frac:.1f} {c:.1f}" transform="rotate(-90 16 16)"/>') if pct is not None else ""
-    sub = f"{html.escape(name)}" + (f" · {html.escape(window)}" if window else "")
-    return (f'<span title="{html.escape(tip)}" style="display:inline-flex;align-items:center;gap:4px;cursor:help">'
-            f'<svg width="32" height="32" viewBox="0 0 32 32" aria-label="{html.escape(name)} {val}">'
-            f'<circle cx="16" cy="16" r="{r}" fill="none" stroke="rgba(137,135,129,.3)" stroke-width="3.2"/>{arc}'
-            f'<text x="16" y="19.5" text-anchor="middle" font-size="{8.5 if pct is not None else 11}" '
+    val = "—" if pct is None else f"{pct:.0f}"
+    arc = (f'<circle cx="14" cy="14" r="{r}" fill="none" stroke="{col}" stroke-width="3" stroke-linecap="round" '
+           f'stroke-dasharray="{c * frac:.2f} {c:.2f}" transform="rotate(-90 14 14)"/>') if pct else ""
+    if wins:
+        lines = "".join(f'<div title="{html.escape(RESET_TIP) if w["pct"] is None else ""}">'
+                        f'{html.escape(w["label"])}: {html.escape(win_line(w, now))}</div>' for w in wins)
+        tip = " | ".join(f'{w["label"]}: {win_line(w, now)}' for w in wins)
+    else:
+        lines, tip = f"<div>— · {html.escape(empty_tip)}</div>", empty_tip
+    return (f'<details class="qrl-ring"><summary title="{html.escape(tip)}" '
+            f'aria-label="{html.escape(name)} {val}%">'
+            f'<svg width="28" height="28" viewBox="0 0 28 28">'
+            f'<circle cx="14" cy="14" r="{r}" fill="none" stroke="rgba(137,135,129,.3)" stroke-width="3"/>{arc}'
+            f'<text x="14" y="17.3" text-anchor="middle" font-size="{8.5 if pct is not None else 10}" '
             f'font-family="sans-serif" fill="currentColor">{val}</text></svg>'
-            f'<span style="font-size:.72rem;line-height:1.1;opacity:.85">{sub}</span></span>')
+            f'<span style="font-size:.68rem;opacity:.8">{html.escape(name)}</span></summary>'
+            f'<div class="qrl-pop"><b>{html.escape(name)}</b>{lines}</div></details>')
 
 
 def load_offers(path):
-    """Curated docs/free_offers.json entries (provider, title, url, as_of, note); [] if missing or malformed."""
+    """docs/free_offers.json entries (provider, title, url, as_of, note, source, added_at); [] if missing/malformed."""
     try:
         with open(path, encoding="utf-8") as f:
             d = json.load(f)
     except (OSError, ValueError):
         return []
-    keys = ("provider", "title", "url", "as_of", "note")
-    return [{k: str(x.get(k, "")) for k in keys} for x in d if isinstance(x, dict) and x.get("title")] \
+    keys = ("provider", "title", "url", "as_of", "note", "source", "added_at")
+    return [{k: str(x.get(k, "") or "") for k in keys} for x in d if isinstance(x, dict) and x.get("title")] \
         if isinstance(d, list) else []
+
+
+def offer_is_new(offer, seen_ts):
+    """True if the entry was merged (added_at, else as_of) after seen_ts (epoch s). Unparseable dates -> False."""
+    t = _ts(offer.get("added_at") or offer.get("as_of") or "")
+    if t is None and offer.get("as_of"):
+        t = _ts(offer["as_of"] + "T00:00:00+00:00")
+    return t is not None and seen_ts is not None and t > seen_ts
 
 
 if __name__ == "__main__":
