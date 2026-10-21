@@ -147,7 +147,11 @@ def codex_bin():
     """Absolute path of the codex CLI: PATH, else the nvm install (the watchdog's env has no nvm PATH)."""
     import glob, shutil
     found = shutil.which("codex") or sorted(glob.glob(os.path.expanduser("~/.nvm/versions/node/*/bin/codex")))[-1:]
-    return found if isinstance(found, str) else (found[0] if found else "codex")
+    path = found if isinstance(found, str) else (found[0] if found else "codex")
+    d = os.path.dirname(path)
+    if d and d not in os.environ.get("PATH", "").split(os.pathsep):   # codex is '#!/usr/bin/env node': node lives there too
+        os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
+    return path
 
 
 def build_command(out_file, cwd=KIT, model=CODEX_MODEL, effort=CODEX_EFFORT):
