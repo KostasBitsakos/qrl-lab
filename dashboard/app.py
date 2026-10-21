@@ -572,7 +572,7 @@ def _brain_state():
         msgs = [{"ts": r[0], "author": r[1], "title": r[2], "body": r[3]} for r in rows]
     except Exception:  # noqa: BLE001 - display only
         msgs = []
-    return brain_view.derive(race_view.load_events(EVENTS, max_lines=1500), msgs, time.time())
+    return brain_view.derive(read_events_raw(1500), msgs, time.time())  # shared incremental tail (M-20261021-023)
 
 
 @st.fragment(run_every=3)
