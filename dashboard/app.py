@@ -457,6 +457,17 @@ def _claude_scanner():
 RING_STEP_S = 600
 
 
+@st.cache_data(ttl=30, show_spinner=False)
+def _watch_events(path, _mtime=None):
+    """Newest-first last 30 events of the offers_watch log (small file)."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            rows = [json.loads(ln) for ln in f.read().splitlines()[-30:] if ln.strip()]
+    except (OSError, ValueError):
+        return []
+    return [r for r in reversed(rows) if isinstance(r, dict)]
+
+
 @st.fragment(run_every=60)
 def usage_rings():
     """Title + usage rings (tap = popover per window). Claude: statusLine file (tools/claude_statusline.py), else
@@ -490,6 +501,24 @@ def usage_rings():
             st.rerun(scope="fragment")
         st.caption("Μόνο επίσημες πηγές (https, anthropic/claude/openai/chatgpt), μέσω `tools/offers_check.py` "
                    "→ `docs/free_offers.json`.")
+    # offers_watch (M-20261021-056): local limit resets + UNVERIFIED candidates from official pages
+    wev = _watch_events(os.path.join(ROOT, ".lab", "offers_watch_events.jsonl"))
+    wseen = st.session_state.setdefault("_watch_seen", now - 86400)
+    wn = sum(1 for e in wev if e.get("ts", 0) > wseen)
+    with st.expander("ειδοποιήσεις ορίων" + (f" · {wn} νέα" if wn else "")):
+        for e in wev[:8]:
+            tag = "όριο reset" if e.get("kind") == "limit_reset" else ":orange-badge[ανεπιβεβαίωτο]"
+            when = time.strftime("%d/%m %H:%M", time.localtime(e.get("ts", 0)))
+            link = f"[{e.get('title', '')}]({e['url']})" if e.get("url") else e.get("title", "")
+            kw = f" ({', '.join(e['matched'])})" if e.get("matched") else ""
+            st.markdown(f"- {when} · **{e.get('provider', '')}** · {tag} · {link}{kw}")
+        if not wev:
+            st.caption("Καμία ειδοποίηση ακόμη.")
+        if wn and st.button("Τα είδα", key="watch_seen_btn"):
+            st.session_state["_watch_seen"] = now
+            st.rerun(scope="fragment")
+        st.caption("Αυτόματος έλεγχος κάθε 10 λεπτά (`tools/offers_watch.py`). Τα ανεπιβεβαίωτα δεν είναι προσφορές "
+                   "μέχρι να τα ελέγξει ο συντονιστής.")
 
 
 with st.sidebar:

@@ -26,11 +26,12 @@ SESSION = os.environ.get("QRL_TMUX_SESSION", "lab")
 DASH_URL = "http://127.0.0.1:8501/"
 TERM_PORT = 8502
 HB_STALE = 180
+OFFERS_STALE = 1500  # offers_watch loops every 600 s
 STRIKES = 3        # consecutive failed checks before the watchdog restarts a component
 MAX_RESTARTS = 5   # consecutive failed restarts before the outage entry
 SHELLS = ("bash", "sh", "zsh", "fish", "dash")
-ORDER = ("coordinator", "dashboard", "health", "terminal")
-LABELS = {"coordinator": "συντονιστής (Claude)", "dashboard": "dashboard", "health": "health watch", "terminal": "web terminal"}
+ORDER = ("coordinator", "dashboard", "health", "offers", "terminal")
+LABELS = {"coordinator": "συντονιστής (Claude)", "dashboard": "dashboard", "health": "health watch", "offers": "offers watch", "terminal": "web terminal"}
 
 
 def _tmux(*args):
@@ -101,7 +102,16 @@ def check_terminal():
         return False, "on demand (starts from the dashboard tab; idle exit after 30 min)"
 
 
-CHECKS = {"coordinator": check_coordinator, "dashboard": check_dashboard, "health": check_health, "terminal": check_terminal}
+def check_offers(lab=None, now=None):
+    p = os.path.join(lab or LAB, "offers_watch.heartbeat")
+    try:
+        age = (now or time.time()) - os.stat(p).st_mtime
+    except OSError:
+        return False, "no heartbeat file"
+    return (age <= OFFERS_STALE), f"heartbeat {int(age)}s old"
+
+
+CHECKS = {"coordinator": check_coordinator, "dashboard": check_dashboard, "health": check_health, "offers": check_offers, "terminal": check_terminal}
 
 
 def check_all():
@@ -126,7 +136,8 @@ def restart(name, dry=None):
         return web_terminal.start(wait=25.0)[0]
     # cores: 0-3 dashboard, 4-7 agents/tests, 8-39 experiments (researcher, 2026-10-21)
     cmd = {"dashboard": "taskset -c 0-3 ./.venv/bin/streamlit run dashboard/app.py; exec bash",
-           "health": "python3 tools/health_watch.py; exec bash"}[name]
+           "health": "python3 tools/health_watch.py; exec bash",
+           "offers": "taskset -c 0-3 python3 tools/offers_watch.py --loop 600; exec bash"}[name]
     _tmux("kill-window", "-t", f"{SESSION}:{name}")
     rc, _ = _tmux("new-window", "-d", "-t", SESSION, "-n", name, "-c", ROOT, cmd)
     return rc == 0
@@ -136,7 +147,7 @@ def ensure(retries=6, wait=10.0, sleep=time.sleep):
     """Check, restart down components (not the coordinator), re-check up to `retries` times. Returns the final report."""
     rep = check_all()
     for i in range(retries):
-        down = [k for k in ("dashboard", "health", "terminal") if not rep[k]["ok"]]
+        down = [k for k in ("dashboard", "health", "offers", "terminal") if not rep.get(k, {"ok": True})["ok"]]
         if not down:
             break
         for k in down:
@@ -145,7 +156,7 @@ def ensure(retries=6, wait=10.0, sleep=time.sleep):
         sleep(wait)
         new = check_all()
         for k in new:
-            new[k]["restarted"] = rep[k].get("restarted") or (k in down)
+            new[k]["restarted"] = rep.get(k, {}).get("restarted") or (k in down)
         rep = new
     return rep
 
@@ -154,7 +165,9 @@ def report_items(rep):
     """Greek per-component truth for the announcement."""
     items = []
     for k in ORDER:
-        r = rep[k]
+        r = rep.get(k)
+        if r is None:
+            continue
         if r["ok"]:
             s = "ναι (επαληθεύτηκε)"
         elif k == "terminal":
@@ -191,7 +204,9 @@ def tick(rep=None, now=None, do_restart=restart, notify=None):
     now = int(now or time.time())
     st = _load_state()
     acts = []
-    for k in ("dashboard", "health"):
+    for k in ("dashboard", "health", "offers"):
+        if k not in rep:
+            continue
         if k == "dashboard" and not os.path.exists(os.path.join(ROOT, ".venv", "bin", "streamlit")):
             continue  # same condition as the shell watchdog: no streamlit, no dashboard to supervise
         s = st.setdefault(k, {"strikes": 0, "restarts": 0, "alerted": False})
