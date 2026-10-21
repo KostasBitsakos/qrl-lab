@@ -1,4 +1,4 @@
-"""Tests for tools/topology_view.py. Run: taskset -c 0-7 .venv/bin/python -m pytest tests/test_topology_view.py (or plain python)."""
+"""Tests for tools/topology_view.py. Run: taskset -c 4-7 .venv/bin/python -m pytest tests/test_topology_view.py (or plain python)."""
 import json
 import os
 import sys
@@ -159,6 +159,66 @@ def test_every_edge_has_why_and_how():
     assert "codex exec" in by[("coordinator", "codex-deputy")]["how"]
     page = tv.render(inv)
     assert "linkLabel(ltip)" in page and "classList.toggle('cmp'" in page
+
+
+def test_network_explanations_and_edge_usage():
+    interfaces, routes = tv.parse_ip_brief(IP_BRIEF), tv.parse_ip_route(IP_ROUTE)
+    nodes, links = tv.network_nodes(interfaces, routes, K8S)
+    by = {n["id"]: n for n in nodes}
+    for n in nodes:
+        assert len(n["network_info"]) == 5
+        assert all(n["network_info"].values())
+        assert n["desc"].count("\n") == 4
+    assert "μόνο στο μηχάνημα" in by["net:lo"]["desc"]
+    assert "Μόνο αυτό το μηχάνημα" in by["net:lo"]["desc"]
+    assert "RFC1918" in by["net:ens4"]["desc"]
+    assert "OpenStack" in by["net:ens4"]["desc"] and "άγνωστο" in by["net:ens4"]["desc"]
+    assert "CGNAT" in by["net:tailscale0"]["desc"] and "tailnet" in by["net:tailscale0"]["desc"]
+    assert "Πιθανότατα το Docker" in by["net:docker0"]["desc"]
+    assert "CNI): Calico" in by["net:calico"]["desc"]
+    usage = by["net:calico"]["network_info"]["Ποια μέρη μας το χρησιμοποιούν"]
+    assert "Grafana" in usage and "Redis" not in usage
+    assert "CIDR είναι άγνωστο" in by["net:k8s-svc"]["desc"]
+    assert "kube-apiserver" in by["net:k8s-svc"]["network_info"]["Ποια μέρη μας το χρησιμοποιούν"]
+    assert tv.network_usage("net:absent", links) == "άγνωστο"
+    inv = tv.build_inventory({"ifaces": interfaces, "routes": routes, "k8s": K8S})
+    rows = tv.node_table(inv)
+    assert any("Τοπική επιστροφή" in r["πληροφορίες δικτύου"] for r in rows)
+    page = tv.render(inv)
+    assert ".replace(/\\n/g,'<br>')" in page
+
+
+def test_address_scope_boundaries_and_missing_data():
+    for ip in ("10.0.0.1", "172.16.0.1", "172.31.255.254", "192.168.1.1"):
+        assert "RFC1918" in tv.address_scope([ip])
+    assert "CGNAT" in tv.address_scope(["100.64.0.1/32", "100.127.255.254/32"])
+    for ip in ("100.63.255.254", "100.128.0.1", "172.32.0.1", "8.8.8.8", "2606:4700:4700::1111"):
+        assert "δημόσια IP" in tv.address_scope([ip])
+    assert "loopback" in tv.address_scope(["::1/128"])
+    assert "ίδια ζεύξη" in tv.address_scope(["fe80::1/64", "169.254.1.1/16"])
+    assert "ιδιωτικό IPv6" in tv.address_scope(["fd7a::1/128"])
+    for addrs in ([], ["invalid"], ["192.0.2.1"], ["224.0.0.1"], ["0.0.0.0"]):
+        assert tv.address_scope(addrs) == "άγνωστο"
+
+
+def test_alternative_cni_unknown_interface_and_public_binding():
+    interfaces = tv.parse_ip_brief("flannel.1 UNKNOWN 10.244.0.0/32\ncni0 UP 10.244.0.1/24\neth9 UP 8.8.8.8/24\nmystery DOWN\ntunl0 UNKNOWN\n")
+    routes = tv.parse_ip_route("default via 8.8.8.1 dev eth9\n10.244.0.0/24 dev cni0\n")
+    nodes, _ = tv.network_nodes(interfaces, routes)
+    by = {n["id"]: n for n in nodes}
+    assert "CNI): flannel" in by["net:flannel.1"]["desc"]
+    assert "CNI): άγνωστο" in by["net:cni0"]["desc"]
+    assert "CNI): άγνωστο" in by["net:calico"]["desc"]  # tunl0 alone does not prove Calico
+    assert "Calico" not in by["net:calico"]["label"]
+    assert "Υπάρχει δημόσια IP" in by["net:eth9"]["desc"]
+    assert "μόνο αν επιτρέπουν" in by["net:eth9"]["desc"]
+    assert by["net:mystery"]["network_info"]["Ποιος το έφτιαξε"] == "άγνωστο"
+    assert by["net:mystery"]["network_info"]["Εσωτερικό ή εξωτερικό"] == "άγνωστο"
+    assert by["net:mystery"]["status"] == "down"
+    # A public destination route does not mean a public address is bound locally.
+    info = tv.network_info(tv.parse_ip_brief("cni0 UP 10.1.0.1/24"),
+                           tv.parse_ip_route("8.8.8.8 dev cni0"))
+    assert "Υπάρχει δημόσια IP" not in info["Μέχρι πού φαίνεται"]
 
 
 if __name__ == "__main__":  # noqa

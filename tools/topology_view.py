@@ -13,6 +13,7 @@ Node status: alive | idle | stale | down | unknown. `hb` = heartbeat age in seco
 """
 import glob
 import html
+import ipaddress
 import json
 import os
 import re
@@ -367,6 +368,93 @@ def iface_of_ip(ifaces, ip):
     return None
 
 
+def address_scope(addrs):
+    """Classify observed addresses, never equating a default route with a public IP."""
+    scopes = set()
+    for value in addrs:
+        try:
+            ip = ipaddress.ip_interface(value).ip
+        except ValueError:
+            continue
+        if ip.is_loopback:
+            scopes.add("εσωτερικό, μόνο στο μηχάνημα (loopback)")
+        elif ip.version == 4 and any(ip in ipaddress.ip_network(c) for c in
+                                     ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")):
+            scopes.add("εσωτερικό, ιδιωτικό (RFC1918)")
+        elif ip.version == 4 and ip in ipaddress.ip_network("100.64.0.0/10"):
+            scopes.add("εσωτερικό, κοινόχρηστες διευθύνσεις (CGNAT 100.64.0.0/10)")
+        elif ip.is_link_local:
+            scopes.add("εσωτερικό, μόνο στην ίδια ζεύξη")
+        elif ip.version == 6 and ip in ipaddress.ip_network("fc00::/7"):
+            scopes.add("εσωτερικό, ιδιωτικό IPv6")
+        elif ip.is_global and not ip.is_multicast:
+            scopes.add("εξωτερικό, δημόσια IP")
+        else:
+            scopes.add(UNKNOWN_GR)
+    return "; ".join(sorted(scopes)) or UNKNOWN_GR
+
+
+def network_info(ifaces, routes, service_ips=None):
+    """Pure, conservative explanation for one interface/group from observed names and routes.
+
+    service_ips=None means an interface; a list means observed Kubernetes ClusterIPs.
+    Addresses alone cannot prove firewall policy, a cloud provider or a human creator.
+    """
+    names = {f["name"] for f in ifaces}
+    addrs = [a for f in ifaces for a in f["addrs"]]
+    bound_scope = address_scope(addrs)
+    default = any(r["dst"] == "default" and r["dev"] in names for r in routes)
+    what = "Διεπαφή δικτύου της VM· ακριβής ρόλος: άγνωστο."
+    creator = UNKNOWN_GR
+    reach = "άγνωστο· οι διευθύνσεις και οι διαδρομές δεν δείχνουν τους κανόνες πρόσβασης."
+    if service_ips is not None:
+        addrs = service_ips
+        what = "Εικονικές διευθύνσεις για σταθερή πρόσβαση σε υπηρεσίες Kubernetes. Το συνολικό service CIDR είναι άγνωστο."
+        creator = "Kubernetes· ποιος ζήτησε τη δημιουργία των Services: άγνωστο."
+        reach = "Συνήθως από pods και κόμβους του cluster· πρόσβαση εκτός cluster: άγνωστο."
+    elif names == {"lo"}:
+        what = "Τοπική επιστροφή (loopback): το μηχάνημα μιλά στον εαυτό του."
+        creator = "Πιθανότατα το λειτουργικό σύστημα."
+        reach = "Μόνο αυτό το μηχάνημα· άλλη συσκευή χρειάζεται ενδιάμεση υπηρεσία ή σήραγγα."
+    elif "tailscale0" in names:
+        what = "Ιδιωτικό εικονικό δίκτυο Tailscale· συνήθως χρησιμοποιεί το 100.64.0.0/10."
+        creator = "Πιθανότατα το Tailscale· ποιος το εγκατέστησε: άγνωστο."
+        reach = "Συσκευές του δικού σου tailnet, εφόσον το επιτρέπουν οι κανόνες του Tailscale."
+    elif "docker0" in names or any(n.startswith("br-") for n in names):
+        what = "Πιθανότατα γέφυρα Docker: συνδέει τοπικά containers."
+        creator = "Πιθανότατα το Docker· ποιος το ζήτησε: άγνωστο."
+        reach = "Συνήθως η VM και τα συνδεδεμένα containers· άλλες διαδρομές πρόσβασης: άγνωστο."
+    elif any(n.startswith(("cali", "flannel")) or n in ("tunl0", "cni0") for n in names):
+        cni = ("Calico" if any(n.startswith("cali") for n in names) else
+               "flannel" if any(n.startswith("flannel") for n in names) else UNKNOWN_GR)
+        what = f"Πιθανότατα δίκτυο pods του Kubernetes· πρόσθετο δικτύωσης (CNI): {cni}."
+        creator = "Πιθανότατα Kubernetes / πρόσθετο δικτύωσης· ποιος το εγκατέστησε: άγνωστο."
+        reach = "Πιθανότατα pods και κόμβοι του cluster, ανάλογα με τους κανόνες δικτύου."
+        addrs += [r["dst"] for r in routes if r["dev"] in names and r["dst"] != "default"]
+    elif default:
+        what = "Κύρια έξοδος της VM: από εδώ ξεκινά η προεπιλεγμένη διαδρομή προς άλλα δίκτυα."
+        creator = "Πιθανότατα λειτουργικό / πάροχος cloud· αν είναι OpenStack και ποιος το ρύθμισε: άγνωστο."
+        reach = "Πιθανότατα συσκευές του ίδιου ιδιωτικού δικτύου / έργου cloud, αν επιτρέπεται· το συγκεκριμένο έργο OpenStack: άγνωστο."
+    scope = address_scope(addrs)
+    if names != {"lo"} and service_ips is None:
+        if "εξωτερικό, δημόσια IP" in bound_scope:
+            reach += " Υπάρχει δημόσια IP στη διεπαφή· πρόσβαση από το internet μόνο αν επιτρέπουν δρομολόγηση και κανόνες πρόσβασης."
+        else:
+            reach += " Δημόσια IP στη διεπαφή δεν παρατηρείται· εξωτερική προώθηση ή δημόσια IP του cloud: άγνωστο."
+    return {"Τι είναι": what, "Εσωτερικό ή εξωτερικό": scope,
+            "Ποιος το έφτιαξε": creator, "Μέχρι πού φαίνεται": reach}
+
+
+def network_usage(nid, links):
+    """List only components tied to this network by existing graph edges."""
+    labels = {"dashboard": "dashboard", "terminal": "web terminal", "tailscale": "Tailscale serve",
+              "researcher": "ερευνητής", "redis": "Redis pods / υπηρεσίες", "prometheus": "Prometheus",
+              "grafana": "Grafana", "k8s": "Kubernetes / kube-apiserver",
+              "openai": "OpenAI", "anthropic": "Anthropic"}
+    peers = sorted({s if t == nid else t for s, t, *_ in links if nid in (s, t)})
+    return ", ".join(labels.get(p, p) for p in peers) or UNKNOWN_GR
+
+
 def network_nodes(ifaces, routes, k8s_snap=None, ts=None):
     """Nodes for the networks of this machine + (s, t, kind, why, how) edges to the components that use them.
     Calico veths (cali*) and tunl0 are one 'Calico' node; Kubernetes Service ClusterIPs (from the read-only snapshot,
@@ -384,18 +472,13 @@ def network_nodes(ifaces, routes, k8s_snap=None, ts=None):
         if n.startswith("cali") or n == "tunl0":
             continue
         v4 = _v4(f["addrs"])
-        desc = {"lo": "Loopback: υπηρεσίες που ακούν μόνο τοπικά.", "tailscale0": "Tailscale (WireGuard) tailnet.",
-                "docker0": "Docker bridge."}.get(n, "Διεπαφή δικτύου της VM.")
-        if n in defaults:
-            desc += " Προεπιλεγμένη διαδρομή (internet) μέσω " + ", ".join(
-                r["via"] for r in routes if r["dst"] == "default" and r["dev"] == n and r["via"]) + "."
-        nodes.append(_node(f"net:{n}", n, "networks", f"{', '.join(v4) or 'χωρίς IPv4'} · {f['state']}", desc,
+        nodes.append(_node(f"net:{n}", n, "networks", f"{', '.join(v4) or 'χωρίς IPv4'} · {f['state']}", "",
                            "down" if f["state"] == "DOWN" else "alive"))
     if cali or "tunl0" in by:
         t4 = _v4(by.get("tunl0", {}).get("addrs", []))
-        nodes.append(_node("net:calico", f"Calico ({len(cali)} veth)", "networks",
+        nodes.append(_node("net:calico", f"Calico ({len(cali)} veth)" if cali else "tunl0 (τύπος άγνωστος)", "networks",
                            "pod network · block " + (", ".join(blocks) or UNKNOWN_GR) + (f" · tunl0 {t4[0]}" if t4 else ""),
-                           "Δίκτυο pods του Kubernetes (Calico CNI: διεπαφές cali*, IPIP tunl0, block από `ip route` proto bird).",
+                           "",
                            "alive"))
     import ipaddress
     items = ((k8s_snap or {}).get("data") or {}).get("items", [])
@@ -410,7 +493,7 @@ def network_nodes(ifaces, routes, k8s_snap=None, ts=None):
         srt = sorted(svc_ips, key=ipaddress.ip_address)
         nodes.append(_node("net:k8s-svc", f"k8s Services ({len(svc_ips)})", "networks",
                            f"ClusterIP {srt[0]} … {srt[-1]} (CIDR: άγνωστο)",
-                           "Εικονικές διευθύνσεις Services (kube-proxy)· το service CIDR δεν φαίνεται χωρίς τη ρύθμιση του apiserver.",
+                           "",
                            "alive"))
     ids = {n["id"] for n in nodes}
 
@@ -448,9 +531,22 @@ def network_nodes(ifaces, routes, k8s_snap=None, ts=None):
     rs = [n for n in svc_names if n.startswith("redis")]
     if rs:
         L("redis", "net:k8s-svc", "Οι clients βρίσκουν το Redis μέσω Service.", "ClusterIP Services " + ", ".join(rs) + ".")
+    for component, prefix in (("prometheus", "prometheus"), ("grafana", "grafana"), ("k8s", "kubernetes")):
+        matches = [name for name in svc_names if name == prefix or name.startswith(prefix + "-")]
+        if matches:
+            L(component, "net:k8s-svc", "Πρόσβαση μέσω διεύθυνσης Service του Kubernetes.",
+              "ClusterIP Services " + ", ".join(matches) + ".")
     for d in defaults:
         L("anthropic", f"net:{d}", "Έξοδος προς το internet.", f"προεπιλεγμένη διαδρομή μέσω {d} (`ip route`).")
         L("openai", f"net:{d}", "Έξοδος προς το internet.", f"προεπιλεγμένη διαδρομή μέσω {d} (`ip route`).")
+    for node in nodes:
+        nid = node["id"]
+        members = ([f for f in ifaces if f["name"].startswith("cali") or f["name"] == "tunl0"]
+                   if nid == "net:calico" else [by[nid[4:]]] if nid[4:] in by else [])
+        info = network_info(members, routes, svc_ips if nid == "net:k8s-svc" else None)
+        info["Ποια μέρη μας το χρησιμοποιούν"] = network_usage(nid, links)
+        node["network_info"] = info
+        node["desc"] = "\n".join(f"{key}: {value}" for key, value in info.items())
     return nodes, links
 
 
@@ -781,7 +877,7 @@ leg.innerHTML='<b>Ομάδες</b><br>'+Object.values(D.groups).map(g=>`<i style
  +(use3d?'':'<br><b style="color:#ffb020">Λειτουργία 2D (χωρίς WebGL) — για 3D ενεργοποίησε το hardware acceleration στον browser</b>');
 leg.style.display='none';
 document.getElementById('bi').onclick=()=>{leg.style.display=leg.style.display==='none'?'block':'none'};
-function tip(n){return `<div class="tip"><b>${esc(n.label)}</b><br>${esc(n.desc)}<br><span class="k">τρέχει ως:</span> ${esc(n.runs_as)}`
+function tip(n){return `<div class="tip"><b>${esc(n.label)}</b><br>${esc(n.desc).replace(/\\n/g,'<br>')}<br><span class="k">τρέχει ως:</span> ${esc(n.runs_as)}`
  +(n.model?`<br><span class="k">μοντέλο:</span> ${esc(n.model)} / ${esc(n.effort)}${n.override?' <b style="color:#ffb020">(override)</b>':''}`:'')
  +`<br><span class="k">κατάσταση:</span> <span style="color:${SC[n.status]}">${esc(n.status)}</span>`
  +(n.hb!=null?`<br><span class="k">heartbeat:</span> ${n.hb}s`:'')+(n.extra?`<br>${esc(n.extra)}`:'')+'</div>';}
@@ -919,7 +1015,7 @@ def node_table(inv):
     """Plain rows for a fallback table under the 3D view (also usable when WebGL/CDN is blocked)."""
     return [{"κόμβος": n["label"], "ομάδα": GROUPS[n["group"]][0], "κατάσταση": n["status"],
              "μοντέλο": (f"{n['model']} / {n['effort']}" + (" (override)" if n.get("override") else "")) if n.get("model") else "",
-             "τρέχει ως": n["runs_as"], "heartbeat s": n["hb"]} for n in inv["nodes"]]
+             "τρέχει ως": n["runs_as"], "πληροφορίες δικτύου": n["desc"] if n.get("network_info") else "", "heartbeat s": n["hb"]} for n in inv["nodes"]]
 
 
 def routable(inv):
