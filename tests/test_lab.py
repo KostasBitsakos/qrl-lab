@@ -331,9 +331,13 @@ def test_sandbox():
         f.write(SPEC_SCRIPT)
     db = LabDB()
     exp = (dtm.datetime.now(dtm.timezone.utc) + dtm.timedelta(days=1)).isoformat(timespec="seconds")
+    pool = sorted(os.sched_getaffinity(0))
+    assert len(pool) >= 4, "sandbox disjoint-core checks need four available CPUs"
+    affinity = ",".join(map(str, pool))
+    child_affinity = ",".join(map(str, pool[-2:]))
     sb = {"branch": "dinos-tuning", "repo": "code", "seed_ranges_allowed": [[0, 999], [1000, 1004]],
           "seed_ranges_forbidden": [[1100, 1109], [20000, 2147483647]], "cpu_hours_budget": 1.0, "max_parallel": 2,
-          "cpu_affinity": "8-39", "per_run_wall_clock_hours": 0.5, "expires": exp}
+          "cpu_affinity": affinity, "per_run_wall_clock_hours": 0.5, "expires": exp}
     parent = {"name": "sbx", "scope": "sim", "kind": "sandbox", "sandbox": sb, "cwd": "code", "max_parallel": 2,
               "entries": [{"name": "marker", "cmd": ["true"]}], "limits": {"wall_clock_hours": 0.5}}
     rid = db.ask("approval", "sandbox", "b", scope="sim", spec=parent)
@@ -373,7 +377,7 @@ def test_sandbox():
     c = child(); c["entries"][0]["cmd"] = ["kubectl", "get", "pods"]; refused(c, "not allowed")
     c = child(); c["entries"][0]["wall_clock_hours"] = 5; refused(c, "wall_clock_hours")
     c = child(estimate_cpu_hours=1.0); c["max_parallel"] = 30; refused(c, "max_parallel")
-    c = child(cpu_affinity="0-3"); refused(c, "cpu_affinity")
+    c = child(cpu_affinity=str(max(pool) + 1)); refused(c, "cpu_affinity")
     c = child(); c["entries"] = [dict(c["entries"][0], cpus=1, wall_clock_hours=0.5) for _ in range(3)]
     refused(c, "max_parallel")                                    # 3 entries > 2 parallel
     c = child(); c["entries"] = [dict(c["entries"][0], cpus=2, wall_clock_hours=0.5) for _ in range(2)]
@@ -413,14 +417,14 @@ def test_sandbox():
     expect_error(lambda: G.assign_cores(range(8, 40), [], [1] * 25), "limit 24")
     expect_error(lambda: G.assign_cores(range(8, 10), [], [3]), "free cores")
     # accepted: seeds 5 and 1003 via args, pinned, recorded under the parent id, in the tuning worktree
-    c = child(cpu_affinity="24-39"); c["entries"][0]["cmd"] += ["--eval-seeds", "1000-1003"]
+    c = child(cpu_affinity=child_affinity); c["entries"][0]["cmd"] += ["--eval-seeds", "1000-1003"]
     out = sstart(c)
     assert out.returncode == 0, out.stderr
     run_id = out.stdout.split()[0]
     r = wait_status(db, run_id, ("done", "failed"))
     assert r["status"] == "done" and r["request_id"] == rid and r["cwd"] == os.path.realpath(wt), r
     assert "kid/s5" in r["name"]
-    assert json.load(open(os.path.join(r["run_dir"], "spec_entry.json")))["cpu_affinity"] == "24-39"
+    assert json.load(open(os.path.join(r["run_dir"], "spec_entry.json")))["cpu_affinity"] == child_affinity
     lj = json.load(open(os.path.join(r["run_dir"], "launcher.json")))
     assert lj["cpu_seconds"] is not None
     led = [json.loads(l) for l in open(os.path.join(TMP, ".lab", "sandbox", f"{rid}.ledger.jsonl"))]
@@ -439,7 +443,7 @@ def test_sandbox():
         assert ev["QRL_SANDBOX_SEEDS"] == "0-999,1000-1004" and ev["OMP_NUM_THREADS"] == "1" and "PYTHONPATH" not in ev, ev
         cores_seen.append(json.load(open(os.path.join(r2["run_dir"], "spec_entry.json")))["sandbox"]["cores"])
     assert all(len(x) == 2 for x in cores_seen) and not set(cores_seen[0]) & set(cores_seen[1]), cores_seen
-    assert all(8 <= x <= 39 for cs in cores_seen for x in cs), cores_seen
+    assert all(x in pool for cs in cores_seen for x in cs), cores_seen
     # (6) absolute expiry enforced by the supervisor (parent re-asked with an expiry 8 s ahead)
     sb2 = dict(sb, expires=(dtm.datetime.now(dtm.timezone.utc) + dtm.timedelta(seconds=8)).isoformat(timespec="seconds"),
                cpu_hours_budget=5.0)
@@ -631,6 +635,7 @@ def test_agents_tab_roles():
     from streamlit.testing.v1 import AppTest
     now = time.time()
     path = os.path.join(TMP, ".lab", "events.jsonl")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     old = open(path).read() if os.path.exists(path) else ""
     ev = [
         {"hook_event_name": "SubagentStart", "agent_id": "a1", "agent_type": "codex-reviewer", "model": "gpt-6.1-sol",
@@ -643,7 +648,9 @@ def test_agents_tab_roles():
     with open(path, "w") as f:
         f.write("".join(json.dumps(e) + "\n" for e in ev))
     try:
-        at = AppTest.from_file(os.path.join(TMP, "dashboard", "app.py"), default_timeout=60).run()
+        at = AppTest.from_file(os.path.join(TMP, "dashboard", "app.py"), default_timeout=60)
+        at.query_params["tab"] = "🤖 Πράκτορες"
+        at.run()
         assert not at.exception, at.exception
         text = " ".join(m.value for m in at.markdown) + " ".join(c.value for c in at.caption)
         assert "codex-reviewer: 1 εργασίες" in text, text[:2000]      # role names only (M-20261021-014)
@@ -1329,6 +1336,7 @@ def test_file_view():
 
 
 def test_paper_build():
+    from unittest import mock
     import paper_build as pb
     # todo counter: markers in comments do not count
     assert pb.count_todos("a \\todo{x} b % \\todo{c}\n\\todo[inline]{y} 50\\% \\todo{z}") == 3
@@ -1351,14 +1359,14 @@ def test_paper_build():
             pass
     assert pb.safe_path(g, "sections/a.tex").endswith("sections/a.tex")
     env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
-    os.environ.update({k: env[k] for k in env if k.startswith("GIT_")})
-    subprocess.run(["git", "-C", g, "init", "-q"], check=True)
-    subprocess.run(["git", "-C", g, "add", "paper"], check=True)
-    subprocess.run(["git", "-C", g, "commit", "-qm", "init"], check=True)
-    h = pb.save_file(g, "sections/a.tex", "new\n")
-    assert h and open(os.path.join(g, "paper", "sections", "a.tex")).read() == "new\n"
-    msg = subprocess.run(["git", "-C", g, "log", "-1", "--format=%s"], capture_output=True, text=True).stdout.strip()
-    assert msg == "paper: edit sections/a.tex from dashboard", msg
+    with mock.patch.dict(os.environ, {k: env[k] for k in env if k.startswith("GIT_")}):
+        subprocess.run(["git", "-C", g, "init", "-q"], check=True)
+        subprocess.run(["git", "-C", g, "add", "paper"], check=True)
+        subprocess.run(["git", "-C", g, "commit", "-qm", "init"], check=True)
+        h = pb.save_file(g, "sections/a.tex", "new\n")
+        assert h and open(os.path.join(g, "paper", "sections", "a.tex")).read() == "new\n"
+        msg = subprocess.run(["git", "-C", g, "log", "-1", "--format=%s"], capture_output=True, text=True).stdout.strip()
+        assert msg == "paper: edit sections/a.tex from dashboard", msg
     shutil.rmtree(g)
     # real latexmk, IEEE variant
     if shutil.which("latexmk"):
@@ -1489,6 +1497,7 @@ def test_lazy_tabs_and_tab_persistence():
 def test_files_tab_keeps_tab_and_glob():
     """Toggling a Files-tab widget after a ?path= deep link keeps the Files tab; globs expand to matches."""
     import file_view
+    from unittest import mock
     from streamlit.testing.v1 import AppTest
     hits = file_view.glob_entries("~/qrl-lab/*", roots=[file_view.HOME])
     assert hits and all(os.path.exists(h["path"]) for h in hits)
@@ -1500,22 +1509,23 @@ def test_files_tab_keeps_tab_and_glob():
     assert expect_glob_missing
     os.environ.pop("QRL_EAGER_TABS", None)
     try:
-        at = AppTest.from_file(os.path.join(TMP, "dashboard", "app.py"), default_timeout=60)
-        at.query_params["path"] = os.path.join(TMP, "tools")
-        at.run()
-        assert not at.exception, at.exception
-        assert at.session_state["tab"] == "\U0001F4C1 Αρχεία", at.session_state["tab"]
-        at.session_state["fb_path_in"] = os.path.join(TMP, "tools", "*.py")
-        at.run()
-        assert not at.exception and not any("Δεν υπάρχει" in w.value for w in at.warning)
-        assert any("αποτελέσματα" in c.value for c in at.caption)
-        for i in range(2):
-            at.toggle(key="fb_hidden").set_value(i == 0).run()
+        with mock.patch.object(file_view, "ROOTS", [os.path.realpath(TMP)]):
+            at = AppTest.from_file(os.path.join(TMP, "dashboard", "app.py"), default_timeout=60)
+            at.query_params["path"] = os.path.join(TMP, "tools")
+            at.run()
             assert not at.exception, at.exception
-            assert at.session_state["tab"] == "\U0001F4C1 Αρχεία", "toggle must not reset the tab"
-            # tabs default is part of the widget id (key_as_main_identity=False): it must not change between reruns
-            assert at.session_state["tab_default"] == "\U0001F4C1 Αρχεία"
-        ok("files tab: tab survives widget interaction after deep link; glob expands")
+            assert at.session_state["tab"] == "\U0001F4C1 Αρχεία", at.session_state["tab"]
+            at.session_state["fb_path_in"] = os.path.join(TMP, "tools", "*.py")
+            at.run()
+            assert not at.exception and not any("Δεν υπάρχει" in w.value for w in at.warning)
+            assert any("αποτελέσματα" in c.value for c in at.caption)
+            for i in range(2):
+                at.toggle(key="fb_hidden").set_value(i == 0).run()
+                assert not at.exception, at.exception
+                assert at.session_state["tab"] == "\U0001F4C1 Αρχεία", "toggle must not reset the tab"
+                # tabs default is part of the widget id (key_as_main_identity=False): it must not change between reruns
+                assert at.session_state["tab_default"] == "\U0001F4C1 Αρχεία"
+            ok("files tab: tab survives widget interaction after deep link; glob expands")
     finally:
         os.environ["QRL_EAGER_TABS"] = "1"
 
