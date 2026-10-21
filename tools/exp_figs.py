@@ -28,12 +28,16 @@ def _segments(ts, phases):
     return out
 
 
-def live_figure(cols, height=360):
+def live_figure(cols, height=360, fit=None, spike=None, show_actual=True):
     """Load (left axis) and pods / pending pods (right axis) over the last ticks; eval segments shaded."""
     t = cols.get("t", [])
     fig = make_subplots(specs=[[{"secondary_y": True}]])
-    fig.add_trace(go.Scatter(x=t, y=cols.get("load"), name="load (είσοδος)", mode="lines", line=dict(color=BLUE, width=1.6)),
-                  secondary_y=False)
+    if show_actual or not fit:
+        fig.add_trace(go.Scatter(x=t, y=cols.get("load"), name="load (είσοδος)", mode="lines",
+                                 line=dict(color=BLUE, width=1.6)), secondary_y=False)
+    if fit:
+        fig.add_trace(go.Scatter(x=t, y=fit, name="σχεδιασμένο ημίτονο (χωρίς θόρυβο/spike)", mode="lines",
+                                 line=dict(color=GREEN, width=1.6, dash="dash")), secondary_y=False)
     fig.add_trace(go.Scatter(x=t, y=cols.get("pods"), name="pods", mode="lines", line=dict(color=RED, width=2, shape="hv")),
                   secondary_y=True)
     if any(cols.get("pending") or []):
@@ -42,6 +46,10 @@ def live_figure(cols, height=360):
     for ph, a, b in _segments(t, cols.get("phase", [])):
         if ph == "eval":
             fig.add_vrect(x0=a, x1=b, fillcolor=GREY, opacity=0.12, line_width=0)
+    for ph, a, b in _segments(t, [bool(x) for x in spike or []]):
+        if ph:
+            fig.add_vrect(x0=a, x1=b, fillcolor=ORANGE, opacity=0.25, line_width=0,
+                          annotation_text="spike", annotation_position="top left")
     fig.update_yaxes(title_text="load", secondary_y=False)
     fig.update_yaxes(title_text="pods", secondary_y=True, rangemode="tozero", showgrid=False)
     fig.update_xaxes(title_text="tick")

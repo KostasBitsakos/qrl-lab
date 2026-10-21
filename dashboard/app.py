@@ -1542,14 +1542,49 @@ if _tab_live(tab_runs):  # lazy: hidden tabs do no work
             if not d or not d["columns"].get("t"):
                 st.caption("Το live αρχείο δεν διαβάζεται αυτή τη στιγμή (γράφεται)· ξαναδοκιμάζω σε 3 s.")
                 return
-            ph = {"pretrain": "προεκπαίδευση (source)", "train": "εκπαίδευση", "eval": "αξιολόγηση (greedy)"}
-            st.markdown(f"**{d.get('arm')}** · {d.get('variant')} · seed {d.get('seed')} · φάση "
-                        f"**{ph.get(d.get('phase'), d.get('phase'))}** {d.get('label') or ''} · tick {d.get('t'):,} "
-                        f"(εκπαίδευση {d.get('total_ticks', '?'):,} + αξιολογήσεις)" + (" · ✅ τελείωσε" if d.get("done") else ""))
-            st.plotly_chart(exp_figs.live_figure(d["columns"]), width="stretch", config={"displayModeBar": False},
-                            key="live_chart")
+            ph = {"pretrain": "προεκπαίδευση (source)", "train": "εκπαίδευση", "eval": "αξιολόγηση (greedy, test/val)"}
+            _phase = d.get("phase")
+            _icon = {"train": "🟢", "pretrain": "🟡", "eval": "🔵"}.get(_phase, "⚪")
+            st.markdown(f"{_icon} **ΦΑΣΗ: {ph.get(_phase, _phase)}** {d.get('label') or ''} · "
+                        f"βήμα (tick) **{d.get('t'):,}** (εκπαίδευση {d.get('total_ticks', '?'):,} ticks + αξιολογήσεις)"
+                        + (" · ✅ τελείωσε" if d.get("done") else ""))
+            st.markdown(f"**Μοντέλο:** {d.get('arm')} (agent `{d.get('agent')}`) · **seed** {d.get('seed')} · "
+                        f"**περιβάλλον:** `{d.get('variant')}`")
+            _vi = exp_view.variant_info(ROOT, d.get("variant"))
+            _cols = d["columns"]
+            _tt, _ld = _cols["t"], _cols.get("load") or []
+            _fit, _mask = exp_view.fit_sinusoid(_tt, _ld, _vi) if len(_ld) == len(_tt) else (None, None)
+            _mode = "Πραγματικό load"
+            if _fit:
+                _mode = st.radio("Εμφάνιση load", ["Πραγματικό load", "Σχεδιασμένο ημίτονο (χωρίς θόρυβο)", "Και τα δύο"],
+                                 horizontal=True, key="live_mode")
+            _sp = list(_mask or [])
+            _last = -99  # bridge gaps of <= 12 ticks inside one spike (|sin| touches zero)
+            for _i, _m in enumerate(_sp):
+                if _m:
+                    if _i - _last <= 12:
+                        for _j in range(_last + 1, _i):
+                            _sp[_j] = True
+                    _last = _i
+            st.plotly_chart(exp_figs.live_figure(_cols, fit=_fit, spike=_sp, show_actual=_mode != "Σχεδιασμένο ημίτονο (χωρίς θόρυβο)"),
+                            width="stretch", config={"displayModeBar": False}, key="live_chart")
             st.caption("Μπλε: load (είσοδος) · κόκκινο: pods · πορτοκαλί: pods σε εκκίνηση (startup delay) · "
-                       "γκρι φόντο: επεισόδια αξιολόγησης. Τελευταία ~600 ticks, ανανέωση κάθε 3 s.")
+                       "γκρι φόντο: επεισόδια αξιολόγησης · πορτοκαλί ζώνη: spike (εντοπίζεται από τα δεδομένα). "
+                       "Τελευταία ~600 ticks, ανανέωση κάθε 3 s.")
+            if _vi:
+                _sd = _vi["noise_sd"]
+                _pos = (f"{_vi['n_spikes']} spikes ανά επεισόδιο ({_vi['episode']} ticks), τυχαία θέση ανά επεισόδιο/seed, "
+                        f"σε διαστήματα [{_vi['seg']}·k+50, {_vi['seg']}·k+1100)" if _vi["multi"] else
+                        f"1 spike στα ticks {_vi['spike_pos']}–{_vi['spike_pos'] + _vi['spike_len']} κάθε επεισοδίου "
+                        f"των {_vi['episode']} ticks")
+                st.caption(f"**Θόρυβος και spikes υπάρχουν:** θόρυβος load N(0, {_sd}) σε πλάτος {_vi['load_amp']:.0f}"
+                           + (" (αόρατος σε αυτή την κλίμακα)" if _sd is not None and _sd < 2 else "")
+                           + f" · spike: +{_vi['spike_amp']:.0f}·|sin| για {_vi['spike_len']} ticks, {_pos}. "
+                           "Το παράθυρο των ~600 ticks συνήθως δεν τα περιέχει· ο αριθμός tick μέσα στο επεισόδιο δεν "
+                           "υπάρχει στο live αρχείο, γι' αυτό οι ζώνες spike εντοπίζονται από τις τιμές (απόκλιση από το "
+                           "ημίτονο), όχι από τη θέση. Το ημίτονο προσαρμόζεται μόνο στη φάση (πλάτος/συχνότητα από το env).")
+            else:
+                st.caption("Δεν βρέθηκαν παράμετροι θορύβου/spike για αυτό το variant (άγνωστο).")
         exp_live()
 
         st.markdown("##### 🔎 Λεπτομέρειες run (παράμετροι, απόσταση από στόχους, γραφήματα σε στυλ paper)")

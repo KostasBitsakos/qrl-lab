@@ -149,3 +149,20 @@ if __name__ == "__main__":
         if n.startswith("test_"):
             fn()
             print("  ok ", n)
+
+
+def test_variant_info_and_fit():
+    import math
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    i = ev.variant_info(root, "orig_d5")
+    assert i and i["noise_sd"] == 0.2 and i["spike_len"] == 100 and i["spike_pos"] == 1500 and not i["multi"]
+    assert ev.variant_info(root, "noise15")["noise_sd"] == 15.0
+    assert ev.variant_info(root, "multispike")["n_spikes"] == 4
+    assert ev.variant_info(root, "bogus") is None
+    t = list(range(3000, 3300))
+    load = [50 + 50 * math.sin(i["omega"] * x + 0.7) for x in t]
+    for k in range(100, 130):
+        load[k] += 100
+    fit, mask = ev.fit_sinusoid(t, load, i)
+    assert max(abs(a - b) for a, b in zip(fit, [50 + 50 * math.sin(i["omega"] * x + 0.7) for x in t])) < 1
+    assert all(mask[100:130:5]) and not any(mask[:90])

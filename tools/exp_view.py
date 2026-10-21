@@ -498,3 +498,63 @@ def remaining_runs(tuning_dir, code_dir, running=0, drivers=()):
 
 def hours_left(now, end=LOOP_END):
     return (parse_ts(end) - now).total_seconds() / 3600.0
+
+
+# ---------------------------------------------------------------- live chart: env info (noise, spikes)
+_VINFO = {}
+
+
+def variant_info(root, variant):
+    """Noise sd, spike amplitude/position/length and sinusoid parameters of an orig-env variant, read from
+    code-tuning/tuning/legacy/{orig_variants,env_orig}.py (never hard-coded). None if unavailable."""
+    key = (root, variant)
+    if key in _VINFO:
+        return _VINFO[key]
+    info = None
+    try:
+        import sys
+        cd = os.path.join(root, "code-tuning")
+        if cd not in sys.path:
+            sys.path.append(cd)
+        from tuning.legacy import env_orig, orig_variants as ov  # noqa: PLC0415
+        sd, multi, amp = ov.parse(str(variant))
+        env = env_orig.Environment()
+        if sd is None:  # default sd = the literal in the verbatim load()
+            import inspect
+            m = re.search(r"np\.random\.normal\(0,\s*([0-9.]+)\)", inspect.getsource(env_orig.Environment.load))
+            sd = float(m.group(1)) if m else None
+        info = {"noise_sd": sd, "multi": bool(multi), "spike_amp": float(amp or env.load_spike_amplitude),
+                "spike_len": int(env.spike_length), "spike_pos": int(env.spike_position),
+                "n_spikes": ov.N_SPIKES if multi else 1, "seg": ov.SEG, "episode": 5000,
+                "load_amp": float(env.load_amplitude), "omega": float(2 * math.pi / env.load_period)}
+    except (ImportError, SystemExit, AttributeError, OSError, ValueError):
+        info = None
+    _VINFO[key] = info
+    return info
+
+
+def fit_sinusoid(t, load, info, iters=4):
+    """Noise-free sinusoid A*sin(omega*t + phi) + A fitted (phase only, A and omega from the env) to the window,
+    ignoring spike ticks. Returns (fit values, spike_mask) or (None, None)."""
+    n = len(t)
+    if not info or n < 30:
+        return None, None
+    A, w = info["load_amp"], info["omega"]
+    s = [math.sin(w * x) for x in t]
+    c = [math.cos(w * x) for x in t]
+    keep = [True] * n
+    a = b = 0.0
+    for _ in range(iters):
+        ss = sum(s[i] * s[i] for i in range(n) if keep[i]); cc = sum(c[i] * c[i] for i in range(n) if keep[i])
+        sc = sum(s[i] * c[i] for i in range(n) if keep[i])
+        ys = sum((load[i] - A) * s[i] for i in range(n) if keep[i]); yc = sum((load[i] - A) * c[i] for i in range(n) if keep[i])
+        det = ss * cc - sc * sc
+        if abs(det) < 1e-9:
+            return None, None
+        a, b = (ys * cc - yc * sc) / det, (yc * ss - ys * sc) / det
+        fit = [A + a * s[i] + b * c[i] for i in range(n)]
+        tol = max(4 * (info["noise_sd"] or 0.2), 3.0)
+        keep = [abs(load[i] - fit[i]) <= tol for i in range(n)]
+        if sum(keep) < 10:
+            return None, None
+    return fit, [not k for k in keep]
