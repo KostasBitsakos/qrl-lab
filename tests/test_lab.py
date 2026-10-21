@@ -113,9 +113,11 @@ def test_routing_tags():
     m1 = db.researcher_send("plain routing", kind="message")
     m2 = db.researcher_send("fast one", req_model="haiku", req_effort="low")
     expect_error(lambda: db.researcher_send("x", req_model="gpt"), "μοντέλο")
-    expect_error(lambda: db.researcher_send("x", req_effort="max"), "ένταση")
+    expect_error(lambda: db.researcher_send("x", req_effort="impossible"), "ένταση")
     assert db.message(m2)["req_model"] == "haiku" and db.message(m2)["req_effort"] == "low"
     assert db.message(m1)["req_model"] is None
+    m3 = db.researcher_send("deep", req_model="claude-opus-5-5", req_effort="high")
+    assert (db.message(m3)["req_model"], db.message(m3)["req_effort"]) == ("claude-opus-5-5", "high")
     lines = watch_cycle(db)
     l1 = [l for l in lines if m1 in l][0]
     l2 = [l for l in lines if m2 in l][0]
@@ -601,7 +603,7 @@ def test_race_coordinator_and_retries():
     assert by[now - 700]["reasons"] == ["επανάληψη ×1"], "same label after a failure = retry"
     assert by[now - 600]["reasons"] == ["επανάληψη ×2"], "same task text = retry"
     # coordinator: idle without events (static, caption), running with recent main-session tool events
-    assert ln[0]["role"] == "coordinator" and ln[0]["status"] == "idle" and ln[0]["name"] == "Συντονιστής (Πάρις)"
+    assert ln[0]["role"] == "coordinator" and ln[0]["status"] == "idle" and ln[0]["name"] == "Συντονιστής (άγνωστο) · coordinator"
     cap = "Κανένας πράκτορας δεν δουλεύει"
     ev0 = [e for e in ev if e["agent_id"].startswith("x")]
     h = race_view.render(race_view.lanes(ev0, now=now), now)
@@ -1823,13 +1825,13 @@ def test_deputy():
     # command construction + answer posting
     assert deputy.cycle(db, lab, health, run=fake) >= 1
     cmd, kw = [c for c in calls if "τι κάνουμε;" in c[1]["input"]][0]
-    assert cmd[:4] == ["codex", "exec", "--sandbox", "read-only"] and 'approval_policy="never"' in cmd
+    assert os.path.isabs(cmd[0]) and cmd[1:4] == ["exec", "--sandbox", "workspace-write"] and 'approval_policy="never"' in cmd
     assert "gpt-6-luna" in cmd and 'model_reasoning_effort="low"' in cmd and cmd[-1] == "-" and "-C" in cmd, cmd
-    assert "delegate simple sub-tasks" in kw["input"] and "read-only" in cmd
+    assert "approved implementation work" in kw["input"] and "workspace-write" in cmd
     assert kw["timeout"] == 600 and "Never invent numbers" in kw["input"]
     assert "τι κάνουμε;" in kw["input"] and ".env" not in cmd
     th = db.thread(mid)
-    assert th[-1]["author"] == "codex" and th[-1]["model"] == "gpt-6-luna · αναπληρωτής" and "NEEDS" not in th[-1]["body"]
+    assert th[-1]["author"] == "codex" and th[-1]["model"] == "gpt-6-luna · low · αναπληρωτής" and "NEEDS" not in th[-1]["body"]
     assert db.message(mid)["status"] == "done"
     assert not os.path.exists(os.path.join(lab, "deputy_queue.jsonl"))
     mk = lambda t: [{"author": "researcher", "body": t}]
@@ -1838,11 +1840,11 @@ def test_deputy():
     assert deputy.choose_model(mk("x" * 300)) == ("gpt-6.1-sol", "medium")
     ok("deputy: message selection, command construction, model choice, answer")
 
-    # needs execution: waiting_approval + queue line; a failing codex is queued too
-    FAKE["text"] = "Χρειάζεται αλλαγή κώδικα.\nNEEDS_EXECUTION: yes"
+    # An approval boundary stays waiting_approval; CLI errors are retryable Codex failures.
+    FAKE["text"] = "Χρειάζεται έγκριση αλλαγής πειράματος.\nNEEDS_APPROVAL: yes"
     m4 = db.researcher_send("άλλαξε τον κώδικα")
     deputy.cycle(db, lab, health, run=fake)
-    assert db.message(m4)["status"] == "waiting_approval" and "σε ουρά για τον Claude" in db.thread(m4)[-1]["body"]
+    assert db.message(m4)["status"] == "waiting_approval" and "σε ουρά για τον Claude" not in db.thread(m4)[-1]["body"]
     FAKE["rc"] = 1
     m5 = db.researcher_send("ξανά")
     _fake_ok = fake
@@ -1852,9 +1854,11 @@ def test_deputy():
     hj = json.load(open(os.path.join(lab, "health.json")))
     assert hj["codex"]["state"] == "limit" and hj["codex"]["detail"].startswith("3:20 AM"), hj
     q = [json.loads(l) for l in open(os.path.join(lab, "deputy_queue.jsonl"))]
-    assert [e["message"] for e in q] == [m4, m5] and q[1]["reason"].startswith("codex exit 1"), q
-    assert db.message(m5)["status"] == "waiting_approval"
-    ok("deputy: queue writing")
+    assert [e["message"] for e in q] == [m4] and q[0]["reason"] == "approval required", q
+    handoff = [json.loads(l) for l in open(os.path.join(lab, "deputy_handoff.jsonl"))]
+    assert handoff[-1]["message"] == m5 and handoff[-1]["reason"].startswith("codex exit 1")
+    assert db.message(m5)["status"] == "failed"
+    ok("deputy: approval queue and retryable failure handoff")
 
     # stop as soon as health is ok: note in the threads, approval consumed, no second run
     n = len(calls)

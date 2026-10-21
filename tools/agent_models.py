@@ -9,15 +9,40 @@ Per subagent run (SubagentStart record of .lab/events.jsonl), first match wins:
      `agent_model`) for the same subagent type within CALL_S seconds before the start                  -> source "hook"
   4. the role's default from .claude/agents/<role>.md frontmatter                                       -> source "default"
   else «άγνωστο».
-Coordinator: the model of the latest SessionStart record (Claude Code reports it there), else «άγνωστο».
+Coordinator: actual deputy start/stop records and provider health, or the latest Claude SessionStart; absent
+evidence is «άγνωστο». Legacy coordinator_model() remains a SessionStart-only compatibility helper.
 """
 import glob
 import os
 import re
+import time
 
 UNKNOWN = "άγνωστο"
 MATCH_S = 1800.0
 CALL_S = 30.0
+
+AUTO_LABEL = "Πάρις (συντονιστής, αυτόματη επιλογή)"
+CLAUDE_MODELS = ("claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-1")
+MODEL_CHOICES = {None: AUTO_LABEL, "haiku": "Γρήγορο · Haiku", "sonnet": "Κανονικό · Sonnet",
+                 "opus": "Βαθύ · Opus", "codex": "Codex · αυτόματα",
+                 **{m: f"Claude · {m}" for m in CLAUDE_MODELS},
+                 **{m: f"Codex · {m}" for m in ("gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol", "gpt-6-astra",
+                                                "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna")}}
+CODEX_EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
+
+
+def effort_choices(model):
+    """Explicit Codex routing supports extended efforts; legacy Claude/auto keep their existing choices."""
+    if model == "codex" or str(model).startswith("gpt-"):
+        return CODEX_EFFORTS[:-1] if model == "codex" or str(model).endswith("-luna") else CODEX_EFFORTS
+    if str(model).startswith("claude-"):
+        return ("low", "medium", "high")  # per-family Claude efforts are not documented in the repo: conservative set
+    return ("low", "med", "high")
+
+
+EFFORT_HELP = ("Πόση προσπάθεια/σκέψη θα καταναλώσει η απάντηση. Codex: low–xhigh (luna) ή έως max/ultra (άλλα). "
+               "Claude: οι υποστηριζόμενες εντάσεις ανά μοντέλο δεν είναι τεκμηριωμένες στο repo, προσφέρονται "
+               "low/medium/high.")
 
 
 def text(model, source):
@@ -97,3 +122,66 @@ def coordinator_model(events):
         if e.get("hook_event_name") == "SessionStart" and e.get("model"):
             return str(e["model"])
     return ""
+
+
+def _msg_ts(m):
+    """Epoch seconds of a labdb message row (ts is local ISO text); 0 when unparsable."""
+    import datetime as dt
+    try:
+        return dt.datetime.fromisoformat(str(m.get("ts"))).timestamp()
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def coordinator_identity(events, health=None, now=None, messages=None):
+    """Observed coordinator identity, including temporary Codex leadership.
+
+    Health accepts raw health.json or race_view's normalized provider map. A Claude limit/down suppresses its
+    historical session identity. Never infer a deputy model from a routing default or an unrelated Codex worker.
+    """
+    now = time.time() if now is None else now
+    events = sorted((e for e in events if isinstance(e, dict) and float(e.get("ts") or 0) <= now),
+                    key=lambda e: float(e.get("ts") or 0))
+    health = health or {}
+    ch = health.get("claude") or health
+    fallback = ch.get("state") in ("limit", "down", "api_error")
+    sessions = [e for e in events if e.get("hook_event_name") == "SessionStart"]
+    deputies = [e for e in events if e.get("hook_event_name") == "SubagentStart"
+                and e.get("agent_type") == "codex-deputy"]
+    session = sessions[-1] if sessions else {}
+    deputy = deputies[-1] if deputies else {}
+    stopped = {e.get("agent_id") for e in events if e.get("hook_event_name") == "SubagentStop"}
+    deputy_active = bool(deputy and deputy.get("agent_id") not in stopped
+                         and now - float(deputy.get("ts") or 0) < 3 * 3600)
+    # Latest ACTUAL actor wins: Claude coordinator tool calls / session start vs the deputy's start and its
+    # posted answers (labq messages with author codex; row `model` looks like «gpt-6.1-sol · low · αναπληρωτής»).
+    claude_ts = max([float(x.get("ts") or 0) for x in events if not x.get("agent_id")
+                     and x.get("hook_event_name") in ("SessionStart", "PreToolUse", "PostToolUse")] or [0.0])
+    posts = [m for m in (messages or []) if m.get("author") == "codex" and "αναπληρωτής" in str(m.get("model") or "")
+             and 0 <= now - _msg_ts(m) < 3 * 3600]
+    post = max(posts, key=_msg_ts) if posts else None
+    dep_ts = max(float(deputy.get("ts") or 0) if deputy else 0.0, _msg_ts(post) if post else 0.0)
+    use_deputy = bool((deputy or post) and (fallback or (deputy_active and dep_ts >= claude_ts) or
+                      (dep_ts > claude_ts and now - dep_ts < 3 * 3600)))
+    if use_deputy and not deputy_active and post and _msg_ts(post) >= float(deputy.get("ts") or 0 if deputy else 0):
+        e = {"ts": _msg_ts(post), "model": str(post["model"]).split("·")[0].strip(), "agent_id": post.get("id"),
+             "effort": (str(post["model"]).split("·") + ["", ""])[1].strip()}
+        provider, role, active = "Codex", "codex-deputy", False
+    elif use_deputy:
+        e, provider, role, active = deputy, "Codex", "codex-deputy", deputy_active
+    elif session and not fallback:
+        e, provider, role = session, "Claude", "coordinator"
+        active = any(not x.get("agent_id") and x.get("hook_event_name") in ("PreToolUse", "PostToolUse")
+                     and 0 <= now - float(x.get("ts") or 0) < 120 for x in events)
+    else:
+        e, provider, role = {}, UNKNOWN, "coordinator"
+        active = not fallback and any(not x.get("agent_id") and x.get("hook_event_name") in ("PreToolUse", "PostToolUse")
+                                     and 0 <= now - float(x.get("ts") or 0) < 120 for x in events)
+    label = f"Συντονιστής ({provider})" + (" · αναπληρωτής" if role == "codex-deputy" else "")
+    mdl = str(e.get("model") or "")
+    card = ("🧭 Συντονιστής (Codex αναπληρωτής)" if role == "codex-deputy" else f"🧭 Συντονιστής ({provider})") \
+        + " · μοντέλο " + (mdl or UNKNOWN)
+    return {"card": card, "provider": provider, "role": role, "model": str(e.get("model") or ""),
+            "effort": str(e.get("effort") or ""), "active": active, "agent_id": e.get("agent_id"),
+            "label": label, "ts": float(e.get("ts") or 0),
+            "task": str(e.get("task") or e.get("summary") or "")}

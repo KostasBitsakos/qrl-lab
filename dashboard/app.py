@@ -75,18 +75,19 @@ HEALTH = os.path.join(LAB, "health.json")
 # Labels name the ROLE only: the model of each task is resolved per event by tools/agent_models.py (agent_log --model,
 # the Agent call's model, else «προεπιλογή: <frontmatter model>»), never asserted here (M-20261021-014/-016).
 AGENTS = {
-    "coordinator": ("Συντονιστής (Claude)", "#2a78d6", "🧭"),
+    "coordinator": ("Συντονιστής", "#2a78d6", "🧭"),
     "codex": ("Codex (OpenAI)", "#eb6834", "🟠"),
     "codex-quick": ("codex-quick (Codex)", "#f2a07b", "🟠"),
     "codex-reviewer": ("codex-reviewer (Codex)", "#d9480f", "🟠"),
     "codex-researcher": ("codex-researcher (Codex)", "#a8561f", "🟠"),
     "codex-architect": ("codex-architect (Codex)", "#7a2e0e", "🟠"),
     "codex-deputy": ("codex-deputy (Codex)", "#b58900", "🟠"),
-    "Explore": ("Explore (Claude · μοντέλο ανά εργασία)", "#1baf7a", "🔎"),
-    "runner": ("runner (Claude · μοντέλο ανά εργασία)", "#eda100", "🏃"),
-    "engineer": ("engineer (Claude · μοντέλο ανά εργασία)", "#e87ba4", "🛠️"),
-    "scholar": ("scholar (Claude · μοντέλο ανά εργασία)", "#008300", "📚"),
-    "writer": ("writer (Claude · μοντέλο ανά εργασία)", "#6250d6", "✍️"),
+    "codex-engineer": ("codex-engineer (Codex)", "#0e7490", "🛠️"),
+    "Explore": ("Explore · μοντέλο ανά εργασία", "#1baf7a", "🔎"),
+    "runner": ("runner · μοντέλο ανά εργασία", "#eda100", "🏃"),
+    "engineer": ("engineer · μοντέλο ανά εργασία", "#e87ba4", "🛠️"),
+    "scholar": ("scholar · μοντέλο ανά εργασία", "#008300", "📚"),
+    "writer": ("writer · μοντέλο ανά εργασία", "#6250d6", "✍️"),
 }
 
 
@@ -113,8 +114,7 @@ REQ_SCOPE = {"sim": "προσομοίωση", "real": "πραγματικό clus
 REQ_STATE = {"open": ("🟡", "ανοιχτό"), "approved": ("✅", "εγκρίθηκε"), "rejected": ("⛔", "απορρίφθηκε"),
              "changes_requested": ("✏️", "ζητήθηκαν αλλαγές"), "answered": ("💬", "απαντήθηκε"),
              "acknowledged": ("👁️", "το είδες"), "withdrawn": ("↩️", "αποσύρθηκε")}
-MODEL_CHOICES = {None: "Αυτόματα", "haiku": "Γρήγορο · Haiku", "sonnet": "Κανονικό · Sonnet", "opus": "Βαθύ · Opus",
-                 "codex": "Codex"}
+MODEL_CHOICES = agent_models.MODEL_CHOICES
 RUN_STATUS = {"starting": ("🔵", "ξεκινά"), "running": ("🟢", "τρέχει"), "done": ("✅", "ολοκληρώθηκε"),
               "failed": ("❌", "απέτυχε"), "stopped": ("⏹️", "διακόπηκε")}
 
@@ -601,7 +601,7 @@ def _brain_state():
         msgs = [{"ts": r[0], "author": r[1], "title": r[2], "body": r[3]} for r in rows]
     except Exception:  # noqa: BLE001 - display only
         msgs = []
-    return brain_view.derive(read_events_raw(1500), msgs, time.time())  # shared incremental tail (M-20261021-023)
+    return brain_view.derive(read_events_raw(1500), msgs, time.time(), health=read_health())
 
 
 @st.fragment(run_every=3)
@@ -772,8 +772,8 @@ def render_message(m, key="chat"):
         if m["author"] == "researcher" and m["status"]:
             si, sl = MSG_STATUS.get(m["status"], ("", m["status"]))
             extra = f" · {si} {sl}"
-            if m.get("req_model") or m.get("req_effort") not in (None, "med"):
-                extra += f" · 🎛️ {m.get('req_model') or 'auto'}/{m.get('req_effort') or 'med'}"
+        if m["author"] == "researcher" and (m.get("req_model") or m.get("req_effort") not in (None, "med")):
+            extra += f" · 🎛️ {m.get('req_model') or 'auto'}/{m.get('req_effort') or 'med'}"
         label = f"{name} · {m['model']}" if m.get("model") else name
         st.caption(f"**{label}** · {fmt_ts(m['ts'])} · {KIND_LABEL.get(m['kind'], m['kind'])}"
                    f"{extra} · `{m['id']}`")
@@ -1063,9 +1063,16 @@ with tab_chat:
                                 format_func=lambda k: KIND_LABEL[k], default="message", key="composer_kind")
     sel_l, sel_r, _sp = st.columns([2, 2, 4])
     req_model = sel_l.selectbox("Μοντέλο", list(MODEL_CHOICES), format_func=MODEL_CHOICES.get, key="req_model_sel",
-                                help="Ποιο μοντέλο απαντά σε αυτό το μήνυμα. Αυτόματα = αποφασίζει ο συντονιστής.")
-    req_effort = sel_r.selectbox("Ένταση", ["low", "med", "high"], index=1, key="req_effort_sel",
-                                 help="Πόση προσπάθεια/σκέψη θα καταναλώσει η απάντηση.")
+                                help="Ποιο μοντέλο απαντά σε αυτό το μήνυμα. Πάρις = αποφασίζει ο συντονιστής. Η επιλογή αποθηκεύεται "
+                                     "μαζί με το μήνυμα (req_model/req_effort).")
+    efforts = agent_models.effort_choices(req_model)
+    previous_effort = st.session_state.get("req_effort_sel", "medium")
+    previous_effort = ("medium" if previous_effort == "med" else previous_effort) if "medium" in efforts else previous_effort
+    if previous_effort not in efforts:
+        previous_effort = "med" if "med" in efforts else "medium"
+    st.session_state["req_effort_sel"] = previous_effort
+    req_effort = sel_r.selectbox("Ένταση", list(efforts), index=1, key="req_effort_sel",
+                                 help=agent_models.EFFORT_HELP)
     # Voice input (local faster-whisper). Outside any fragment, so a recording is never refreshed away.
     rec = st.audio_input("🎙️ Φωνητικό μήνυμα", key=f"voice_rec_{st.session_state.get('voice_n', 0)}")
     voice_wav = None
@@ -1174,7 +1181,14 @@ if _tab_live(tab_agents):  # lazy: hidden tabs do no work (M-20261021-023)
             raw_ev = read_events_raw()
             resolved = agent_models.resolve(raw_ev, agent_models.defaults_from_agents_dir(ROOT))
             mtext = {aid: agent_models.text(m, src_) for aid, (m, src_) in resolved.items()}
-            coord_m = agent_models.text(agent_models.coordinator_model(raw_ev), "event")
+            try:
+                _dd = db()
+                _codex_msgs = [m for t in _dd.threads(8) for m in _dd.thread(t["thread_id"])[-6:] if m["author"] == "codex"]
+                _dd.close()
+            except Exception:
+                _codex_msgs = []
+            identity = agent_models.coordinator_identity(raw_ev, read_health(), messages=_codex_msgs)
+            coord_m = agent_models.text(identity["model"], "event")
             if race_on:
                 ln = race_view.lanes(race_view.load_events(EVENTS), roles={k: (role_name(k), v[1]) for k, v in AGENTS.items()},
                                      health=race_view.load_health(HEALTH), models=mtext, coord_model=coord_m)
@@ -1186,14 +1200,21 @@ if _tab_live(tab_agents):  # lazy: hidden tabs do no work (M-20261021-023)
             # who is working now
             st.markdown("##### Τώρα")
             keys = active_agent_keys(ev)
+            if identity["role"] == "codex-deputy":
+                keys = [k for k in keys if k != "codex-deputy"]
             cols = st.columns(min(4, max(1, len(keys))))
             for i, k in enumerate(keys):
                 sub = ev[(ev["agent"] == k) & (ev["event"].isin(["PreToolUse", "PostToolUse", "SubagentStart"]))]
                 name, color, icon = AGENTS.get(k, (k, OTHER_COLOR, "🛠️"))
+                if k == "coordinator":
+                    name = identity["label"]
+                    if identity["role"] == "codex-deputy":
+                        sub = ev[(ev["agent_id"] == identity["agent_id"]) & (ev["event"] == "SubagentStart")]
                 with cols[i % len(cols)].container(border=True):
                     st.markdown(f"{icon} **{name}**")
                     if k == "coordinator":
                         st.caption(f"μοντέλο: {coord_m}")
+                        st.caption(f"ρόλος: {identity['role']} · effort: {identity['effort'] or '—'}")
                     else:
                         ids_k = [r["agent_id"] for r in raw_ev if r.get("hook_event_name") == "SubagentStart"
                                  and agent_key(r.get("agent_type")) == k and r.get("agent_id") in mtext]
@@ -1203,7 +1224,7 @@ if _tab_live(tab_agents):  # lazy: hidden tabs do no work (M-20261021-023)
                         st.caption("καμία ενέργεια ακόμη")
                         continue
                     last = sub.iloc[-1]
-                    busy = (now_ - last["ts"]).total_seconds() < 120
+                    busy = identity["active"] if k == "coordinator" else (now_ - last["ts"]).total_seconds() < 120
                     st.caption(("🟢 εργάζεται" if busy else "⚪ σε αναμονή") + f" · {ago((now_ - last['ts']).total_seconds())} πριν")
                     st.markdown(f"`{last['tool'] or last['event']}` {str(last['summary'])[:120]}")
             # timeline

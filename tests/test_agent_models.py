@@ -69,6 +69,61 @@ def test_race_lane_shows_resolved_model():
     assert "engineer · claude-opus-5-5" in h and "προεπιλογή: sonnet" in h and "Sonnet" not in h
 
 
+def test_deputy_identity_and_race_use_actual_model():
+    events = [{"hook_event_name": "SessionStart", "ts": 1, "model": "claude-opus-5-5"},
+              {"hook_event_name": "PreToolUse", "ts": 99, "tool_name": "Bash"},
+              {"hook_event_name": "SubagentStart", "ts": 90, "agent_id": "log-d", "agent_type": "codex-deputy",
+               "model": "gpt-6-astra", "effort": "high", "task": "Fix dashboard"}]
+    health = {"claude": {"state": "limit"}, "codex": {"state": "ok"}}
+    identity = am.coordinator_identity(events, health, 100)
+    assert (identity["provider"], identity["role"], identity["model"], identity["active"]) == (
+        "Codex", "codex-deputy", "gpt-6-astra", True)
+    lanes = race_view.lanes(events, now=100, health=health, coord_model="claude-opus-5-5")
+    assert lanes[0]["model"] == "gpt-6-astra" and lanes[0]["status"] == "running"
+    assert len(lanes) == 1 and lanes[0]["reasons"] == []
+    rendered = race_view.render(lanes, 100)
+    assert "Codex" in rendered and "codex-deputy" in rendered and "gpt-6-astra" in rendered
+    assert "claude-opus" not in rendered and "Πάρις" not in rendered
+    stopped = events + [{"hook_event_name": "SubagentStop", "ts": 101, "agent_id": "log-d"}]
+    assert not am.coordinator_identity(stopped, health, 102)["active"]
+    assert race_view.lanes(stopped, now=102, health=health)[0]["status"] == "idle"
+    resumed = stopped + [{"hook_event_name": "SessionStart", "ts": 103, "model": "claude-opus-5-5"}]
+    assert am.coordinator_identity(resumed, {"state": "ok"}, 104)["provider"] == "Claude"
+
+
+def test_limit_does_not_invent_deputy_or_reuse_old_claude_model():
+    events = [{"hook_event_name": "SessionStart", "ts": 1, "model": "claude-opus-5-5"}]
+    i = am.coordinator_identity(events, {"state": "limit"}, 100)
+    assert i["provider"] == am.UNKNOWN and i["model"] == "" and not i["active"]
+    assert am.coordinator_identity([], now=100)["model"] == ""
+    # An unrelated Codex worker never becomes the coordinator.
+    events.append({"hook_event_name": "SubagentStart", "ts": 99, "agent_type": "codex-engineer",
+                   "agent_id": "e", "model": "gpt-6-sol"})
+    assert am.coordinator_identity(events, {"state": "limit"}, 100)["model"] == ""
+
+
+def test_latest_actor_and_card():
+    ev = [{"hook_event_name": "SessionStart", "ts": 10, "model": "claude-opus-5-5"},
+          {"hook_event_name": "PreToolUse", "ts": 20, "tool_name": "Bash"}]
+    ok = {"claude": {"state": "ok"}}
+    assert am.coordinator_identity(ev, ok, 30)["card"] == "🧭 Συντονιστής (Claude) · μοντέλο claude-opus-5-5"
+    import datetime as dt
+    msg = {"author": "codex", "id": "M-1", "model": "gpt-6.1-sol · low · αναπληρωτής",
+           "ts": dt.datetime.fromtimestamp(40).isoformat()}
+    i = am.coordinator_identity(ev, ok, 50, messages=[msg])
+    assert i["card"] == "🧭 Συντονιστής (Codex αναπληρωτής) · μοντέλο gpt-6.1-sol" and not i["active"]
+    ev.append({"hook_event_name": "PreToolUse", "ts": 45, "tool_name": "Bash"})  # Claude acted later again
+    assert am.coordinator_identity(ev, ok, 50, messages=[msg])["provider"] == "Claude"
+
+
+def test_selector_options():
+    assert am.MODEL_CHOICES[None].startswith("Πάρις")
+    for m in ("claude-opus-5-5", "claude-fable-5-1", "gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra"):
+        assert m in am.MODEL_CHOICES
+    assert am.effort_choices("claude-haiku-5-5") == ("low", "medium", "high")
+    assert "xhigh" in am.effort_choices("gpt-6.1-sol") and "ultra" not in am.effort_choices("gpt-6-luna")
+
+
 if __name__ == "__main__":
     for n, fn in list(globals().items()):
         if n.startswith("test_"):

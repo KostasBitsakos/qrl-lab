@@ -20,8 +20,15 @@ from contextlib import contextmanager
 SCHEMA_VERSION = 2
 
 MESSAGE_STATUSES = ("new", "delivered", "acknowledged", "in_progress", "waiting_approval", "done", "failed")
-REQ_MODELS = ("haiku", "sonnet", "opus", "codex")
-REQ_EFFORTS = ("low", "med", "high")
+CODEX_MODELS = ("gpt-6-luna", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-astra",
+                "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna")
+CODEX_EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
+CODEX_MODEL_EFFORTS = {model: CODEX_EFFORTS[:-1] if model.endswith("luna") else CODEX_EFFORTS
+                      for model in CODEX_MODELS}
+# Keep historical values readable/sendable while accepting explicit Codex routing.
+CLAUDE_MODELS = ("claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-1")
+REQ_MODELS = ("haiku", "sonnet", "opus", "codex") + CLAUDE_MODELS + CODEX_MODELS
+REQ_EFFORTS = CODEX_EFFORTS + ("med",)
 PAPER_THREAD_TITLE = "Paper — συγγραφή"
 VENUES_THREAD_TITLE = "Συζήτηση συνεδρίων"
 VENUES_TAG = "[VENUES]"  # the coordinator routes messages starting with this tag to the scholar
@@ -230,6 +237,9 @@ class LabDB:
             raise LabError(f"Άγνωστο μοντέλο: {req_model}")
         if req_effort is not None and req_effort not in REQ_EFFORTS:
             raise LabError(f"Άγνωστη ένταση: {req_effort}")
+        effective_model = "gpt-6-luna" if req_model == "haiku" else req_model
+        if effective_model in CODEX_MODEL_EFFORTS and req_effort == "ultra" and req_effort not in CODEX_MODEL_EFFORTS[effective_model]:
+            raise LabError(f"Η ένταση ultra δεν υποστηρίζεται από το {req_model}.")
         for given, allowed, what in ((req_writers, PAPER_WRITERS, "συγγραφέας"), (req_reviewers, PAPER_REVIEWERS, "reviewer")):
             for x in given or []:
                 if x not in allowed:
@@ -546,6 +556,11 @@ class LabDB:
 
     def audit(self, limit=100):
         return [dict(r) for r in self.conn.execute("SELECT * FROM audit ORDER BY id DESC LIMIT ?", (limit,))]
+
+    def record_agent_action(self, actor, action, target, detail):
+        """Record structured deputy execution metadata without changing approvals or runs."""
+        with self.tx() as c:
+            self._audit(c, actor, action, target, json.dumps(detail, ensure_ascii=False))
 
 
 def paper_requests(reqs, paper_tid):

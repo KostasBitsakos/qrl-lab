@@ -1,27 +1,30 @@
 #!/usr/bin/env python3
-"""Codex as read-only deputy coordinator while Claude is unavailable (usage limit or coordinator down).
+"""Codex acting deputy coordinator while Claude is unavailable (usage limit or coordinator down).
 
 Pieces (all pure or injectable, so tests mock the subprocess):
   maybe_file_request(db, health, now)   health_watch calls this; files ONE proposal for the researcher, de-duplicated
   approved_request(db, lab)             the researcher's approval (Decisions tab), never decided here
   pick_messages(db)                     researcher messages (new/delivered) the coordinator has not taken
-  build_command / build_prompt          `codex exec` read-only, approval never, gpt-6-sol, medium effort
-  handle_message(...)                   take, ask Codex, post the answer, queue it for Claude if it needs execution
+  build_command / build_prompt          `codex exec` workspace-write, existing project approval rules
+  handle_message(...)                   take, execute approved work, post the answer and a Claude handoff
   tick(lab)                             health_watch: start the `deputy` tmux window when needed (idempotent)
   main()                                the loop; stops (and posts a note) as soon as health is ok again
 
 Run:  python3 tools/deputy.py          (normally started by health_watch in tmux window `deputy`)
-Execution requests from Codex are never executed here: they go to .lab/deputy_queue.jsonl for the coordinator.
+Project edits are allowed; experiments and privileged actions retain their existing approval gates.
 """
 import datetime as dt
+import glob
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from labdb import LabDB, LabError  # noqa: E402
+from labdb import LabDB, LabError, CODEX_MODELS, CODEX_MODEL_EFFORTS  # noqa: E402
 import agent_log  # noqa: E402
 import codex_health  # noqa: E402
 
@@ -32,22 +35,24 @@ DOWN_GRACE = 600
 TIMEOUT = 600
 INTERVAL = float(os.environ.get("QRL_DEPUTY_INTERVAL", "10"))
 ACTOR = "codex-deputy"
-# Model per message (DECISIONS 2026-10-17): simple/short -> luna, otherwise sol. Both read-only.
+# Automatic routing stays economical; explicit researcher choices take precedence.
 SOL_MODEL, SOL_EFFORT = "gpt-6.1-sol", "medium"
 LUNA_MODEL, LUNA_EFFORT = "gpt-6-luna", "low"
 SIMPLE_MAX_CHARS = 200
 COMPLEX_HINTS = ("κώδικ", "code", "sim", "paper", "review", "έλεγξ", "ανάλυσ", "analy", "σχέδι", "design", "plan",
                  "literature", "βιβλιογραφ", "bug", "test", "why", "γιατί")
-MODEL_LABEL = "gpt-6.1-sol · αναπληρωτής"  # default / stop note
+MODEL_LABEL = "codex-deputy · αναπληρωτής"  # No model is inferred when no action was recorded.
 CODEX_MODEL = SOL_MODEL
 CODEX_EFFORT = SOL_EFFORT
 MARK = "NEEDS_EXECUTION:"
+APPROVAL_MARK = "NEEDS_APPROVAL:"
 OUTAGE_STATES = ("limit", "down")
 BODY = (
     "Ο Claude (συντονιστής) δεν είναι διαθέσιμος ({state}{reset}). Αν εγκρίνεις, ο Codex αναλαμβάνει προσωρινά σε "
-    "ΚΑΤΑΣΤΑΣΗ ΜΟΝΟ-ΑΝΑΓΝΩΣΗΣ: απαντά στα μηνύματά σου στο chat, κάνει έρευνα και σχέδια. Δεν αλλάζει αρχεία, δεν "
-    "τρέχει πειράματα, δεν κάνει sudo. Ό,τι χρειάζεται εκτέλεση γράφεται σε ουρά (.lab/deputy_queue.jsonl) και το "
-    "παίρνει ο Claude όταν επιστρέψει. Σταματά αυτόματα μόλις ο Claude ξαναδουλέψει."
+    "ρόλο αναπληρωτή συντονιστή: απαντά και εκτελεί εγκεκριμένες εργασίες μέσα στο ~/qrl-lab, με καταγραφή "
+    "μοντέλου και έντασης και παράδοση στον Claude. Οι εγκρίσεις πειραμάτων μέσω launch_run.py, sudo, πραγματικού "
+    "cluster και QPU παραμένουν υποχρεωτικές. Δεν αλλάζει πειράματα ή μοντέλα χωρίς ρητή έγκριση. "
+    "Σταματά αυτόματα μόλις ο Claude ξαναδουλέψει."
 )
 
 
@@ -117,15 +122,41 @@ def pick_messages(db):
 
 
 def choose_model(thread):
-    """(model, effort) for the researcher's last message: short and without complexity hints -> luna, else sol."""
-    last = ""
+    """Honor this message's selection; legacy Claude choices map to bounded Codex equivalents."""
+    last, request = "", {}
     for m in thread:
         if m.get("author") == "researcher":
             last = m.get("body") or ""
+            request = m
     low = last.lower()
     if last and len(last) <= SIMPLE_MAX_CHARS and last.count("\n") < 3 and not any(h in low for h in COMPLEX_HINTS):
-        return LUNA_MODEL, LUNA_EFFORT
-    return SOL_MODEL, SOL_EFFORT
+        model, effort = LUNA_MODEL, LUNA_EFFORT
+    else:
+        model, effort = SOL_MODEL, SOL_EFFORT
+    selected = request.get("req_model")
+    legacy = {"haiku": (LUNA_MODEL, LUNA_EFFORT), "sonnet": (SOL_MODEL, SOL_EFFORT),
+              "opus": ("gpt-6-astra", "high"),
+              "claude-haiku-5-5": (LUNA_MODEL, LUNA_EFFORT), "claude-sonnet-5-5": (SOL_MODEL, SOL_EFFORT),
+              "claude-opus-5-5": ("gpt-6-astra", "high"), "claude-fable-5-1": (SOL_MODEL, SOL_EFFORT)}
+    if selected in legacy:
+        model, effort = legacy[selected]
+    elif selected in CODEX_MODELS:
+        model = selected
+        effort = "low" if model.endswith("luna") else ("high" if model == "gpt-6-astra" else "medium")
+    elif selected not in (None, "", "codex"):
+        raise LabError(f"Unknown deputy model: {selected}")
+    requested_effort = request.get("req_effort")
+    if requested_effort:
+        effort = "medium" if requested_effort == "med" else requested_effort
+        if effort == "ultra" and selected in (None, "", "codex") and model.endswith("luna"):
+            model = SOL_MODEL  # Automatic routing must choose a model supporting the requested effort.
+    validate_routing(model, effort)
+    return model, effort
+
+
+def validate_routing(model, effort):
+    if model not in CODEX_MODELS or effort not in CODEX_MODEL_EFFORTS[model]:
+        raise LabError("Unsupported Codex model or effort.")
 
 
 def build_prompt(agents_md, thread):
@@ -133,38 +164,58 @@ def build_prompt(agents_md, thread):
     for m in thread:
         lines.append(f"[{m['id']} · {m['author']} · {m['kind']}]\n{m['body']}")
     return (
-        f"{agents_md}\n\n---\nYou are the READ-ONLY deputy coordinator of QRL-Lab while Claude is unavailable. "
-        "Read docs/PLAN.md if needed. Never read or print secrets (.env, ~/.ssh, tokens, credentials). "
-        "You may delegate simple sub-tasks (lookups, summaries, formatting) to gpt-6-luna; keep the important reasoning "
-        "on gpt-6.1-sol. You stay read-only either way. "
+        f"{agents_md}\n\n---\nYou are the acting Codex deputy coordinator of QRL-Lab while Claude is unavailable. "
+        "This is approved implementation work for the researcher's requested task inside ~/qrl-lab. "
+        "Read CLAUDE.md, docs/PLAN.md sections 1, 2 and 6, and relevant docs/rules before acting. "
+        "You may edit project tools, dashboard and docs within the task scope, run focused checks, and complete "
+        "ordinary approved execution work. Honor the researcher's per-message model/effort. Automatic routing "
+        "is bounded to gpt-6-luna/low for simple work and gpt-6.1-sol/medium otherwise; do not launch other agents "
+        "without an explicit delegation request. Never read or print secrets (.env, ~/.ssh, tokens, credentials). "
+        "Never modify experiments, model code, run configs, live drivers or results without explicit task-specific "
+        "approval. All experiment launches MUST use tools/launch_run.py with its matching approved frozen spec; "
+        "never bypass approval checks, forge decisions, edit approval records/specs, or run training directly. "
+        "Sudo, changes outside qrl-lab, real-cluster mutations, QPU jobs, git push and publishing require their "
+        "existing explicit approvals. Do not run sudo, kubectl mutations or QPU jobs here. "
+        "Report changed paths, checks, remaining work and any approval needed so Claude can resume. "
         "Answer the researcher's last message in Greek, under 300 words, short and direct, with file pointers. "
-        "If answering well requires execution (editing files, code changes, running anything, sudo, kubectl, "
-        "starting runs), do not attempt it: say what is needed and end your answer with a final line "
-        f"'{MARK} yes'. Otherwise end with '{MARK} no'.\n\n--- THREAD ---\n" + "\n\n".join(lines))
+        "Address the researcher as Κώστα. Complete authorized work now. If an existing approval boundary blocks "
+        f"remaining work, explain precisely and end with '{APPROVAL_MARK} yes'; otherwise end with "
+        f"'{APPROVAL_MARK} no'.\n\n--- THREAD ---\n" + "\n\n".join(lines))
 
 
 def codex_bin():
-    """Absolute path of the codex CLI: PATH, else the nvm install (the watchdog's env has no nvm PATH)."""
-    import glob, shutil
-    found = shutil.which("codex") or sorted(glob.glob(os.path.expanduser("~/.nvm/versions/node/*/bin/codex")))[-1:]
-    path = found if isinstance(found, str) else (found[0] if found else "codex")
-    d = os.path.dirname(path)
-    if d and d not in os.environ.get("PATH", "").split(os.pathsep):   # codex is '#!/usr/bin/env node': node lives there too
-        os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
-    return path
+    """Find executable CLI and its Node runtime even in the watchdog's clean PATH."""
+    def versions(path):
+        return tuple(int(n) for n in re.findall(r"\d+", path))
+    bins = sorted(glob.glob(os.path.expanduser("~/.nvm/versions/node/*/bin")), key=versions, reverse=True)
+    candidates = [shutil.which("codex")] + [os.path.join(d, "codex") for d in bins]
+    for path in candidates:
+        if not path or not os.path.isfile(path) or not os.access(path, os.X_OK):
+            continue
+        # The npm CLI uses /usr/bin/env node; prefer the Node installed beside it.
+        dirs = [os.path.dirname(os.path.abspath(path))] + bins
+        for directory in dirs:
+            node = os.path.join(directory, "node")
+            if os.path.isfile(node) and os.access(node, os.X_OK):
+                os.environ["PATH"] = directory + os.pathsep + os.environ.get("PATH", "")
+                return os.path.abspath(path)
+        if shutil.which("node"):
+            return os.path.abspath(path)
+    raise FileNotFoundError("Codex CLI or Node.js runtime not found; restore the project Codex/nvm installation and retry")
 
 
 def build_command(out_file, cwd=KIT, model=CODEX_MODEL, effort=CODEX_EFFORT):
-    return [codex_bin(), "exec", "--sandbox", "read-only", "-c", 'approval_policy="never"',
+    validate_routing(model, effort)
+    return [codex_bin(), "exec", "--sandbox", "workspace-write", "-c", 'approval_policy="never"',
             "-c", f'model_reasoning_effort="{effort}"', "-m", model, "-C", cwd,
             "--skip-git-repo-check", "--ephemeral", "-o", out_file, "-"]
 
 
 def parse_answer(text):
-    """Split Codex's text into (answer, needs_execution)."""
+    """Split Codex's text into (answer, needs_approval); accept the historical marker too."""
     lines = (text or "").rstrip().splitlines()
     needs = False
-    if lines and lines[-1].strip().upper().startswith(MARK):
+    if lines and lines[-1].strip().upper().startswith((APPROVAL_MARK, MARK)):
         needs = lines[-1].split(":", 1)[1].strip().lower().startswith("y")
         lines = lines[:-1]
     return "\n".join(lines).strip(), needs
@@ -175,29 +226,56 @@ def queue_append(lab, entry):
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
+def write_handoff(lab, entry):
+    """Append an outcome for every action, including failed/retryable Codex calls."""
+    with open(os.path.join(lab, "deputy_handoff.jsonl"), "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    with open(os.path.join(lab, "deputy_handoff.md"), "a", encoding="utf-8") as f:
+        f.write(f"\n## {entry['message']} — {entry['status']}\n\n"
+                f"Role: {entry['role']}; model: {entry['model']}; effort: {entry['effort']}.\n"
+                f"Task: {entry['task']}\n\n{entry['answer']}\n\n"
+                f"Next: {entry['next_action']}\n")
+
+
 def handle_message(db, lab, mid, run=subprocess.run, now=None):
-    """Take one message, run Codex read-only, post the answer. Returns "done" or "queued"."""
+    """Act on one message within project rules. Failures are retryable, never Claude-only execution queues."""
     import tempfile
     m, thread = db.take(mid, actor=ACTOR)
+    # Only context through this message belongs to its task; a simultaneous follow-up stays pending.
+    thread = thread[:next(i for i, item in enumerate(thread) if item["id"] == mid) + 1]
     with open(os.path.join(KIT, "AGENTS.md"), encoding="utf-8") as f:
         agents = f.read()
     prompt = build_prompt(agents, thread)
-    model, effort = choose_model(thread)
-    label = f"{model} · αναπληρωτής"
-    out = tempfile.mktemp(prefix="deputy-", suffix=".txt")
-    log_id = agent_log.start("codex-deputy", model, effort, f"deputy reply to {mid}", m["thread_id"])
-    answer, needs, err = "", False, ""
+    routing_error = ""
     try:
-        r = run(build_command(out, model=model, effort=effort), input=prompt, capture_output=True, text=True,
-                timeout=TIMEOUT, cwd=KIT)
-        if r.returncode == 0 and os.path.exists(out):
-            with open(out, encoding="utf-8") as f:
-                answer, needs = parse_answer(f.read())
-            codex_health.mark_ok(lab)
-        else:
-            err = f"codex exit {r.returncode}"
-            if codex_health.record(getattr(r, "stdout", "") or "", getattr(r, "stderr", "") or "", lab=lab):
-                err += " (όριο χρήσης Codex)"
+        # A newer message in this thread must not replace the selection of the message being handled.
+        model, effort = choose_model([m])
+    except LabError as e:
+        model, effort, routing_error = SOL_MODEL, SOL_EFFORT, str(e)
+    label = f"{model} · {effort} · αναπληρωτής"
+    task = f"{mid}: {m['body'][:120]}".replace("\n", " ")
+    metadata = {"role": ACTOR, "model": model, "effort": effort, "task": task,
+                "message": mid, "thread": m["thread_id"],
+                "req_model": m.get("req_model"), "req_effort": m.get("req_effort")}
+    log_id = agent_log.start(ACTOR, model, effort, task, m["thread_id"])
+    db.record_agent_action(ACTOR, "deputy_start", mid, metadata)
+    db.set_status(mid, "in_progress", actor=ACTOR)
+    fd, out = tempfile.mkstemp(prefix="deputy-", suffix=".txt")
+    os.close(fd)
+    answer, needs, err = "", False, routing_error
+    try:
+        if not err:
+            r = run(build_command(out, model=model, effort=effort), input=prompt, capture_output=True, text=True,
+                    timeout=TIMEOUT, cwd=KIT)
+            if r.returncode == 0 and os.path.exists(out):
+                with open(out, encoding="utf-8") as f:
+                    answer, needs = parse_answer(f.read())
+                if answer:
+                    codex_health.mark_ok(lab)
+            else:
+                err = f"codex exit {r.returncode}"
+                if codex_health.record(getattr(r, "stdout", "") or "", getattr(r, "stderr", "") or "", lab=lab):
+                    err += " (όριο χρήσης Codex)"
     except subprocess.TimeoutExpired:
         err = f"timeout {TIMEOUT}s"
     except OSError as e:
@@ -205,23 +283,38 @@ def handle_message(db, lab, mid, run=subprocess.run, now=None):
     finally:
         if os.path.exists(out):
             os.remove(out)
-    agent_log.end(log_id, "failed" if (err or not answer) else "done")
     if err or not answer:
-        needs, answer = True, f"Ο αναπληρωτής Codex δεν κατάφερε να απαντήσει ({err or 'κενή απάντηση'})."
+        needs = False
+        status = "failed"
+        answer = (f"Κώστα, ο αναπληρωτής Codex δεν ολοκλήρωσε την εργασία ({err or 'κενή απάντηση'}). "
+                  "Η εργασία παραμένει ανολοκλήρωτη· μπορείς να ζητήσεις νέα προσπάθεια από τον Codex "
+                  "μετά την αποκατάσταση του CLI/Node ή του ορίου χρήσης. Η παράδοση έχει καταγραφεί.")
+    else:
+        status = "waiting_approval" if needs else "done"
+    db.post("codex", answer, mid, kind="reply", model=label, set_status=status)
+    next_action = ("Researcher approval required; review the precise boundary in the reply." if needs else
+                   "Retry with Codex after resolving the reported failure." if status == "failed" else
+                   "Claude: review the reported changes/checks and continue any stated remaining work.")
+    entry = {**metadata, "ts": time.time() if now is None else now, "status": status,
+             "reason": err or ("approval required" if needs else "completed"),
+             "answer": answer[:2000], "next_action": next_action}
+    write_handoff(lab, entry)
     if needs:
-        answer += "\n\n_(σε ουρά για τον Claude)_"
-    db.post("codex", answer, mid, kind="reply", model=label, set_status="waiting_approval" if needs else "done")
-    if needs:
-        queue_append(lab, {"ts": time.time() if now is None else now, "message": mid, "thread": m["thread_id"],
-                           "reason": err or "needs execution", "answer": answer[:2000]})
-    return "queued" if needs else "done"
+        queue_append(lab, entry)
+    db.record_agent_action(ACTOR, "deputy_end", mid, entry)
+    agent_log._append({"hook_event_name": "SubagentStop", "agent_id": log_id, "agent_type": ACTOR,
+                       **metadata, "status": "failed" if status == "failed" else "done", "ts": entry["ts"]})
+    return status
 
 
 def stop_note(db, lab, handled):
     for mid in handled:
         try:
-            db.post("codex", "Ο Claude επέστρεψε· ο αναπληρωτής Codex σταματά. Ό,τι χρειάζεται εκτέλεση είναι στην ουρά.",
-                    mid, kind="status", model=MODEL_LABEL)
+            label = next((m["model"] for m in reversed(db.thread(db.message(mid)["thread_id"]))
+                          if m["author"] == "codex" and m.get("model")), MODEL_LABEL)
+            db.post("codex", "Ο Claude επέστρεψε· ο αναπληρωτής Codex σταματά. Οι ενέργειες και τα εκκρεμή "
+                    "βήματα έχουν καταγραφεί στο ~/qrl-lab/.lab/deputy_handoff.md.",
+                    mid, kind="status", model=label)
         except LabError:
             pass
 
