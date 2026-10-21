@@ -1503,7 +1503,7 @@ if _tab_live(tab_runs):  # lazy: hidden tabs do no work
                 st.info("Δεν υπάρχουν ακόμη runs. Κάθε πείραμα ξεκινά μόνο μέσω `tools/launch_run.py` και μόνο αφού "
                         "εγκρίνεις το run spec του στην καρτέλα «Αποφάσεις».", icon="📈")
                 return
-            rows = []
+            rows = {"opus": [], "astra": []}
             for r in runs:
                 prog = None
                 pj = read_text(os.path.join(r["run_dir"], "progress.json"))
@@ -1516,28 +1516,33 @@ if _tab_live(tab_runs):  # lazy: hidden tabs do no work
                 started, ended = parse_ts(r["started"]), parse_ts(r["ended"])
                 dur = ((ended or dt.datetime.now(dt.timezone.utc)) - started).total_seconds() if started else None
                 icon, label = RUN_STATUS.get(r["status"], ("", r["status"]))
-                rows.append({"run": r["run_id"], "όνομα": r["name"], "κατάσταση": f"{icon} {label}",
+                rows[exp_view.branch_of(r["request_id"], r["cwd"] if "cwd" in r.keys() else None)].append({"run": r["run_id"], "όνομα": r["name"], "κατάσταση": f"{icon} {label}",
                              "πρόοδος": prog, "πεδίο": REQ_SCOPE.get(r["scope"], r["scope"]), "έγκριση": r["request_id"],
                              "διάρκεια": ago(dur) if dur is not None else "—", "exit": "" if r["exit_code"] is None else r["exit_code"],
                              "κώδικας": (r["code_sha"] or "")[:12]})
-            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch",
-                         column_config={"πρόοδος": st.column_config.ProgressColumn("πρόοδος", min_value=0, max_value=1,
-                                                                                   format="percent")})
+            for _col, (_b, _bn, _) in zip(st.columns(2), exp_view.BRANCHES):
+                with _col:
+                    st.markdown(f"**Runs · branch {_bn}** ({len(rows[_b])})")
+                    if not rows[_b]:
+                        st.caption("Κανένα run σε αυτό το branch.")
+                        continue
+                    st.dataframe(pd.DataFrame(rows[_b]), hide_index=True, width="stretch",
+                                 column_config={"πρόοδος": st.column_config.ProgressColumn(
+                                     "πρόοδος", min_value=0, max_value=1, format="percent")})
         runs_view()
 
         st.markdown("##### 📡 Live: φορτίο και pods του run που τρέχει τώρα")
 
-        @st.fragment(run_every=3)
-        def exp_live():
-            cands = exp_view.live_candidates(EXP_RESULTS, time.time())
+        def exp_live_col(bk, bname, rdir):
+            cands = exp_view.live_candidates(rdir, time.time())
             if not cands:
-                st.info("Κανένα run με live καταγραφή αυτή τη στιγμή — ενεργοποιείται από τον επόμενο κύκλο. "
+                st.info(f"Branch {bname}: κανένα run με live καταγραφή αυτή τη στιγμή — ενεργοποιείται από τον επόμενο κύκλο. "
                         "Μέχρι τότε δες τον πίνακα runs από πάνω.", icon="📡")
                 return
             paths = [p for p, _ in cands]
             ages = dict(cands)
-            pick = st.selectbox("Live run", paths, key="live_pick",
-                                format_func=lambda p: f"{os.path.relpath(p, EXP_RESULTS)} · ενημέρωση πριν {ages.get(p, 0):.0f} s")
+            pick = st.selectbox("Live run", paths, key=f"live_pick_{bk}",
+                                format_func=lambda p: f"{os.path.relpath(p, rdir)} · ενημέρωση πριν {ages.get(p, 0):.0f} s")
             d = exp_view.read_live(pick)
             if not d or not d["columns"].get("t"):
                 st.caption("Το live αρχείο δεν διαβάζεται αυτή τη στιγμή (γράφεται)· ξαναδοκιμάζω σε 3 s.")
@@ -1545,7 +1550,7 @@ if _tab_live(tab_runs):  # lazy: hidden tabs do no work
             ph = {"pretrain": "προεκπαίδευση (source)", "train": "εκπαίδευση", "eval": "αξιολόγηση (greedy, test/val)"}
             _phase = d.get("phase")
             _icon = {"train": "🟢", "pretrain": "🟡", "eval": "🔵"}.get(_phase, "⚪")
-            st.markdown(f"{_icon} **ΦΑΣΗ: {ph.get(_phase, _phase)}** {d.get('label') or ''} · "
+            st.markdown(f"**Branch {bname}**\n\n{_icon} **ΦΑΣΗ: {ph.get(_phase, _phase)}** {d.get('label') or ''} · "
                         f"βήμα (tick) **{d.get('t'):,}** (εκπαίδευση {d.get('total_ticks', '?'):,} ticks + αξιολογήσεις)"
                         + (" · ✅ τελείωσε" if d.get("done") else ""))
             st.markdown(f"**Μοντέλο:** {d.get('arm')} (agent `{d.get('agent')}`) · **seed** {d.get('seed')} · "
@@ -1557,7 +1562,7 @@ if _tab_live(tab_runs):  # lazy: hidden tabs do no work
             _mode = "Πραγματικό load"
             if _fit:
                 _mode = st.radio("Εμφάνιση load", ["Πραγματικό load", "Σχεδιασμένο ημίτονο (χωρίς θόρυβο)", "Και τα δύο"],
-                                 horizontal=True, key="live_mode")
+                                 horizontal=True, key=f"live_mode_{bk}")
             _sp = list(_mask or [])
             _last = -99  # bridge gaps of <= 12 ticks inside one spike (|sin| touches zero)
             for _i, _m in enumerate(_sp):
@@ -1567,7 +1572,7 @@ if _tab_live(tab_runs):  # lazy: hidden tabs do no work
                             _sp[_j] = True
                     _last = _i
             st.plotly_chart(exp_figs.live_figure(_cols, fit=_fit, spike=_sp, show_actual=_mode != "Σχεδιασμένο ημίτονο (χωρίς θόρυβο)"),
-                            width="stretch", config={"displayModeBar": False}, key="live_chart")
+                            width="stretch", config={"displayModeBar": False}, key=f"live_chart_{bk}")
             st.caption("Μπλε: load (είσοδος) · κόκκινο: pods · πορτοκαλί: pods σε εκκίνηση (startup delay) · "
                        "γκρι φόντο: επεισόδια αξιολόγησης · πορτοκαλί ζώνη: spike (εντοπίζεται από τα δεδομένα). "
                        "Τελευταία ~600 ticks, ανανέωση κάθε 3 s.")
@@ -1585,6 +1590,11 @@ if _tab_live(tab_runs):  # lazy: hidden tabs do no work
                            "ημίτονο), όχι από τη θέση. Το ημίτονο προσαρμόζεται μόνο στη φάση (πλάτος/συχνότητα από το env).")
             else:
                 st.caption("Δεν βρέθηκαν παράμετροι θορύβου/spike για αυτό το variant (άγνωστο).")
+        @st.fragment(run_every=3)
+        def exp_live():
+            for _col, (_b, _bn, _rel) in zip(st.columns(2), exp_view.BRANCHES):
+                with _col:
+                    exp_live_col(_b, _bn, os.path.join(ROOT, _rel))
         exp_live()
 
         st.markdown("##### 🔎 Λεπτομέρειες run (παράμετροι, απόσταση από στόχους, γραφήματα σε στυλ paper)")

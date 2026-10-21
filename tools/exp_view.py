@@ -16,6 +16,9 @@ UNKNOWN = "άγνωστο"
 RESULTS_REL = os.path.join("code-tuning", "tuning", "results")
 CLOSENESS_REL = os.path.join("code-tuning", "tuning", "closeness.py")
 HISTORY_REL = os.path.join(".lab", "tuning", "closeness_history.json")
+ASTRA_RESULTS_REL = os.path.join("code-tuning-astra", "tuning", "results")
+BRANCHES = (("opus", "Opus", RESULTS_REL), ("astra", "astra", ASTRA_RESULTS_REL))
+ASTRA_REQUESTS = ("R-20261021-007",)
 LOOP_REQUESTS = ("R-20261019-001", "R-20261020-005", "R-20261021-001")
 LOOP_END = "2026-10-21T23:59:00+00:00"
 LIVE_MAX_AGE = 120.0
@@ -97,6 +100,16 @@ def list_results(results_dir):
     ps = [p for p in glob.glob(os.path.join(results_dir, "*", "*.json")) if is_main_result(p)]
     ps.sort(key=lambda p: os.path.getmtime(p), reverse=True)
     return [(os.path.basename(os.path.dirname(p)), p) for p in ps]
+
+
+def branch_of(request_id=None, cwd=None, path=None):
+    """'astra' or 'opus' (default) for a run: sandbox request id, else cwd / result path (code-astra, code-tuning-astra)."""
+    if request_id in ASTRA_REQUESTS:
+        return "astra"
+    for x in (cwd, path):
+        if x and re.search(r"(^|[\\/])code(-tuning)?-astra([\\/]|$)", str(x)):
+            return "astra"
+    return "opus"
 
 
 def out_path_of(cmd, cwd):

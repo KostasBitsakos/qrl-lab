@@ -166,3 +166,13 @@ def test_variant_info_and_fit():
     fit, mask = ev.fit_sinusoid(t, load, i)
     assert max(abs(a - b) for a, b in zip(fit, [50 + 50 * math.sin(i["omega"] * x + 0.7) for x in t])) < 1
     assert all(mask[100:130:5]) and not any(mask[:90])
+
+
+def test_branch_of():
+    assert ev.branch_of("R-20261021-007") == "astra"
+    assert ev.branch_of("R-20261021-005") == "opus"
+    assert ev.branch_of(None, "/h/qrl-lab/code-tuning-astra/tuning") == "astra"
+    assert ev.branch_of(None, "/h/qrl-lab/code-astra") == "astra"
+    assert ev.branch_of(None, None, "/h/qrl-lab/code-tuning-astra/tuning/results/c1/x.json") == "astra"
+    assert ev.branch_of("R-20261019-001", "/h/qrl-lab/code-tuning") == "opus"
+    assert ev.branch_of() == "opus"
