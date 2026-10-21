@@ -212,11 +212,13 @@ def two_words(label, task="", role=""):
     return " ".join(words)[:DESC_MAX]
 
 
-def lanes(events, now=None, roles=None, window=6 * 3600, max_lanes=16, health=None):
+def lanes(events, now=None, roles=None, window=6 * 3600, max_lanes=16, health=None, models=None, coord_model=None):
     """Race lanes: one per subagent run (plus the coordinator when it acted in the last 2 minutes).
 
     Active runs first, then the most recently finished. Each lane: dict(role, name, model, label, start, end,
     status ("running"|"done"|"failed"), elapsed, progress (0..1 or None for unknown), color).
+    models: {agent_id: display text} (tools/agent_models.py) overrides the record's model; coord_model: the
+    coordinator lane's model text.
     """
     now = time.time() if now is None else now
     roles = roles or {}
@@ -227,7 +229,8 @@ def lanes(events, now=None, roles=None, window=6 * 3600, max_lanes=16, health=No
         if not aid:
             continue
         if e.get("hook_event_name") == "SubagentStart":
-            runs[aid] = {"role": _atype(e), "model": e.get("model") or "", "label": lab, "start": float(e["ts"]),
+            runs[aid] = {"role": _atype(e), "model": (models or {}).get(aid) or e.get("model") or "", "label": lab,
+                         "start": float(e["ts"]),
                          "end": None, "status": "running",
                          "task": str(e.get("task") or e.get("summary") or "").strip()}
             order.append(aid)
@@ -254,7 +257,7 @@ def lanes(events, now=None, roles=None, window=6 * 3600, max_lanes=16, health=No
     ctask = next((str(e.get("summary") or "") for e, _ in reversed(coord)
                   if e.get("hook_event_name") == "PreToolUse" and e.get("tool_name") not in ("Agent", "Task")
                   and e.get("summary")), "")
-    out.insert(0, {"role": "coordinator", "model": "", "label": "", "task": ctask, "start": last,
+    out.insert(0, {"role": "coordinator", "model": coord_model or "", "label": "", "task": ctask, "start": last,
                    "end": None if busy else last, "status": "running" if busy else "idle", "coord": True,
                    "activity": min(1.0, 0.25 + 0.75 * min(1.0, n_rec / 20.0)) if busy else 0.0,
                    "reasons": ["Claude: " + HEALTH_GREEK[cstate]] if busy and cstate in HEALTH_GREEK else [], "final": False})

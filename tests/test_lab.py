@@ -646,11 +646,14 @@ def test_agents_tab_roles():
         at = AppTest.from_file(os.path.join(TMP, "dashboard", "app.py"), default_timeout=60).run()
         assert not at.exception, at.exception
         text = " ".join(m.value for m in at.markdown) + " ".join(c.value for c in at.caption)
-        assert "codex-architect · gpt-6-astra · high" in text, text[:2000]
-        assert "codex-reviewer · gpt-6.1-sol · medium: 1 εργασίες" in text
+        assert "codex-reviewer: 1 εργασίες" in text, text[:2000]      # role names only (M-20261021-014)
+        assert "gpt-6-astra" not in " ".join(c.value for c in at.caption if "εργασίες" in c.value)
         frames = [d.value for d in at.dataframe]
         spans = [d for d in frames if "ρόλος" in d.columns][0]
-        assert set(spans["ρόλος"]) >= {"codex-reviewer", "codex-architect", "engineer (Claude Sonnet)"}, spans
+        assert set(spans["ρόλος"]) >= {"codex-reviewer", "codex-architect", "engineer"}, spans
+        assert spans[spans["ρόλος"] == "codex-architect"].iloc[0]["μοντέλο"] == "gpt-6-astra"
+        assert spans[spans["ρόλος"] == "codex-architect"].iloc[0]["effort"] == "high"
+        assert spans[spans["ρόλος"] == "engineer"].iloc[0]["μοντέλο"] == "άγνωστο"   # no log, no frontmatter in TMP
         r = spans[spans["ρόλος"] == "codex-reviewer"].iloc[0]
         assert r["μοντέλο"] == "gpt-6.1-sol" and r["κατάσταση"] == "done" and r["διάρκεια"] == "1 λεπτά"
         assert spans[spans["ρόλος"] == "codex-architect"].iloc[0]["κατάσταση"] == "running"
@@ -1672,7 +1675,7 @@ def test_dashboard():
     at.run()
     caps = [x.value for x in at.caption]
     assert any("Codex (OpenAI) · gpt-6-sol**" in v for v in caps), caps
-    assert any(v.startswith("**Συντονιστής (Claude Opus)** ·") for v in caps), caps  # no model: author only
+    assert any(v.startswith("**Συντονιστής (Claude)** ·") for v in caps), caps  # no model: author only
     ok("dashboard: model label rendered")
     amid = db.researcher_send("με αρχείο", thread_id=cur, attachments=[("n.txt", b"hello")], root=TMP)
     at.run()

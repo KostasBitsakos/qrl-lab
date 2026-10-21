@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 import modreload  # noqa: E402
 import importlib  # noqa: E402
 _LOCAL_MODS = ["labdb", "file_view", "replytext", "k8s_view", "prom_view", "web_terminal", "sudo_ui", "race_view", "brain_view",
-               "perm_store", "ext_catalog", "summarize_runs", "paper_plots", "paper_build", "uploads", "installed_view", "access", "outage", "models_view", "banners", "sandbox_view", "topology_view", "topology_ui", "exp_view", "exp_figs"]
+               "perm_store", "ext_catalog", "summarize_runs", "agent_models", "paper_plots", "paper_build", "uploads", "installed_view", "access", "outage", "models_view", "banners", "sandbox_view", "topology_view", "topology_ui", "exp_view", "exp_figs"]
 for _n in _LOCAL_MODS:  # first import so they are in sys.modules, then reload those whose file changed
     importlib.import_module(_n)
 modreload.reload_changed(_LOCAL_MODS)
@@ -59,6 +59,7 @@ import summarize_runs  # noqa: E402
 import paper_plots  # noqa: E402
 import paper_build  # noqa: E402
 import exp_view  # noqa: E402
+import agent_models  # noqa: E402
 import exp_figs  # noqa: E402
 from uploads import UploadError, attachment_paths  # noqa: E402
 
@@ -69,20 +70,27 @@ HEARTBEAT = os.path.join(LAB, "bridge_heartbeat")
 HEALTH = os.path.join(LAB, "health.json")
 
 # Categorical slots in fixed order (validated reference palette, light mode). Colour follows the agent, never rank.
+# Labels name the ROLE only: the model of each task is resolved per event by tools/agent_models.py (agent_log --model,
+# the Agent call's model, else «προεπιλογή: <frontmatter model>»), never asserted here (M-20261021-014/-016).
 AGENTS = {
-    "coordinator": ("Συντονιστής (Claude Opus)", "#2a78d6", "🧭"),
+    "coordinator": ("Συντονιστής (Claude)", "#2a78d6", "🧭"),
     "codex": ("Codex (OpenAI)", "#eb6834", "🟠"),
-    "codex-quick": ("codex-quick · gpt-6-luna · low", "#f2a07b", "🟠"),
-    "codex-reviewer": ("codex-reviewer · gpt-6.1-sol · medium", "#d9480f", "🟠"),
-    "codex-researcher": ("codex-researcher · gpt-6.1-sol · medium", "#a8561f", "🟠"),
-    "codex-architect": ("codex-architect · gpt-6-astra · high", "#7a2e0e", "🟠"),
-    "codex-deputy": ("codex-deputy · gpt-6.1-sol/luna", "#b58900", "🟠"),
-    "Explore": ("Explore (Claude Haiku)", "#1baf7a", "🔎"),
-    "runner": ("runner (Claude Haiku)", "#eda100", "🏃"),
-    "engineer": ("engineer (Claude Sonnet)", "#e87ba4", "🛠️"),
-    "scholar": ("scholar (Claude Sonnet)", "#008300", "📚"),
-    "writer": ("writer (Claude Sonnet)", "#6250d6", "✍️"),
+    "codex-quick": ("codex-quick (Codex)", "#f2a07b", "🟠"),
+    "codex-reviewer": ("codex-reviewer (Codex)", "#d9480f", "🟠"),
+    "codex-researcher": ("codex-researcher (Codex)", "#a8561f", "🟠"),
+    "codex-architect": ("codex-architect (Codex)", "#7a2e0e", "🟠"),
+    "codex-deputy": ("codex-deputy (Codex)", "#b58900", "🟠"),
+    "Explore": ("Explore (Claude · μοντέλο ανά εργασία)", "#1baf7a", "🔎"),
+    "runner": ("runner (Claude · μοντέλο ανά εργασία)", "#eda100", "🏃"),
+    "engineer": ("engineer (Claude · μοντέλο ανά εργασία)", "#e87ba4", "🛠️"),
+    "scholar": ("scholar (Claude · μοντέλο ανά εργασία)", "#008300", "📚"),
+    "writer": ("writer (Claude · μοντέλο ανά εργασία)", "#6250d6", "✍️"),
 }
+
+
+def role_name(k):
+    """Short role name for lanes/tables: 'engineer', 'codex-reviewer', 'συντονιστής'."""
+    return "συντονιστής" if k == "coordinator" else str(k)
 OTHER_COLOR = "#898781"
 RESEARCHER = ("Εσύ", "🧑‍🔬")
 
@@ -244,6 +252,7 @@ def read_events(max_lines=6000):
                      "tool": e.get("tool_name", ""), "summary": e.get("summary", ""),
                      "model": e.get("model", ""), "effort": e.get("effort", ""), "status": e.get("status", "")})
     df = pd.DataFrame(rows)
+    df.attrs["raw"] = raw  # the parsed records (tools/agent_models.py resolves the model of each task from them)
     ann = race_view.annotate(raw)  # (one-word task label, task group) per event
     df["label"] = [a[0] for a in ann]
     df["group"] = [a[1] for a in ann]
@@ -254,10 +263,10 @@ def agent_spans(ev):
     """One row per subagent run (SubagentStart paired with its SubagentStop by agent_id): role, model, task, duration, status."""
     rows, open_ = [], {}
     if ev.empty:
-        return pd.DataFrame(columns=["start", "agent", "model", "effort", "task", "seconds", "status"])
+        return pd.DataFrame(columns=["start", "agent", "agent_id", "model", "effort", "task", "seconds", "status"])
     for _, e in ev[ev["event"].isin(["SubagentStart", "SubagentStop"]) & ev["agent_id"].notna()].iterrows():
         if e["event"] == "SubagentStart":
-            row = {"start": e["ts"], "agent": e["agent"], "model": e["model"], "effort": e["effort"],
+            row = {"start": e["ts"], "agent": e["agent"], "agent_id": e["agent_id"], "model": e["model"], "effort": e["effort"],
                    "task": e["summary"], "seconds": None, "status": "running"}
             open_[e["agent_id"]] = row
             rows.append(row)
@@ -265,7 +274,7 @@ def agent_spans(ev):
             row = open_.pop(e["agent_id"])
             row["seconds"] = (e["ts"] - row["start"]).total_seconds()
             row["status"] = e["status"] or "done"
-    return pd.DataFrame(rows, columns=["start", "agent", "model", "effort", "task", "seconds", "status"])
+    return pd.DataFrame(rows, columns=["start", "agent", "agent_id", "model", "effort", "task", "seconds", "status"])
 
 
 def active_agent_keys(ev):
@@ -1032,9 +1041,13 @@ with tab_agents:
                     "`.lab/events.jsonl` μόλις ξεκινήσει ο συντονιστής.", icon="🤖")
             return
         now_ = dt.datetime.now()
+        raw_ev = ev.attrs.get("raw") or []
+        resolved = agent_models.resolve(raw_ev, agent_models.defaults_from_agents_dir(ROOT))
+        mtext = {aid: agent_models.text(m, src_) for aid, (m, src_) in resolved.items()}
+        coord_m = agent_models.text(agent_models.coordinator_model(raw_ev), "event")
         if race_on:
-            ln = race_view.lanes(race_view.load_events(EVENTS), roles={k: (v[0], v[1]) for k, v in AGENTS.items()},
-                            health=race_view.load_health(HEALTH))
+            ln = race_view.lanes(race_view.load_events(EVENTS), roles={k: (role_name(k), v[1]) for k, v in AGENTS.items()},
+                                 health=race_view.load_health(HEALTH), models=mtext, coord_model=coord_m)
             page, hgt = race_view.render(ln), race_view.height_for(len(ln))
             try:  # st.components.v1.html is deprecated in newer Streamlit; st.iframe takes the same HTML string
                 components.html(page, height=hgt, scrolling=True)
@@ -1049,6 +1062,13 @@ with tab_agents:
             name, color, icon = AGENTS.get(k, (k, OTHER_COLOR, "🛠️"))
             with cols[i % len(cols)].container(border=True):
                 st.markdown(f"{icon} **{name}**")
+                if k == "coordinator":
+                    st.caption(f"μοντέλο: {coord_m}")
+                else:
+                    ids_k = [r["agent_id"] for r in raw_ev if r.get("hook_event_name") == "SubagentStart"
+                             and agent_key(r.get("agent_type")) == k and r.get("agent_id") in mtext]
+                    if ids_k:
+                        st.caption(f"μοντέλο (τελευταία εργασία): {mtext[ids_k[-1]]}")
                 if sub.empty:
                     st.caption("καμία ενέργεια ακόμη")
                     continue
@@ -1089,11 +1109,12 @@ with tab_agents:
         if not spans.empty:
             st.markdown("##### Ρόλοι ανά εργασία")
             per = spans.groupby("agent").size()
-            st.caption(" · ".join(f"{AGENTS.get(k, (k,))[0]}: {n} εργασίες" for k, n in per.items()))
+            st.caption(" · ".join(f"{role_name(k)}: {n} εργασίες" for k, n in per.items()))
             st.dataframe(pd.DataFrame({
                 "ώρα": spans["start"].dt.strftime("%H:%M:%S"),
-                "ρόλος": [AGENTS.get(a, (a,))[0].split(" · ")[0] for a in spans["agent"]],
-                "μοντέλο": [m or (AGENTS.get(a, ("",))[0].split(" · ") + ["", ""])[1] for a, m in zip(spans["agent"], spans["model"])],
+                "ρόλος": [role_name(a) for a in spans["agent"]],
+                "μοντέλο": [mtext.get(i) or m or agent_models.UNKNOWN for i, m in zip(spans["agent_id"], spans["model"])],
+                "effort": [x or "—" for x in spans["effort"]],
                 "εργασία": spans["task"], "διάρκεια": [ago(x) if x == x and x is not None else "…" for x in spans["seconds"]],
                 "κατάσταση": spans["status"]}).iloc[::-1], hide_index=True, width="stretch")
         with st.expander("Πίνακας τελευταίων ενεργειών"):

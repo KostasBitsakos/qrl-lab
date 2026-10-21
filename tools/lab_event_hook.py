@@ -50,6 +50,9 @@ def main():
     s = summarize(str(data.get("tool_name", "")), data.get("tool_input"))
     if s:
         rec["summary"] = s
+    ti = data.get("tool_input")
+    if data.get("tool_name") in ("Agent", "Task") and isinstance(ti, dict) and isinstance(ti.get("model"), str):
+        rec["agent_model"] = ti["model"][:40]   # the model the coordinator asked for (tools/agent_models.py)
     root = os.environ.get("CLAUDE_PROJECT_DIR") or data.get("cwd") or "."
     path = os.path.join(root, ".lab", "events.jsonl")
     try:
