@@ -134,6 +134,23 @@ def test_offers_file():
     assert ul.offer_is_new({"as_of": "2027-01-10"}, 0)
 
 
+
+
+def test_ring_html_stable_between_refreshes():
+    """M-20261021-023: with step, the HTML is identical across 60 s refreshes inside a step (an open popover survives)
+    and the countdown is rounded UP (never claims more time used than true), with the exact reset time next to it."""
+    resets = NOW + 2 * 3600 + 14 * 60 + 5
+    st = {"five_hour": {"used_percentage": 23.4, "resets_at": resets}, "as_of": NOW - 30}
+    w = ul.claude_windows(st, None, NOW)
+    line = ul.win_line(w[0], NOW, step=600)
+    assert line.startswith("23% χρησιμοποιημένο · reset σε ≤2ω 20λ (") and line.endswith(" UTC)"), line
+    hs = {ul.ring_html("Claude", ul.claude_windows(st, None, NOW + d), "#d97757", NOW + d, step=600) for d in (0, 60, 120, 240)}
+    assert len(hs) == 1, "HTML changed inside one 10-minute step"
+    later = NOW + 300  # crosses the 2ω20λ -> 2ω10λ boundary
+    assert ul.ring_html("Claude", ul.claude_windows(st, None, later), "#d97757", later, step=600) not in hs
+    assert ul.left_text(resets, resets - 1, step=600) == "≤0ω 10λ" and ul.left_text(None, NOW, step=600) == "άγνωστο"
+
+
 if __name__ == "__main__":
     for n, fn in list(globals().items()):
         if n.startswith("test_"):

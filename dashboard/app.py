@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 import modreload  # noqa: E402
 import importlib  # noqa: E402
 _LOCAL_MODS = ["labdb", "file_view", "replytext", "k8s_view", "prom_view", "web_terminal", "sudo_ui", "race_view", "brain_view",
-               "perm_store", "ext_catalog", "summarize_runs", "agent_models", "paper_plots", "paper_build", "uploads", "installed_view", "access", "outage", "models_view", "banners", "sandbox_view", "topology_view", "topology_ui", "exp_view", "exp_figs", "usage_limits"]
+               "perm_store", "ext_catalog", "summarize_runs", "agent_models", "paper_plots", "paper_build", "uploads", "installed_view", "access", "outage", "models_view", "banners", "sandbox_view", "topology_view", "topology_ui", "exp_view", "exp_figs", "usage_limits", "event_tail"]
 for _n in _LOCAL_MODS:  # first import so they are in sys.modules, then reload those whose file changed
     importlib.import_module(_n)
 modreload.reload_changed(_LOCAL_MODS)
@@ -62,6 +62,7 @@ import exp_view  # noqa: E402
 import agent_models  # noqa: E402
 import usage_limits  # noqa: E402
 import exp_figs  # noqa: E402
+import event_tail  # noqa: E402
 from uploads import UploadError, attachment_paths  # noqa: E402
 
 LAB = os.path.join(ROOT, ".lab")
@@ -233,61 +234,92 @@ def bridge_age():
         return None
 
 
+_EV_COLS = ["ts", "agent", "agent_id", "event", "tool", "summary", "model", "effort", "status", "label", "group"]
+EV_KEEP = 6000  # records kept in memory (the tail of events.jsonl)
+EV_TAIL_BYTES = 3_000_000
+
+
+@st.cache_resource(show_spinner=False)
+def _ev_state(path):
+    """Process-wide incremental tail of events.jsonl (survives reruns; app.py globals do not), see tools/event_tail.py.
+    df: max_lines -> (tail version, DataFrame)."""
+    import threading
+    return {"tail": event_tail.EventTail(path, keep=EV_KEEP, tail_bytes=EV_TAIL_BYTES), "df": {}, "lock": threading.Lock()}
+
+
+def _ev_row(e):
+    return {"ts": dt.datetime.fromtimestamp(e.get("ts", 0)), "agent": agent_key(e.get("agent_type")),
+            "agent_id": e.get("agent_id"), "event": e.get("hook_event_name", ""),
+            "tool": e.get("tool_name", ""), "summary": e.get("summary", ""),
+            "model": e.get("model", ""), "effort": e.get("effort", ""), "status": e.get("status", "")}
+
+
+def _load_events(max_lines=EV_KEEP):
+    """(df, raw) for the last max_lines events. Both are shared cached objects: callers must not mutate them.
+    The raw records are NOT kept in df.attrs: pandas deep-copies attrs into every derived frame/Series, which made every
+    filter and iterrows row deep-copy ~6000 dicts (M-20261021-023: page stuck at 100% CPU)."""
+    state = _ev_state(EVENTS)
+    ver, raw = state["tail"].refresh()
+    raw = raw[-max_lines:]
+    with state["lock"]:
+        hit = state["df"].get(max_lines)
+    if hit and hit[0] == ver:
+        return hit[1], raw
+    if not raw:
+        df = pd.DataFrame(columns=_EV_COLS)
+    else:
+        df = pd.DataFrame([_ev_row(e) for e in raw])
+        ann = race_view.annotate(raw)  # (one-word task label, task group) per event
+        df["label"] = [x[0] for x in ann]
+        df["group"] = [x[1] for x in ann]
+    with state["lock"]:
+        state["df"][max_lines] = (ver, df)
+    return df, raw
+
+
 def read_events(max_lines=6000):
-    if not os.path.exists(EVENTS):
-        return pd.DataFrame(columns=["ts", "agent", "event", "tool", "summary"])
-    with open(EVENTS, "rb") as f:
-        f.seek(0, os.SEEK_END)
-        size = f.tell()
-        f.seek(max(0, size - 3_000_000))
-        lines = f.read().decode("utf-8", "ignore").splitlines()[-max_lines:]
-    rows, raw = [], []
-    for line in lines:
-        try:
-            e = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        raw.append(e)
-        rows.append({"ts": dt.datetime.fromtimestamp(e.get("ts", 0)), "agent": agent_key(e.get("agent_type")),
-                     "agent_id": e.get("agent_id"), "event": e.get("hook_event_name", ""),
-                     "tool": e.get("tool_name", ""), "summary": e.get("summary", ""),
-                     "model": e.get("model", ""), "effort": e.get("effort", ""), "status": e.get("status", "")})
-    df = pd.DataFrame(rows)
-    df.attrs["raw"] = raw  # the parsed records (tools/agent_models.py resolves the model of each task from them)
-    ann = race_view.annotate(raw)  # (one-word task label, task group) per event
-    df["label"] = [a[0] for a in ann]
-    df["group"] = [a[1] for a in ann]
-    return df
+    """Events as a DataFrame (shared cached object: filter it, do not mutate it in place)."""
+    return _load_events(max_lines)[0]
+
+
+def read_events_raw(max_lines=6000):
+    """The parsed records behind read_events (tools/agent_models.py resolves the model of each task from them)."""
+    return _load_events(max_lines)[1]
 
 
 def agent_spans(ev):
     """One row per subagent run (SubagentStart paired with its SubagentStop by agent_id): role, model, task, duration, status."""
+    cols = ["start", "agent", "agent_id", "model", "effort", "task", "seconds", "status"]
     rows, open_ = [], {}
     if ev.empty:
-        return pd.DataFrame(columns=["start", "agent", "agent_id", "model", "effort", "task", "seconds", "status"])
-    for _, e in ev[ev["event"].isin(["SubagentStart", "SubagentStop"]) & ev["agent_id"].notna()].iterrows():
-        if e["event"] == "SubagentStart":
-            row = {"start": e["ts"], "agent": e["agent"], "agent_id": e["agent_id"], "model": e["model"], "effort": e["effort"],
-                   "task": e["summary"], "seconds": None, "status": "running"}
-            open_[e["agent_id"]] = row
+        return pd.DataFrame(columns=cols)
+    sub = ev[ev["event"].isin(["SubagentStart", "SubagentStop"]) & ev["agent_id"].notna()]
+    for ts, event, agent, aid, model, effort, summary, status in zip(
+            sub["ts"], sub["event"], sub["agent"], sub["agent_id"], sub["model"], sub["effort"], sub["summary"], sub["status"]):
+        if event == "SubagentStart":
+            row = {"start": ts, "agent": agent, "agent_id": aid, "model": model, "effort": effort,
+                   "task": summary, "seconds": None, "status": "running"}
+            open_[aid] = row
             rows.append(row)
-        elif e["agent_id"] in open_:
-            row = open_.pop(e["agent_id"])
-            row["seconds"] = (e["ts"] - row["start"]).total_seconds()
-            row["status"] = e["status"] or "done"
-    return pd.DataFrame(rows, columns=["start", "agent", "agent_id", "model", "effort", "task", "seconds", "status"])
+        elif aid in open_:
+            row = open_.pop(aid)
+            row["seconds"] = (ts - row["start"]).total_seconds()
+            row["status"] = status or "done"
+    return pd.DataFrame(rows, columns=cols)
 
 
 def active_agent_keys(ev):
     """Agents with a SubagentStart not yet matched by a SubagentStop; the coordinator is always first."""
     active_ids = {}
-    for _, e in ev[ev["event"].isin(["SubagentStart", "SubagentStop"])].iterrows() if not ev.empty else []:
-        if e["agent_id"]:
-            if e["event"] == "SubagentStart":
-                active_ids[e["agent_id"]] = e
-            else:
-                active_ids.pop(e["agent_id"], None)
-    return ["coordinator"] + sorted({e["agent"] for e in active_ids.values()} - {"coordinator"})
+    if not ev.empty:
+        sub = ev[ev["event"].isin(["SubagentStart", "SubagentStop"])]
+        for event, aid, agent in zip(sub["event"], sub["agent_id"], sub["agent"]):
+            if aid:
+                if event == "SubagentStart":
+                    active_ids[aid] = agent
+                else:
+                    active_ids.pop(aid, None)
+    return ["coordinator"] + sorted(set(active_ids.values()) - {"coordinator"})
 
 
 def read_health(max_age=90):
@@ -419,6 +451,12 @@ def _claude_scanner():
     return usage_limits.ClaudeScanner()
 
 
+# The rings' HTML depends only on the readings and a countdown rounded up to RING_STEP_S, so the 60 s refresh re-sends an
+# identical st.html body (the frontend keeps the DOM, an open <details> popover stays open) until a reading changes or
+# the countdown crosses a 10-minute step (M-20261021-023).
+RING_STEP_S = 600
+
+
 @st.fragment(run_every=60)
 def usage_rings():
     """Title + usage rings (tap = popover per window). Claude: statusLine file (tools/claude_statusline.py), else
@@ -434,8 +472,8 @@ def usage_rings():
     st.html(usage_limits.RING_CSS
             + '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:0 0 4px">'
             '<span style="font-size:1.35rem;font-weight:700;margin-right:auto">🧪 QRL-Lab</span>'
-            + usage_limits.ring_html("Claude", cw, "#d97757", now)
-            + usage_limits.ring_html("Codex", xw, "#10a37f", now) + "</div>")
+            + usage_limits.ring_html("Claude", cw, "#d97757", now, step=RING_STEP_S)
+            + usage_limits.ring_html("Codex", xw, "#10a37f", now, step=RING_STEP_S) + "</div>")
     offers = usage_limits.load_offers(os.path.join(ROOT, "docs", "free_offers.json"))
     seen = st.session_state.setdefault("_offers_seen", now - 86400)   # first view: last 24 h count as new
     n_new = sum(usage_limits.offer_is_new(o, seen) for o in offers)
@@ -690,6 +728,13 @@ def decision_panel(d, select=lambda reqs: reqs, pre="", label="Αίτημα",
                     st.error(str(e))
 
 # ---------------------------------------------------------------- shared chat rendering
+@st.cache_data(ttl=120, max_entries=5000, show_spinner=False)
+def _linkify(text):
+    """file_view.linkify does a realpath/stat per path token; the chat re-renders every few seconds (M-20261021-023).
+    ttl: a path created or removed later gets (un)linked within 2 minutes."""
+    return file_view.linkify(text)
+
+
 def render_message(m, key="chat"):
     """The ONLY place a chat message is rendered (author, body, ✏️ inline edit, attachments)."""
     name, avatar = author_info(m["author"])
@@ -729,7 +774,7 @@ def render_message(m, key="chat"):
         else:
             shown = (replytext.readable(m["body"])[0] if m["author"] != "researcher"
                      else ext_catalog.strip_instruction(m["body"]))
-            st.markdown(file_view.linkify(shown))  # render-time only; stored text unchanged
+            st.markdown(_linkify(shown))  # render-time only; stored text unchanged
             if m["author"] == "researcher" and st.button("✏️", key=f"edit_btn_{key}_{m['id']}",
                                                          help="Επεξεργασία του μηνύματος"):
                 st.session_state[ekey] = True
@@ -769,6 +814,9 @@ def rename_widget(tid, current, key):
     return False
 
 
+THREAD_WINDOW = 40  # messages rendered per thread by default
+
+
 @st.fragment(run_every=refresh)
 def show_thread(tid, key="chat", title=None):
     dd = db()
@@ -786,8 +834,16 @@ def show_thread(tid, key="chat", title=None):
         st.session_state[f"renaming_{key}_{tid}"] = True
         st.rerun()
     rename_widget(tid, root["title"] or first, key)
+    # Only the newest messages are rendered on each auto-refresh: a 300+ message thread re-sent ~900 elements every few
+    # seconds and kept the page in «running» (M-20261021-023). Older ones load on demand, 100 per click.
+    nk = f"thread_show_{key}_{tid}"
+    n_show = st.session_state.get(nk, THREAD_WINDOW)
+    hidden_n = max(0, len(msgs) - n_show)
     with st.container(height=480):  # oldest first, newest at the bottom
-        for m in msgs:
+        if hidden_n and st.button(f"⬆️ Παλαιότερα μηνύματα ({hidden_n} κρυμμένα)", key=f"more_{key}_{tid}"):
+            st.session_state[nk] = n_show + 100
+            st.rerun(scope="fragment")
+        for m in msgs[hidden_n:]:
             render_message(m, key)
         st.html("<div id='chat-end'></div>")
     for m in msgs:
@@ -1065,109 +1121,110 @@ with tab_dec:
             "πότε": fmt_ts(r["decided_at"])} for r in closed]), hide_index=True, width="stretch")
 
 # ================================================================ agents
-with tab_agents:
-    @st.fragment(run_every=3)
-    def agents_brain():
-        components.html(brain_view.render(_brain_state(), full_names=True), height=380)
+if _tab_live(tab_agents):  # lazy: hidden tabs do no work (M-20261021-023)
+    with tab_agents:
+        @st.fragment(run_every=3)
+        def agents_brain():
+            components.html(brain_view.render(_brain_state(), full_names=True), height=380)
 
-    with st.expander("🧠 Εγκέφαλος πρακτόρων (ζωντανά, από τα logs)", expanded=True):
-        agents_brain()
-    hours = st.select_slider("Παράθυρο", options=[1, 3, 6, 12, 24, 72], value=6, format_func=lambda h: f"{h} ώρες",
-                             key="agent_hours")
+        with st.expander("🧠 Εγκέφαλος πρακτόρων (ζωντανά, από τα logs)", expanded=True):
+            agents_brain()
+        hours = st.select_slider("Παράθυρο", options=[1, 3, 6, 12, 24, 72], value=6, format_func=lambda h: f"{h} ώρες",
+                                 key="agent_hours")
 
-    race_on = st.toggle("🏁 Race view", key="race_view")
+        race_on = st.toggle("🏁 Race view", key="race_view")
 
-    @st.fragment(run_every=refresh)
-    def agents_view(hours, race_on=False):
-        ev = read_events()
-        if ev.empty:
-            st.info("Δεν υπάρχει ακόμη δραστηριότητα πρακτόρων. Τα hooks του Claude Code γράφουν στο "
-                    "`.lab/events.jsonl` μόλις ξεκινήσει ο συντονιστής.", icon="🤖")
-            return
-        now_ = dt.datetime.now()
-        raw_ev = ev.attrs.get("raw") or []
-        resolved = agent_models.resolve(raw_ev, agent_models.defaults_from_agents_dir(ROOT))
-        mtext = {aid: agent_models.text(m, src_) for aid, (m, src_) in resolved.items()}
-        coord_m = agent_models.text(agent_models.coordinator_model(raw_ev), "event")
-        if race_on:
-            ln = race_view.lanes(race_view.load_events(EVENTS), roles={k: (role_name(k), v[1]) for k, v in AGENTS.items()},
-                                 health=race_view.load_health(HEALTH), models=mtext, coord_model=coord_m)
-            page, hgt = race_view.render(ln), race_view.height_for(len(ln))
-            try:  # st.components.v1.html is deprecated in newer Streamlit; st.iframe takes the same HTML string
-                components.html(page, height=hgt, scrolling=True)
-            except AttributeError:
-                st.iframe(page, height=hgt)
-        # who is working now
-        st.markdown("##### Τώρα")
-        keys = active_agent_keys(ev)
-        cols = st.columns(min(4, max(1, len(keys))))
-        for i, k in enumerate(keys):
-            sub = ev[(ev["agent"] == k) & (ev["event"].isin(["PreToolUse", "PostToolUse", "SubagentStart"]))]
-            name, color, icon = AGENTS.get(k, (k, OTHER_COLOR, "🛠️"))
-            with cols[i % len(cols)].container(border=True):
-                st.markdown(f"{icon} **{name}**")
-                if k == "coordinator":
-                    st.caption(f"μοντέλο: {coord_m}")
-                else:
-                    ids_k = [r["agent_id"] for r in raw_ev if r.get("hook_event_name") == "SubagentStart"
-                             and agent_key(r.get("agent_type")) == k and r.get("agent_id") in mtext]
-                    if ids_k:
-                        st.caption(f"μοντέλο (τελευταία εργασία): {mtext[ids_k[-1]]}")
-                if sub.empty:
-                    st.caption("καμία ενέργεια ακόμη")
-                    continue
-                last = sub.iloc[-1]
-                busy = (now_ - last["ts"]).total_seconds() < 120
-                st.caption(("🟢 εργάζεται" if busy else "⚪ σε αναμονή") + f" · {ago((now_ - last['ts']).total_seconds())} πριν")
-                st.markdown(f"`{last['tool'] or last['event']}` {str(last['summary'])[:120]}")
-        # timeline
-        win = ev[(ev["ts"] > now_ - dt.timedelta(hours=hours)) & (ev["event"].isin(["PreToolUse", "SubagentStart"]))]
-        st.markdown(f"##### Χρονογραμμή ({hours} ώρες) — κάθε σημείο είναι μία ενέργεια")
-        if win.empty:
-            st.caption("Καμία ενέργεια στο παράθυρο.")
-            return
-        lanes = [k for k in AGENTS if k in set(win["agent"])] + sorted(set(win["agent"]) - set(AGENTS))
-        fig = go.Figure()
-        for k in lanes:
-            sub = win[win["agent"] == k]
-            name, color, _ = AGENTS.get(k, (k, OTHER_COLOR, ""))
-            # one label per task: written next to the last dot of each task group
-            last_of = sub.groupby("group").tail(1).index if "group" in sub else []
-            texts = [(sub.at[i, "label"] if i in last_of else "") for i in sub.index]
-            fig.add_trace(go.Scatter(
-                x=sub["ts"], y=[name] * len(sub), mode="markers+text", name=name,
-                text=texts, textposition="middle right", textfont=dict(size=11, color=color),
-                cliponaxis=False,
-                marker=dict(size=9, color=color, line=dict(width=2, color="#fcfcfb")),
-                customdata=list(zip(sub["tool"].fillna(""), sub["summary"].fillna("").str.slice(0, 120))),
-                hovertemplate="%{x|%H:%M:%S}<br><b>%{customdata[0]}</b> %{customdata[1]}<extra>" + name + "</extra>"))
-        fig.update_layout(height=90 + 46 * len(lanes), margin=dict(l=10, r=90, t=10, b=30), showlegend=False,
-                          hovermode="closest", plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
-        fig.update_xaxes(showgrid=True, gridcolor="rgba(137,135,129,0.25)", gridwidth=1)
-        fig.update_yaxes(showgrid=False, categoryorder="array", categoryarray=[AGENTS.get(k, (k,))[0] for k in lanes][::-1])
-        st.plotly_chart(fig, theme="streamlit", width="stretch", config={"displayModeBar": False})
-        counts = win.groupby("agent").size().reindex(lanes).fillna(0).astype(int)
-        st.caption(" · ".join(f"{AGENTS.get(k, (k,))[0]}: {n} ενέργειες" for k, n in counts.items()))
-        spans = agent_spans(ev)
-        spans = spans[spans["start"] > now_ - dt.timedelta(hours=hours)] if not spans.empty else spans
-        if not spans.empty:
-            st.markdown("##### Ρόλοι ανά εργασία")
-            per = spans.groupby("agent").size()
-            st.caption(" · ".join(f"{role_name(k)}: {n} εργασίες" for k, n in per.items()))
-            st.dataframe(pd.DataFrame({
-                "ώρα": spans["start"].dt.strftime("%H:%M:%S"),
-                "ρόλος": [role_name(a) for a in spans["agent"]],
-                "μοντέλο": [mtext.get(i) or m or agent_models.UNKNOWN for i, m in zip(spans["agent_id"], spans["model"])],
-                "effort": [x or "—" for x in spans["effort"]],
-                "εργασία": spans["task"], "διάρκεια": [ago(x) if x == x and x is not None else "…" for x in spans["seconds"]],
-                "κατάσταση": spans["status"]}).iloc[::-1], hide_index=True, width="stretch")
-        with st.expander("Πίνακας τελευταίων ενεργειών"):
-            tail = ev.tail(40).iloc[::-1]
-            st.dataframe(pd.DataFrame({"ώρα": tail["ts"].dt.strftime("%H:%M:%S"),
-                                       "πράκτορας": [AGENTS.get(a, (a,))[0] for a in tail["agent"]],
-                                       "γεγονός": tail["event"], "εργαλείο": tail["tool"],
-                                       "περίληψη": tail["summary"]}), hide_index=True, width="stretch")
-    agents_view(hours, race_on)
+        @st.fragment(run_every=refresh)
+        def agents_view(hours, race_on=False):
+            ev = read_events()
+            if ev.empty:
+                st.info("Δεν υπάρχει ακόμη δραστηριότητα πρακτόρων. Τα hooks του Claude Code γράφουν στο "
+                        "`.lab/events.jsonl` μόλις ξεκινήσει ο συντονιστής.", icon="🤖")
+                return
+            now_ = dt.datetime.now()
+            raw_ev = read_events_raw()
+            resolved = agent_models.resolve(raw_ev, agent_models.defaults_from_agents_dir(ROOT))
+            mtext = {aid: agent_models.text(m, src_) for aid, (m, src_) in resolved.items()}
+            coord_m = agent_models.text(agent_models.coordinator_model(raw_ev), "event")
+            if race_on:
+                ln = race_view.lanes(race_view.load_events(EVENTS), roles={k: (role_name(k), v[1]) for k, v in AGENTS.items()},
+                                     health=race_view.load_health(HEALTH), models=mtext, coord_model=coord_m)
+                page, hgt = race_view.render(ln), race_view.height_for(len(ln))
+                try:  # st.components.v1.html is deprecated in newer Streamlit; st.iframe takes the same HTML string
+                    components.html(page, height=hgt, scrolling=True)
+                except AttributeError:
+                    st.iframe(page, height=hgt)
+            # who is working now
+            st.markdown("##### Τώρα")
+            keys = active_agent_keys(ev)
+            cols = st.columns(min(4, max(1, len(keys))))
+            for i, k in enumerate(keys):
+                sub = ev[(ev["agent"] == k) & (ev["event"].isin(["PreToolUse", "PostToolUse", "SubagentStart"]))]
+                name, color, icon = AGENTS.get(k, (k, OTHER_COLOR, "🛠️"))
+                with cols[i % len(cols)].container(border=True):
+                    st.markdown(f"{icon} **{name}**")
+                    if k == "coordinator":
+                        st.caption(f"μοντέλο: {coord_m}")
+                    else:
+                        ids_k = [r["agent_id"] for r in raw_ev if r.get("hook_event_name") == "SubagentStart"
+                                 and agent_key(r.get("agent_type")) == k and r.get("agent_id") in mtext]
+                        if ids_k:
+                            st.caption(f"μοντέλο (τελευταία εργασία): {mtext[ids_k[-1]]}")
+                    if sub.empty:
+                        st.caption("καμία ενέργεια ακόμη")
+                        continue
+                    last = sub.iloc[-1]
+                    busy = (now_ - last["ts"]).total_seconds() < 120
+                    st.caption(("🟢 εργάζεται" if busy else "⚪ σε αναμονή") + f" · {ago((now_ - last['ts']).total_seconds())} πριν")
+                    st.markdown(f"`{last['tool'] or last['event']}` {str(last['summary'])[:120]}")
+            # timeline
+            win = ev[(ev["ts"] > now_ - dt.timedelta(hours=hours)) & (ev["event"].isin(["PreToolUse", "SubagentStart"]))]
+            st.markdown(f"##### Χρονογραμμή ({hours} ώρες) — κάθε σημείο είναι μία ενέργεια")
+            if win.empty:
+                st.caption("Καμία ενέργεια στο παράθυρο.")
+                return
+            lanes = [k for k in AGENTS if k in set(win["agent"])] + sorted(set(win["agent"]) - set(AGENTS))
+            fig = go.Figure()
+            for k in lanes:
+                sub = win[win["agent"] == k]
+                name, color, _ = AGENTS.get(k, (k, OTHER_COLOR, ""))
+                # one label per task: written next to the last dot of each task group
+                last_of = sub.groupby("group").tail(1).index if "group" in sub else []
+                texts = [(sub.at[i, "label"] if i in last_of else "") for i in sub.index]
+                fig.add_trace(go.Scatter(
+                    x=sub["ts"], y=[name] * len(sub), mode="markers+text", name=name,
+                    text=texts, textposition="middle right", textfont=dict(size=11, color=color),
+                    cliponaxis=False,
+                    marker=dict(size=9, color=color, line=dict(width=2, color="#fcfcfb")),
+                    customdata=list(zip(sub["tool"].fillna(""), sub["summary"].fillna("").str.slice(0, 120))),
+                    hovertemplate="%{x|%H:%M:%S}<br><b>%{customdata[0]}</b> %{customdata[1]}<extra>" + name + "</extra>"))
+            fig.update_layout(height=90 + 46 * len(lanes), margin=dict(l=10, r=90, t=10, b=30), showlegend=False,
+                              hovermode="closest", plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
+            fig.update_xaxes(showgrid=True, gridcolor="rgba(137,135,129,0.25)", gridwidth=1)
+            fig.update_yaxes(showgrid=False, categoryorder="array", categoryarray=[AGENTS.get(k, (k,))[0] for k in lanes][::-1])
+            st.plotly_chart(fig, theme="streamlit", width="stretch", config={"displayModeBar": False})
+            counts = win.groupby("agent").size().reindex(lanes).fillna(0).astype(int)
+            st.caption(" · ".join(f"{AGENTS.get(k, (k,))[0]}: {n} ενέργειες" for k, n in counts.items()))
+            spans = agent_spans(ev)
+            spans = spans[spans["start"] > now_ - dt.timedelta(hours=hours)] if not spans.empty else spans
+            if not spans.empty:
+                st.markdown("##### Ρόλοι ανά εργασία")
+                per = spans.groupby("agent").size()
+                st.caption(" · ".join(f"{role_name(k)}: {n} εργασίες" for k, n in per.items()))
+                st.dataframe(pd.DataFrame({
+                    "ώρα": spans["start"].dt.strftime("%H:%M:%S"),
+                    "ρόλος": [role_name(a) for a in spans["agent"]],
+                    "μοντέλο": [mtext.get(i) or m or agent_models.UNKNOWN for i, m in zip(spans["agent_id"], spans["model"])],
+                    "effort": [x or "—" for x in spans["effort"]],
+                    "εργασία": spans["task"], "διάρκεια": [ago(x) if x == x and x is not None else "…" for x in spans["seconds"]],
+                    "κατάσταση": spans["status"]}).iloc[::-1], hide_index=True, width="stretch")
+            with st.expander("Πίνακας τελευταίων ενεργειών"):
+                tail = ev.tail(40).iloc[::-1]
+                st.dataframe(pd.DataFrame({"ώρα": tail["ts"].dt.strftime("%H:%M:%S"),
+                                           "πράκτορας": [AGENTS.get(a, (a,))[0] for a in tail["agent"]],
+                                           "γεγονός": tail["event"], "εργαλείο": tail["tool"],
+                                           "περίληψη": tail["summary"]}), hide_index=True, width="stretch")
+        agents_view(hours, race_on)
 
 
 # ---------------------------------------------------------------- experiments tab helpers (M-20261021-008)
@@ -1335,23 +1392,58 @@ def _paper_figures(path, res, items, cycle):
                    "Latency baselines: δεν αποθηκεύεται μέσος όρος στο baselines JSON (μόνο p95).")
 
 
+@st.cache_resource(show_spinner=False)
+def _psutil_primed():
+    return {}
+
+
+@st.cache_data(ttl=20, show_spinner=False)
+def _sandbox_statuses(rids):
+    """{rid: ("ok", launch_run.sandbox_status) | ("err", exception name)}. Each status reads the runs table and hundreds of
+    run JSONs (~50-90 ms); shared by the experiments overview and the sandbox section, refreshed every 20 s (M-20261021-023)."""
+    out = {}
+    dd = db()
+    try:
+        import launch_run
+        for rid in rids:
+            try:
+                out[rid] = ("ok", launch_run.sandbox_status(dd, rid))
+            except Exception as e:  # noqa: BLE001 - read-only view
+                out[rid] = ("err", type(e).__name__)
+    finally:
+        dd.close()
+    return out
+
+
+@st.cache_data(ttl=10, show_spinner=False)
+def _sandbox_ledgers():
+    """[(run_id, summary)] per sandbox ledger (ledger + runs table), cached 10 s; the section refreshes every few seconds."""
+    paths = sandbox_view.ledger_paths(os.path.join(ROOT, ".lab", "sandbox"))
+    if not paths:
+        return []
+    dd = db()
+    try:
+        by_id = {r["run_id"]: dict(r) for r in dd.runs(limit=100000)}
+    finally:
+        dd.close()
+    return [(os.path.basename(pth).split(".ledger.")[0], sandbox_view.summarize(sandbox_view.read_ledger(pth), by_id))
+            for pth in paths]
+
+
 def _exp_overview():
     """Gauge: latest cycle closeness, forecast, runs left in the loop (reads files; launcher status read-only)."""
     hist = exp_view.load_history(EXP_HISTORY) or exp_view.SEED_HISTORY
     ser = exp_view.primary_series(hist)
     vals = [float(e["closeness"]) for e in ser]
     running, run_err = 0, []
-    dd = db()
-    try:
-        import launch_run
-        for rid in exp_view.LOOP_REQUESTS:
-            try:
-                v = launch_run.sandbox_status(dd, rid)["running"]
-                running += len(v) if isinstance(v, (list, tuple)) else int(v)
-            except Exception as e:  # noqa: BLE001 - read-only view
-                run_err.append(f"{rid}: {type(e).__name__}")
-    finally:
-        dd.close()
+    for rid, (ok_, stt_) in _sandbox_statuses(tuple(exp_view.LOOP_REQUESTS)).items():
+        try:
+            if ok_ != "ok":
+                raise RuntimeError(stt_)
+            v = stt_["running"]
+            running += len(v) if isinstance(v, (list, tuple)) else int(v)
+        except Exception as e:  # noqa: BLE001 - read-only view
+            run_err.append(f"{rid}: {stt_ if ok_ != 'ok' else type(e).__name__}")
     rem = exp_view.remaining_runs(os.path.join(LAB, "tuning"), os.path.join(ROOT, "code-tuning"), running,
                                   exp_view.driver_files(exp_view.proc_cmdlines()))
     fc = exp_view.forecast(vals, steps=1)
@@ -1608,37 +1700,30 @@ if _tab_live(tab_runs):  # lazy: hidden tabs do no work
 
         @st.fragment(run_every=refresh)
         def sandbox_section():
-            paths = sandbox_view.ledger_paths(os.path.join(ROOT, ".lab", "sandbox"))
-            if not paths:
+            ledgers = _sandbox_ledgers()
+            if not ledgers:
                 st.caption("Δεν υπάρχουν sandbox ledgers.")
                 return
-            dd = db()
-            try:
-                by_id = {r["run_id"]: dict(r) for r in dd.runs(limit=100000)}
-                for pth in paths:
-                    rid = os.path.basename(pth).split(".ledger.")[0]
-                    try:
-                        import launch_run
-                        s = launch_run.sandbox_status(dd, rid)
-                        st.markdown(f"**{rid}** · branch `{s['branch']}` · CPU-h {s['cpu_hours_used']}/{s['budget']} "
-                                    f"(απομένουν {s['cpu_hours_left']}) · τρέχουν {s['running']}/{s['max_parallel']} · "
-                                    + (":red[έληξε]" if s["expired"] else f"λήγει σε {s['hours_to_expiry']} ώρες ({s['expires']})"))
-                    except Exception as e:  # noqa: BLE001 - read-only view; show what is known
-                        st.markdown(f"**{rid}** · η σύνοψη δεν είναι διαθέσιμη ({type(e).__name__})")
-                    v = sandbox_view.summarize(sandbox_view.read_ledger(pth), by_id)
-                    if v["running"]:
-                        st.dataframe(pd.DataFrame([{"run_id": x["run_id"], "batch": x["batch"], "πυρήνες": ",".join(map(str, x["cores"])),
-                                                    "ξεκίνησε": fmt_ts(x["started"]), "διάρκεια": ago(x["elapsed_s"]) if x["elapsed_s"] is not None else "—"}
-                                                   for x in v["running"]]), hide_index=True, width="stretch")
-                    else:
-                        st.caption("Κανένα sandbox run δεν τρέχει.")
-                    if v["finished"]:
-                        with st.expander(f"Τελευταία {len(v['finished'])} ολοκληρωμένα"):
-                            st.dataframe(pd.DataFrame([{"run_id": x["run_id"], "όνομα": x["name"], "wall (s)": x["wall_s"],
-                                                        "CPU (s)": x["cpu_seconds"], "κατάσταση": x["status"]}
-                                                       for x in v["finished"]]), hide_index=True, width="stretch")
-            finally:
-                dd.close()
+            stats = _sandbox_statuses(tuple(rid for rid, _ in ledgers))
+            for rid, v in ledgers:
+                ok_, s = stats.get(rid, ("err", "KeyError"))
+                if ok_ == "ok":
+                    st.markdown(f"**{rid}** · branch `{s['branch']}` · CPU-h {s['cpu_hours_used']}/{s['budget']} "
+                                f"(απομένουν {s['cpu_hours_left']}) · τρέχουν {s['running']}/{s['max_parallel']} · "
+                                + (":red[έληξε]" if s["expired"] else f"λήγει σε {s['hours_to_expiry']} ώρες ({s['expires']})"))
+                else:  # read-only view; show what is known
+                    st.markdown(f"**{rid}** · η σύνοψη δεν είναι διαθέσιμη ({s})")
+                if v["running"]:
+                    st.dataframe(pd.DataFrame([{"run_id": x["run_id"], "batch": x["batch"], "πυρήνες": ",".join(map(str, x["cores"])),
+                                                "ξεκίνησε": fmt_ts(x["started"]), "διάρκεια": ago(x["elapsed_s"]) if x["elapsed_s"] is not None else "—"}
+                                               for x in v["running"]]), hide_index=True, width="stretch")
+                else:
+                    st.caption("Κανένα sandbox run δεν τρέχει.")
+                if v["finished"]:
+                    with st.expander(f"Τελευταία {len(v['finished'])} ολοκληρωμένα"):
+                        st.dataframe(pd.DataFrame([{"run_id": x["run_id"], "όνομα": x["name"], "wall (s)": x["wall_s"],
+                                                    "CPU (s)": x["cpu_seconds"], "κατάσταση": x["status"]}
+                                                   for x in v["finished"]]), hide_index=True, width="stretch")
         sandbox_section()
 
         st.markdown("##### Διακοπή run")
@@ -1709,7 +1794,11 @@ if _tab_live(tab_res):  # lazy: hidden tabs do no work
                 st.warning("Λείπει το psutil στο .venv.")
                 return
             c = st.columns(4)
-            cpu = psutil.cpu_percent(interval=0.2)
+            # non-blocking: average since the previous call (the fragment refreshes every >=10 s); only the very first
+            # call of the process measures 0.2 s, instead of blocking 0.2 s on every refresh (M-20261021-023)
+            prime = _psutil_primed()
+            cpu = psutil.cpu_percent(interval=None if prime.get("done") else 0.2)
+            prime["done"] = True
             mem = psutil.virtual_memory()
             disk = shutil.disk_usage(ROOT)
             load1 = os.getloadavg()[0] if hasattr(os, "getloadavg") else None
@@ -2038,7 +2127,8 @@ with tab_paper:
     decision_panel(_pd, select=lambda rs: paper_requests(rs, paper_tid), pre="paper_", label="Ερώτηση",
                    empty_msg="Δεν υπάρχουν ανοιχτές ερωτήσεις για το paper.")
     _pd.close()
-    show_thread(paper_tid, key="paper", title="Συζήτηση paper")
+    if _tab_live(tab_paper):  # the tab stays eager (typed text), its auto-refreshing chat only runs when open
+        show_thread(paper_tid, key="paper", title="Συζήτηση paper")
     pw_col, pr_col = st.columns(2)
     p_writers = pw_col.multiselect("Συγγραφή", list(PAPER_WRITERS), default=["writer-sonnet"],
                                    format_func=PAPER_WRITERS.get, key="paper_writers", placeholder="✍️ Συγγραφή: ποιος γράφει",

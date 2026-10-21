@@ -244,18 +244,27 @@ def codex_windows(entries, now):
             for e in (entries or []) if e]
 
 
-def left_text(resets_at, now):
+def left_text(resets_at, now, step=None):
+    """«Hω Mλ» until resets_at. step (seconds): round UP to that step and prefix «≤», so the text (and the HTML that
+    contains it) only changes at step boundaries — an auto-refresh then leaves an open popover alone (M-20261021-023)."""
     if resets_at is None:
         return "άγνωστο"
     left = max(0.0, resets_at - now)
-    return f"{int(left // 3600)}ω {int(left % 3600 // 60)}λ"
+    pre = ""
+    if step:
+        left, pre = math.ceil(left / step) * step, "≤"
+    return f"{pre}{int(left // 3600)}ω {int(left % 3600 // 60)}λ"
 
 
-def win_line(w, now):
-    """Popover text of one window: «<P>% χρησιμοποιημένο · reset σε <Hω Mλ>», or «—» + RESET_TIP after a reset."""
+def win_line(w, now, step=None):
+    """Popover text of one window: «<P>% χρησιμοποιημένο · reset σε <Hω Mλ>», or «—» + RESET_TIP after a reset.
+    With step: «reset σε ≤Hω Mλ (dd/mm HH:MM UTC)» (countdown rounded up to step seconds, plus the exact reset time)."""
     if w["pct"] is None:
         return "— · " + RESET_TIP
-    return f"{w['pct']:.0f}% χρησιμοποιημένο · reset σε {left_text(w['resets_at'], now)}"
+    line = f"{w['pct']:.0f}% χρησιμοποιημένο · reset σε {left_text(w['resets_at'], now, step)}"
+    if step and w.get("resets_at") is not None:
+        line += f" ({_utc(w['resets_at'])})"
+    return line
 
 
 def headline(wins):
@@ -282,7 +291,7 @@ RING_CSS = ("<style>.qrl-ring{position:relative;display:inline-block}"
             ".qrl-pop div{white-space:nowrap}</style>")
 
 
-def ring_html(name, wins, color, now, empty_tip=NO_SOURCE):
+def ring_html(name, wins, color, now, empty_tip=NO_SOURCE, step=None):
     """Small usage ring (SVG stroke-dasharray arc over a grey track, provider colour, amber >=75 %, red >=90 %).
     Tap/click opens a <details> popover with one «P% χρησιμοποιημένο · reset σε Hω Mλ» line per window. No JS."""
     import html
@@ -296,8 +305,8 @@ def ring_html(name, wins, color, now, empty_tip=NO_SOURCE):
            f'stroke-dasharray="{c * frac:.2f} {c:.2f}" transform="rotate(-90 14 14)"/>') if pct else ""
     if wins:
         lines = "".join(f'<div title="{html.escape(RESET_TIP) if w["pct"] is None else ""}">'
-                        f'{html.escape(w["label"])}: {html.escape(win_line(w, now))}</div>' for w in wins)
-        tip = " | ".join(f'{w["label"]}: {win_line(w, now)}' for w in wins)
+                        f'{html.escape(w["label"])}: {html.escape(win_line(w, now, step))}</div>' for w in wins)
+        tip = " | ".join(f'{w["label"]}: {win_line(w, now, step)}' for w in wins)
     else:
         lines, tip = f"<div>— · {html.escape(empty_tip)}</div>", empty_tip
     return (f'<details class="qrl-ring"><summary title="{html.escape(tip)}" '
