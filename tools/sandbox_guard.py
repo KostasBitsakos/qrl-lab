@@ -17,7 +17,9 @@ import subprocess
 from labdb import LabError, lab_dir, lab_root
 
 # repo name in the sandbox block -> worktree directory (relative to the lab root)
-WORKTREES = {"code": "code-tuning"}
+# (C-20261021-03: a second, parallel tuning worktree for the Codex branch; each sandbox names its repo and branch, and
+# the worktree's checked-out branch must equal the sandbox branch)
+WORKTREES = {"code": "code-tuning", "code-astra": "code-tuning-astra"}
 FORBIDDEN_WORDS = ("kubectl", "qiskit_ibm", "ibm_quantum", "ibmq", "qiskit-ibm", "helm", "kube")
 FORBIDDEN_KEYS = {"real", "qpu", "kube_context", "backend_name", "ibm"}
 # Files whose bytes on the tuning worktree must equal those on REFERENCE_BRANCH (qrl-dev) before any launch:
@@ -70,9 +72,9 @@ def check_env(d, where):
     return out
 
 
-def check_cmd(cmd, cwd, root=None):
-    """Entrypoint = the project venv python or python3 running a .py file that resolves inside the worktree.
-    No shell interpreters, no -c / -m, no env wrapper."""
+def check_cmd(cmd, cwd, root=None, wt=None):
+    """Entrypoint = the project venv python or python3 running a .py file that resolves inside the worktree
+    (wt = the sandbox's worktree path; default the 'code' worktree). No shell interpreters, no -c / -m, no env wrapper."""
     root = root or lab_root()
     exe = cmd[0]
     if os.path.basename(exe) in SHELLS or "-c" in cmd:
@@ -84,7 +86,7 @@ def check_cmd(cmd, cwd, root=None):
     if len(cmd) < 2 or cmd[1].startswith("-") or not cmd[1].endswith(".py"):
         raise LabError("The first argument must be a .py script (no -c, -m or options before it).")
     script = os.path.realpath(os.path.join(cwd, cmd[1]))
-    base = os.path.realpath(os.path.join(root, WORKTREES["code"]))
+    base = os.path.realpath(wt) if wt else os.path.realpath(os.path.join(root, WORKTREES["code"]))
     if not script.startswith(base + os.sep) or not os.path.isfile(script):
         raise LabError(f"Script {cmd[1]!r} resolves to {script}, which is not a file inside {base}.")
     return script
@@ -311,7 +313,7 @@ def check_child(child, parent, root=None, now=None):
         for tok in e["cmd"]:
             if any(w in tok.lower() for w in FORBIDDEN_WORDS):
                 raise LabError(f"Entry {i} mentions {tok!r}: kubectl/IBM/cluster commands are not allowed.")
-        check_cmd(e["cmd"], cwd, root)
+        check_cmd(e["cmd"], cwd, root, worktree_path(sb, root))
         seeds = entry_seeds(e)
         for lo, hi in seeds:
             if not seed_ok(lo, hi, sb["seed_ranges_allowed"], sb["seed_ranges_forbidden"]):
