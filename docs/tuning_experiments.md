@@ -23,7 +23,8 @@ Legend: **kept** = carried forward; **dropped** = did not help; **open** = still
 | 11a | Larger delay D=15/20 screen, 3 seeds, test5 | all scratch learners collapse to 1-2 pods (~20k) below fixed 59.8k (c11a_partial.json) | **dropped** (no similar numbers) |
 | 12a | His sinusoid+noise+spike workloads with D=5: spike300_d5, noise15_multispike_d5, all 5 arms, seeds 20-24, fresh test8, frozen absolute-return acceptance (cycles/c12a_prereg.md) | spike300_d5: DInos+T 85.9k > MLP 79.2k ~ LSTM 78.7k > DERP-hist 74.2k > DERP 56.5k > HPA-demand 47.6k; passes all acceptance; noise15_multispike_d5: LSTM 64.8k < fixed 72.0k, DERP 44.9k overprovisions (c12_brief.md, c12_codex.md) | **kept** spike300_d5 (accepted, operational criterion); noise15_multispike_d5 **dropped** |
 | 12b | Training length 40k on orig_d10, 3 seeds, test5 (exploratory) | original DERP stays ~1.5 pods (23.3k); enhanced DERP 50.8k ~ LSTM 54.7k (CIs contain 0) (c12b_partial.json) | original DERP collapse under delay not a training-length artefact; LSTM vs enhanced DERP gap not robust |
-| 13a | Replication of spike300_d5, 2 fresh seeds, fresh test9 (cycles/c13a_prereg.md) | running | open |
+| 13a | Replication of spike300_d5, 2 fresh seeds (28,29), fresh test9 (cycles/c13a_prereg.md) | DInos+T 88.2k > MLP 86.8k ~ LSTM 86.4k > DERP-hist 74.9k > DERP 58.8k > HPA-demand 47.5k; passes all acceptance; ratio 1.50x (c13_brief.md, c13_codex.md) | **kept** (replicates at n=2) |
+| 14 | Robustness: spike300_d7 (delay only, 3 seeds) and multispike_d5 (4 spikes amplitude 150, 2 seeds), test9 reused for these variants (cycles/c14_prereg.md) | running | open |
 
 ## Notes
 - His HPA (`P/HPA/simpleagent.py:9-14`, verified 2026-10-20): scale up if CPU > 50 **or** memory > 50, else scale down.
