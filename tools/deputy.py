@@ -143,8 +143,15 @@ def build_prompt(agents_md, thread):
         f"'{MARK} yes'. Otherwise end with '{MARK} no'.\n\n--- THREAD ---\n" + "\n\n".join(lines))
 
 
+def codex_bin():
+    """Absolute path of the codex CLI: PATH, else the nvm install (the watchdog's env has no nvm PATH)."""
+    import glob, shutil
+    found = shutil.which("codex") or sorted(glob.glob(os.path.expanduser("~/.nvm/versions/node/*/bin/codex")))[-1:]
+    return found if isinstance(found, str) else (found[0] if found else "codex")
+
+
 def build_command(out_file, cwd=KIT, model=CODEX_MODEL, effort=CODEX_EFFORT):
-    return ["codex", "exec", "--sandbox", "read-only", "-c", 'approval_policy="never"',
+    return [codex_bin(), "exec", "--sandbox", "read-only", "-c", 'approval_policy="never"',
             "-c", f'model_reasoning_effort="{effort}"', "-m", model, "-C", cwd,
             "--skip-git-repo-check", "--ephemeral", "-o", out_file, "-"]
 
