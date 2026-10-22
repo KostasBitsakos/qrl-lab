@@ -4,6 +4,7 @@ Newest first, one or two lines per decision. The rules themselves live in [`docs
 (index, precedence, contradiction-check procedure, resolved conflicts). Codex role table: [`docs/rules/models.md`](rules/models.md).
 Before adding a decision, follow the procedure in `docs/rules/README.md` (M-20261020-021).
 
+- 2026-10-22 — R-20261021-009/010 (researcher): loop extended to 2026-10-23 23:59 UTC (v7 +120 branch 1, v8 +60 branch 2); goal: Dinos+Transfer V.2 the best, closest to the paper picture (fair protocol). → .lab/codex-handoff/joint_review_decisions.md
 - 2026-10-21 — R-20261021-007 (researcher): two parallel branches for this loop only (Opus dinos-tuning cores 8-19; Codex astra dinos-tuning-astra cores 20-31, sandbox v6 80 CPU-h); shared versioned protocol. → .lab/council/C-20261021-03/card.md
 - 2026-10-21 — R-20261021-005 (researcher): loop to 22/10, sandbox v5; Dinos V.2 architecture search + Transfer V.2; checkpoints 1k-20k chosen on val. → .lab/council/C-20261021-02/
 - 2026-10-21 — R-20261021-003 (researcher): council C-20261021-01 plan (B1, claims list, noise study, then QC). → .lab/council/C-20261021-01/card.md
