@@ -100,6 +100,28 @@ def test_mesh_geometry():
     assert agent_v
 
 
+def test_brain_observes_codex_coordinator_and_engineer():
+    events = [ev("SessionStart", NOW - 100, model="claude-opus-5-5"),
+              ev("SubagentStart", NOW - 20, "codex-deputy", "d", model="gpt-6.1-sol", effort="high"),
+              ev("SubagentStart", NOW - 2, "codex-engineer", "e", model="gpt-6-sol")]
+    s = bv.derive(events, [], NOW, health={"state": "limit"})
+    assert s["nodes"]["coordinator"]["active"] and s["nodes"]["codex-engineer"]["active"]
+    for full in (False, True):
+        h = bv.render(s, full_names=full)
+        assert "Codex" in h and "codex-deputy" in h and "gpt-6.1-sol" in h
+        assert "claude-opus" not in h
+        assert ("Πάρις (Codex αναπληρωτής) · τώρα" if full else "Πάρις (Codex)") in h
+    s = bv.derive(events + [ev("SubagentStop", NOW - 1, aid="d")], [], NOW, health={"state": "limit"})
+    assert not s["nodes"]["coordinator"]["active"]
+
+
+def test_brain_coordinator_named_paris_claude():
+    events = [ev("SessionStart", NOW - 100, model="claude-opus-5-5"), ev("PreToolUse", NOW - 1)]
+    s = bv.derive(events, [], NOW, health={"state": "ok"})
+    assert "Πάρις (Claude) · τώρα" in bv.render(s, full_names=True)
+    assert "Πάρις (Claude)" in bv.render(s) and "claude-opus-5-5" in bv.render(s)
+
+
 if __name__ == "__main__":
     n = 0
     for k, v in sorted(globals().items()):

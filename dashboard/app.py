@@ -1067,12 +1067,15 @@ with tab_chat:
     _c = st.session_state.get("_coord_choices")
     if not _c or time.time() - _c[0] > 30:
         try:
-            _ev = read_events(400)
+            # raw event dicts (a DataFrame here gave an empty identity -> «τώρα: άγνωστο», M-20261022-013), plus the
+            # latest SessionStart from the file when it has scrolled out of the in-memory tail
+            _ev = agent_models.with_session_start(read_events_raw(), EVENTS)
             _dd = db()
             _cm = [m for t in _dd.threads(8) for m in _dd.thread(t["thread_id"])[-6:] if m["author"] == "codex"]
             _dd.close()
             _c = (time.time(), agent_models.model_choices(agent_models.coordinator_identity(_ev, read_health(), messages=_cm)))
-        except Exception:
+        except Exception as _e:
+            st.caption(f"⚠️ μοντέλο συντονιστή: {type(_e).__name__}: {_e}")
             _c = (time.time(), agent_models.model_choices(None))
         st.session_state["_coord_choices"] = _c
     _choices = _c[1]
@@ -1202,7 +1205,8 @@ if _tab_live(tab_agents):  # lazy: hidden tabs do no work (M-20261021-023)
                 _dd.close()
             except Exception:
                 _codex_msgs = []
-            identity = agent_models.coordinator_identity(raw_ev, read_health(), messages=_codex_msgs)
+            identity = agent_models.coordinator_identity(agent_models.with_session_start(raw_ev, EVENTS), read_health(),
+                                                       messages=_codex_msgs)
             coord_m = agent_models.text(identity["model"], "event")
             if race_on:
                 ln = race_view.lanes(race_view.load_events(EVENTS), roles={k: (role_name(k), v[1]) for k, v in AGENTS.items()},
@@ -1224,7 +1228,7 @@ if _tab_live(tab_agents):  # lazy: hidden tabs do no work (M-20261021-023)
                 if k == "coordinator":
                     name = identity["card"]
                     if identity["provider"] == "Claude" and not identity["model"] and coord_m != agent_models.UNKNOWN:
-                        name = f"🧭 Συντονιστής (Claude) · μοντέλο {coord_m}"
+                        name = f"🧭 Πάρις (Claude) · μοντέλο {coord_m}"
                     if identity["role"] == "codex-deputy":
                         sub = ev[(ev["agent_id"] == identity["agent_id"]) & (ev["event"] == "SubagentStart")]
                 with cols[i % len(cols)].container(border=True):

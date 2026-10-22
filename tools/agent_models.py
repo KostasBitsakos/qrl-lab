@@ -1,5 +1,5 @@
 """Which model actually ran each agent task (Agents tab / race view, M-20261021-014 / -016). Pure; no I/O except
-defaults_from_agents_dir().
+defaults_from_agents_dir() and latest_session_start().
 
 Per subagent run (SubagentStart record of .lab/events.jsonl), first match wins:
   1. the record's own `model` (tools/agent_log.py start --model ...; Codex roles and explicit logs)  -> source "agent_log"
@@ -149,6 +149,44 @@ def resolve(events, defaults=None):
     return out
 
 
+def latest_session_start(path, block=65536):
+    """Latest SessionStart record (with a model) of an events.jsonl, scanning backwards from the end; None if absent.
+    SessionStart is written once per session/compaction, so it is often older than the in-memory event tail."""
+    import json
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            pos, rest = f.tell(), b""
+            while pos > 0:
+                step = min(block, pos)
+                pos -= step
+                f.seek(pos)
+                chunk = f.read(step) + rest
+                lines = chunk.split(b"\n")
+                rest = lines[0] if pos > 0 else b""
+                for ln in reversed(lines[1:] if pos > 0 else lines):
+                    if b"SessionStart" not in ln:
+                        continue
+                    try:
+                        e = json.loads(ln)
+                    except ValueError:
+                        continue
+                    if isinstance(e, dict) and e.get("hook_event_name") == "SessionStart" and e.get("model"):
+                        return e
+    except OSError:
+        return None
+    return None
+
+
+def with_session_start(events, path):
+    """events (list of dicts) plus the latest SessionStart from the file when the tail no longer contains one."""
+    events = [e for e in (events or []) if isinstance(e, dict)]
+    if any(e.get("hook_event_name") == "SessionStart" and e.get("model") for e in events):
+        return events
+    s = latest_session_start(path)
+    return ([s] + events) if s else events
+
+
 def coordinator_model(events):
     """Model of the latest SessionStart record that carries one, else ""."""
     for e in reversed(events):
@@ -173,6 +211,8 @@ def coordinator_identity(events, health=None, now=None, messages=None):
     historical session identity. Never infer a deputy model from a routing default or an unrelated Codex worker.
     """
     now = time.time() if now is None else now
+    if hasattr(events, "columns"):  # a pandas DataFrame iterates over column names: refuse silently-empty input
+        raise TypeError("coordinator_identity needs the raw event dicts (read_events_raw), not a DataFrame")
     events = sorted((e for e in events if isinstance(e, dict) and float(e.get("ts") or 0) <= now),
                     key=lambda e: float(e.get("ts") or 0))
     health = health or {}
@@ -210,10 +250,10 @@ def coordinator_identity(events, health=None, now=None, messages=None):
         e, provider, role = {}, UNKNOWN, "coordinator"
         active = not fallback and any(not x.get("agent_id") and x.get("hook_event_name") in ("PreToolUse", "PostToolUse")
                                      and 0 <= now - float(x.get("ts") or 0) < 120 for x in events)
-    label = f"Συντονιστής ({provider})" + (" · αναπληρωτής" if role == "codex-deputy" else "")
+    # the coordinator is called Πάρις whichever provider is acting (M-20261022-024)
+    label = "Πάρις (Codex αναπληρωτής)" if role == "codex-deputy" else f"Πάρις ({provider})"
     mdl = str(e.get("model") or "")
-    card = ("🧭 Συντονιστής (Codex αναπληρωτής)" if role == "codex-deputy" else f"🧭 Συντονιστής ({provider})") \
-        + " · μοντέλο " + (mdl or UNKNOWN)
+    card = "🧭 " + label + " · μοντέλο " + (mdl or UNKNOWN)
     return {"card": card, "provider": provider, "role": role, "model": str(e.get("model") or ""),
             "effort": str(e.get("effort") or ""), "active": active, "agent_id": e.get("agent_id"),
             "label": label, "ts": float(e.get("ts") or 0),

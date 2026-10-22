@@ -83,7 +83,7 @@ def test_deputy_identity_and_race_use_actual_model():
     assert len(lanes) == 1 and lanes[0]["reasons"] == []
     rendered = race_view.render(lanes, 100)
     assert "Codex αναπληρωτής" in rendered and "gpt-6-astra" in rendered
-    assert "claude-opus" not in rendered and "Πάρις" not in rendered
+    assert "claude-opus" not in rendered and "Πάρις (Codex αναπληρωτής)" in rendered
     stopped = events + [{"hook_event_name": "SubagentStop", "ts": 101, "agent_id": "log-d"}]
     assert not am.coordinator_identity(stopped, health, 102)["active"]
     assert race_view.lanes(stopped, now=102, health=health)[0]["status"] == "idle"
@@ -106,12 +106,12 @@ def test_latest_actor_and_card():
     ev = [{"hook_event_name": "SessionStart", "ts": 10, "model": "claude-opus-5-5"},
           {"hook_event_name": "PreToolUse", "ts": 20, "tool_name": "Bash"}]
     ok = {"claude": {"state": "ok"}}
-    assert am.coordinator_identity(ev, ok, 30)["card"] == "🧭 Συντονιστής (Claude) · μοντέλο claude-opus-5-5"
+    assert am.coordinator_identity(ev, ok, 30)["card"] == "🧭 Πάρις (Claude) · μοντέλο claude-opus-5-5"
     import datetime as dt
     msg = {"author": "codex", "id": "M-1", "model": "gpt-6.1-sol · low · αναπληρωτής",
            "ts": dt.datetime.fromtimestamp(40).isoformat()}
     i = am.coordinator_identity(ev, ok, 50, messages=[msg])
-    assert i["card"] == "🧭 Συντονιστής (Codex αναπληρωτής) · μοντέλο gpt-6.1-sol" and not i["active"]
+    assert i["card"] == "🧭 Πάρις (Codex αναπληρωτής) · μοντέλο gpt-6.1-sol" and not i["active"]
     ev.append({"hook_event_name": "PreToolUse", "ts": 45, "tool_name": "Bash"})  # Claude acted later again
     assert am.coordinator_identity(ev, ok, 50, messages=[msg])["provider"] == "Claude"
 
@@ -120,13 +120,13 @@ def test_race_lane_label_uses_card():
     ev = [{"hook_event_name": "SessionStart", "ts": 10, "model": "claude-opus-5-5"},
           {"hook_event_name": "PreToolUse", "ts": 20, "tool_name": "Bash", "summary": "x"}]
     ln = race_view.lanes(ev, now=30, health={"claude": {"state": "ok"}})
-    assert ln[0]["name"] == "🧭 Συντονιστής (Claude) · μοντέλο claude-opus-5-5"
+    assert ln[0]["name"] == "🧭 Πάρις (Claude) · μοντέλο claude-opus-5-5"
     html = race_view.render(ln, 30)
-    assert "🧭 Συντονιστής (Claude) · μοντέλο claude-opus-5-5" in html and html.count("claude-opus-5-5") == 1
+    assert "🧭 Πάρις (Claude) · μοντέλο claude-opus-5-5" in html and html.count("claude-opus-5-5") == 1
     dep = ev + [{"hook_event_name": "SubagentStart", "ts": 25, "agent_id": "log-d", "agent_type": "codex-deputy",
                  "model": "gpt-6.1-sol", "effort": "low"}]
     h2 = race_view.render(race_view.lanes(dep, now=30, health={"claude": {"state": "limit"}}), 30)
-    assert "Συντονιστής (Codex αναπληρωτής) · μοντέλο gpt-6.1-sol" in h2 and "Συντονιστής (Claude)" not in h2
+    assert "Πάρις (Codex αναπληρωτής) · μοντέλο gpt-6.1-sol" in h2 and "Πάρις (Claude)" not in h2
 
 
 def test_agents_tab_card_wiring():

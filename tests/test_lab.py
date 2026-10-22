@@ -603,7 +603,7 @@ def test_race_coordinator_and_retries():
     assert by[now - 700]["reasons"] == ["επανάληψη ×1"], "same label after a failure = retry"
     assert by[now - 600]["reasons"] == ["επανάληψη ×2"], "same task text = retry"
     # coordinator: idle without events (static, caption), running with recent main-session tool events
-    assert ln[0]["role"] == "coordinator" and ln[0]["status"] == "idle" and ln[0]["name"] == "Συντονιστής (άγνωστο) · coordinator"
+    assert ln[0]["role"] == "coordinator" and ln[0]["status"] == "idle" and ln[0]["name"] == "🧭 Πάρις (άγνωστο) · μοντέλο άγνωστο"
     cap = "Κανένας πράκτορας δεν δουλεύει"
     ev0 = [e for e in ev if e["agent_id"].startswith("x")]
     h = race_view.render(race_view.lanes(ev0, now=now), now)
@@ -1687,7 +1687,7 @@ def test_dashboard():
     at.run()
     caps = [x.value for x in at.caption]
     assert any("Codex (OpenAI) · gpt-6-sol**" in v for v in caps), caps
-    assert any(v.startswith("**Συντονιστής (Claude)** ·") for v in caps), caps  # no model: author only
+    assert any(v.startswith("**Συντονιστής** ·") for v in caps), caps  # no model: author only
     ok("dashboard: model label rendered")
     amid = db.researcher_send("με αρχείο", thread_id=cur, attachments=[("n.txt", b"hello")], root=TMP)
     at.run()

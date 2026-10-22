@@ -15,6 +15,7 @@ pulse is rendered with a negative animation-delay equal to its age, so it contin
 import datetime as dt
 import html
 import json
+import agent_models
 
 COORD = "coordinator"
 ACTIVE_TOOL_S = 25     # a tool event this recent keeps a role active even without a start/stop pair
@@ -36,6 +37,7 @@ ROLES = {
     "codex-researcher": ("codex-researcher", "#92400e", 258, 140),
     "codex-architect": ("codex-architect", "#4338ca", 240, 195),
     "codex-deputy": ("codex-deputy", "#a21caf", 195, 232),
+    "codex-engineer": ("codex-engineer", "#0e7490", 195, 210),
 }
 WORKERS = [r for r in ROLES if r != COORD]
 DEPUTY_MARKERS = ("αναπληρωτ", "deputy")
@@ -57,7 +59,8 @@ def _msg_ts(m):
     return t.timestamp()
 
 
-def derive(events, messages=(), now=0.0):
+def derive(events, messages=(), now=0.0, health=None):
+    identity = agent_models.coordinator_identity(events, health, now)
     nodes = {r: {"active": False} for r in ROLES}
     pulses = []
     open_ = {}   # agent_id -> (role, start ts)
@@ -118,7 +121,8 @@ def derive(events, messages=(), now=0.0):
                 nodes[role]["active"] = True
                 pulse(role, COORD, ts, "post")
     pulses.sort(key=lambda p: p["age"])
-    return {"nodes": nodes, "pulses": pulses}
+    nodes[COORD]["active"] = identity["active"]
+    return {"nodes": nodes, "pulses": pulses, "coordinator": identity}
 
 
 # ---------------------------------------------------------------- rendering
@@ -147,6 +151,7 @@ LAYOUT = {
     "codex-researcher": ((214, 192), (284, 162), "cdx-research"),
     "codex-architect": ((150, 190), (95, 259), "cdx-arch"),
     "codex-deputy": ((188, 230), (225, 259), "cdx-deputy"),
+    "codex-engineer": ((200, 176), (280, 212), "cdx-engineer"),
 }
 FULL_DX = 60  # full-name mode widens the frame by 2*FULL_DX and recentres the drawing
 
@@ -397,6 +402,11 @@ def render(state, full_names=False):
     o.append("</g>")
     for r, (label, colour, _x, _y) in ROLES.items():
         (vx, vy), (bx, by), short = LAYOUT[r]
+        identity = state.get("coordinator") or {}
+        if r == COORD and identity.get("provider") not in (None, agent_models.UNKNOWN):
+            # «Πάρις (Claude) · τώρα» / «Πάρις (Codex αναπληρωτής)» (M-20261022-024); model/effort in the line below
+            label = identity["label"] + (" · τώρα" if nodes[r]["active"] else "")
+            short = "Πάρις (" + identity["provider"] + ")"
         vi = _vertex(r)
         vx += dx
         bx += dx
@@ -421,6 +431,11 @@ def render(state, full_names=False):
             f'fill="#0b1220">{html.escape(text)}</text></g>')
     o.append(f'<rect width="{W}" height="{H}" fill="url(#sl)" class="scan" pointer-events="none"/>')
     o.append("</svg>")
+    identity = state.get("coordinator") or {}
+    if identity.get("provider") not in (None, agent_models.UNKNOWN):
+        details = " · ".join(str(identity.get(k) or agent_models.UNKNOWN) for k in ("provider", "role", "model", "effort"))
+        o.append('<div style="font:10px sans-serif;color:#c9faff;text-align:center">'
+                 + html.escape(details) + '</div>')
     data = '{"P":%s,"O":%d}' % (json.dumps(P3), len(_OUTLINE))
     o.append("<script>" + _JS % (data, SWAY_DEG, SWAY_S, CX, CY) + "</script></body></html>")
     return "".join(o)

@@ -280,7 +280,7 @@ def lanes(events, now=None, roles=None, window=6 * 3600, max_lanes=16, health=No
         if r.get("coord"):
             card = identity["card"]
             if not identity["model"] and identity["provider"] == "Claude" and coord_model:
-                card = f"🧭 Συντονιστής (Claude) · μοντέλο {coord_model}"
+                card = f"🧭 Πάρις (Claude) · μοντέλο {coord_model}"
             name, color = card, (roles.get("coordinator") or ("", "#ff2a6d"))[1]
         r["name"], r["color"] = name, color
         r["desc"] = two_words(r.get("label"), r.get("task"), "" if r.get("coord") else r["role"])
