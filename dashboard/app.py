@@ -507,7 +507,9 @@ def usage_rings():
     wev = _watch_events(os.path.join(ROOT, ".lab", "offers_watch_events.jsonl"))
     dpath = os.path.join(ROOT, ".lab", "notifications_dismissed.json")   # M-20261022-063: only the dismissals are stored
     vis = notif_format.visible(wev, notif_format.load_dismissed(dpath), now)   # last 24 h, not dismissed; raw jsonl untouched
-    with st.expander("ειδοποιήσεις ορίων" + (f" · {len(vis)}" if vis else "")):
+    # stable label + remembered open state: a dismissal must not collapse the dropdown (M-20261022-068)
+    with st.expander("ειδοποιήσεις ορίων", expanded=st.session_state.get("_nd_open", False)):
+        st.caption(f"{len(vis)} ενεργές (τελευταίες 24 ώρες)" if vis else "")
         for prov, items in notif_format.group_by_provider([notif_format.format_event(e, now) for e in vis]).items():
             st.markdown(f'<div style="border-left:4px solid {items[0]["brand"]};padding-left:6px;font-weight:700">'
                         f'{items[0]["provider_label"]}</div>', unsafe_allow_html=True)
@@ -518,11 +520,13 @@ def usage_rings():
                             f'<span style="opacity:.6;font-size:.8em">{f["when"]} · {f["at"]}</span>', unsafe_allow_html=True)
                 if c2.button("✕", key="nd_" + f["id"], help="Απόκρυψη"):
                     notif_format.dismiss(dpath, [f["id"]])
+                    st.session_state["_nd_open"] = True
                     st.rerun(scope="fragment")
         if not vis:
             st.caption("Καμία ενεργή ειδοποίηση (τελευταίες 24 ώρες).")
         elif st.button("Καθαρισμός όλων", key="nd_all"):
             notif_format.dismiss(dpath, [notif_format.event_id(e) for e in vis])
+            st.session_state["_nd_open"] = True
             st.rerun(scope="fragment")
         st.caption("Έλεγχος κάθε 10 λεπτά (`tools/offers_watch.py`). Οι κρυμμένες δεν διαγράφονται από το αρχείο καταγραφής. "
                    "Τα ανεπιβεβαίωτα δεν είναι προσφορές μέχρι να τα ελέγξει ο συντονιστής.")
