@@ -416,7 +416,7 @@ def test_sandbox():
     assert G.seed_env(dict(sb, seed_ranges_forbidden=[[500, 600]])) == "0-499,601-999,1000-1004"
     assert G.assign_cores(range(8, 40), [8, 9], [2, 1]) == [[10, 11], [12]]
     expect_error(lambda: G.assign_cores([], [], [1]), "empty")
-    expect_error(lambda: G.assign_cores(range(8, 40), [], [1] * 25), "limit 24")
+    expect_error(lambda: G.assign_cores(range(8, 40), [], [1] * 33), "limit 32")   # R-20261022-004: cap 24 -> 32
     expect_error(lambda: G.assign_cores(range(8, 10), [], [3]), "free cores")
     # accepted: seeds 5 and 1003 via args, pinned, recorded under the parent id, in the tuning worktree
     c = child(cpu_affinity=child_affinity); c["entries"][0]["cmd"] += ["--eval-seeds", "1000-1003"]

@@ -29,7 +29,7 @@ PROTECTED_FILES = ("sim_v2/env.py", "sim_v2/params.py", "sim_v2/workloads.py", "
                    "experiments/dinos_simv2/adapter.py")
 SHELLS = {"sh", "bash", "dash", "zsh", "ksh", "csh", "tcsh", "fish", "env", "busybox", "ash"}
 ENV_ALLOWED = ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS")
-MAX_TOTAL_CPUS = 24
+MAX_TOTAL_CPUS = 32
 SEED_FLAG = re.compile(r"^--?(?:[\w-]*[-_])?seeds?(?:=(.*))?$")
 
 
