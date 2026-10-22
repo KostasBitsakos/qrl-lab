@@ -1528,7 +1528,7 @@ def _exp_overview():
         st.plotly_chart(exp_figs.gauge(last["closeness"], "Πόσο κοντά είμαστε στους στόχους",
                                        ref=vals[-2] if len(vals) > 1 else None),
                         width="stretch", config={"displayModeBar": False}, key="xg_gauge")
-        st.caption(f"Τελευταίος κύκλος **{last['cycle']}** ({last['variant']}), λόγος DInos+T/DERP {last.get('ratio')}× "
+        st.caption(f"Τελευταίος κύκλος **{last['cycle']}** ({last['variant']}), λόγος LSTM+transfer/DERP {last.get('ratio')}× "
                    f"(στόχος 17.3×) · πηγή `{last['source']}` · {_PAPER_NOTE}.")
     with c2:
         if fc:
@@ -1551,7 +1551,7 @@ def _exp_overview():
                         config={"displayModeBar": False}, key="xg_hist")
         st.dataframe(pd.DataFrame(hist), hide_index=True, width="stretch")
         st.caption(f"Αρχείο `{os.path.relpath(EXP_HISTORY, ROOT)}` · closeness = code-tuning/tuning/closeness.py "
-                   "score(5×μ.ό. DInos+T, 5×μ.ό. DERP), μέσος όρος τριών μερών (DERP, DInos, λόγος) · " + _PAPER_NOTE + ".")
+                   "score(5×μ.ό. LSTM+transfer, 5×μ.ό. DERP), μέσος όρος τριών μερών (DERP, DInos, λόγος) · " + _PAPER_NOTE + ".")
         if rem["files"]:
             st.dataframe(pd.DataFrame(rem["files"]), hide_index=True, width="stretch")
 
@@ -1719,11 +1719,11 @@ if _tab_live(tab_runs):  # lazy: hidden tabs do no work
                                    f"(closeness.part) · {_PAPER_NOTE}.")
                     else:
                         st.caption(f"Το arm `{_res.get('arm')}` δεν έχει στόχο στο paper (στόχοι μόνο για DERP 2.2e5 και "
-                                   f"DInos+T 3.8e6)· 5 × μ.ό. = {(_cl['x'] or 0):,.0f}.")
+                                   f"LSTM+transfer 3.8e6)· 5 × μ.ό. = {(_cl['x'] or 0):,.0f}.")
                 with _t2:
                     if _fs:
                         st.metric(f"Closeness κύκλου {_cyc} · {exp_view.variant_of(_res)}", f"{100 * _fs['total']:.0f}%")
-                        st.caption(f"score(5×{_fs['dinos_mean']:,.0f} DInos+T, 5×{_fs['derp_mean']:,.0f} DERP), όπως το loop "
+                        st.caption(f"score(5×{_fs['dinos_mean']:,.0f} LSTM+transfer, 5×{_fs['derp_mean']:,.0f} DERP), όπως το loop "
                                    f"(μ.ό. seeds {_fs['n_seeds']}, split {_fs['split']}): μέσος όρος των μερών DERP "
                                    f"{100 * _fs['derp']:.0f}%, DInos {100 * _fs['dinos']:.0f}%, λόγος {100 * _fs['ratio_part']:.0f}% "
                                    f"(λόγος {_fs['ratio']:.2f}×, στόχος 17.3×) · "
