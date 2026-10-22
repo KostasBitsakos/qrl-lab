@@ -2834,7 +2834,7 @@ if _tab_live(tab_ext):  # lazy: hidden tabs do no work
             st.subheader(c)
             for ei, e in enumerate(cat[c]):
                 with st.container(border=True):
-                    st.markdown(f"**{e['name']}** · {e['kind']} · {e['provider']}")
+                    st.markdown(f"**{e['name']}** · {e['kind']} · {e['provider']} · 🎯 {ext_catalog.target_for_provider(e['provider'])}")
                     st.write(e["description"])
                     st.caption(f"Κόστος: {e['cost']} · [πηγή]({e['url']})")
                     if st.button("Πρόσθεσε", key=f"ext_add_{ci}_{ei}"):
@@ -2853,13 +2853,15 @@ if _tab_live(tab_ext):  # lazy: hidden tabs do no work
         _dx.close()
         show_thread(ext_tid, key="ext_chat")
         composer_toggle("ext")
+        _ext_tg = st.radio("Στόχος αιτήματος", list(ext_catalog.TARGET_CHOICES), index=2, horizontal=True, key="ext_target",
+                           help="Για ποια πλευρά να ψάξει/εγκαταστήσει ο συντονιστής.")
         ext_in = st.chat_input("Περίγραψε ποιο skill/επέκταση θέλεις… (Enter = αποστολή)", key="ext_composer")
         ext_in = composer_gate("ext", ext_in or None)[0]
         if ext_in:
             try:
                 dd = db()
                 thr = dd.thread(ext_tid)
-                dd.researcher_send(ext_catalog.search_message(ext_in), thread_id=ext_tid,
+                dd.researcher_send(ext_catalog.search_message(ext_in, ext_catalog.TARGET_CHOICES[_ext_tg]), thread_id=ext_tid,
                                    reply_to=thr[-1]["id"] if thr else None)
                 dd.close()
                 st.toast("Στάλθηκε στον συντονιστή", icon="📨")

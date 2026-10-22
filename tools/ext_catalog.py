@@ -15,6 +15,20 @@ KINDS = ("skill", "plugin", "MCP", "feature")
 PROVIDERS = ("Claude", "ChatGPT")
 MAX_PER_CATEGORY = 4
 EXT_TAG = "EXT-SEARCH"
+TARGETS = ("Claude", "Codex", "Claude + Codex")
+TARGET_CHOICES = {"για Claude": "Claude", "για Codex": "Codex", "και για τα δύο": "Claude + Codex"}
+
+
+def target_for_provider(provider):
+    """Catalog provider -> target label (Claude / Codex / Claude + Codex)."""
+    p = (provider or "").strip().lower()
+    if p in ("both", "claude + codex", "claude+codex", "και τα δύο"):
+        return "Claude + Codex"
+    if p in ("chatgpt", "codex", "openai"):
+        return "Codex"
+    return "Claude"
+
+
 EXT_THREAD_TITLE = "Επεκτάσεις: αναζήτηση skills/plugins"
 
 
@@ -47,13 +61,15 @@ def load(root=None):
     return out
 
 
-def search_message(text):
+def search_message(text, target="Claude + Codex"):
     """Body of the dashboard message that triggers the coordinator's search agent."""
     text = (text or "").strip()
     if not text:
         raise ValueError("empty")
     # The coordinator's handling rule lives in the inbox procedure, not in the researcher's visible text.
-    return f"[{EXT_TAG}] Ζητώ skill/επέκταση: {text}"
+    if target not in TARGETS:
+        raise ValueError("bad target")
+    return f"[{EXT_TAG} · {target}] Ζητώ skill/επέκταση: {text}"
 
 
 def strip_instruction(body):
@@ -66,7 +82,7 @@ def add_request(entry):
     """-> (title, body) for `labq ask --kind approval --scope external`. Never installs anything."""
     e = {k: str(entry.get(k, "")) for k in FIELDS}
     title = f"Προσθήκη επέκτασης: {e['name']} ({e['kind']}, {e['provider']})"
-    body = (f"Ο Κώστας ζήτησε να προστεθεί η επέκταση «{e['name']}».\n\n- Είδος: {e['kind']}\n- Πάροχος: {e['provider']}\n"
+    body = (f"Ο Κώστας ζήτησε να προστεθεί η επέκταση «{e['name']}».\n\n- Είδος: {e['kind']}\n- Πάροχος: {e['provider']}\n- Για: {target_for_provider(e['provider'])}\n"
             f"- Περιγραφή: {e['description']}\n- Πηγή: {e['url']}\n- Κόστος: {e['cost']}\n\n"
             "Η έγκριση δεν εγκαθιστά τίποτα από μόνη της: ο συντονιστής θα προτείνει συγκεκριμένα βήματα εγκατάστασης.")
     return title, body

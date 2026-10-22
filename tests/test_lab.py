@@ -981,8 +981,14 @@ def test_ext_catalog_and_tab():
     at.chat_input(key="ext_composer").set_value("ένα skill για LaTeX").run()
     assert not at.exception, at.exception
     msgs = [m for m in LabDB().conn.execute("SELECT * FROM messages WHERE author='researcher'").fetchall()
-            if "[EXT-SEARCH]" in m["body"]]
+            if "[EXT-SEARCH · Claude + Codex]" in m["body"]]
     assert len(msgs) == 1 and msgs[0]["kind"] == "message", msgs
+    assert ext_catalog.search_message("x", "Codex").startswith("[EXT-SEARCH · Codex]")
+    try:
+        ext_catalog.search_message("x", "bogus"); assert False
+    except ValueError:
+        pass
+    assert [ext_catalog.target_for_provider(p) for p in ("Claude", "ChatGPT", "both")] == ["Claude", "Codex", "Claude + Codex"]
     ok("extensions: catalog only from file (empty state, validation), add -> approval/external, chat -> EXT-SEARCH")
 
 
@@ -2150,10 +2156,15 @@ def test_modreload_and_installed():
     open(os.path.join(r, ".claude/skills/council/SKILL.md"), "w").write("---\nname: council\ndescription: x\n---\nSECRET body\n")
     open(os.path.join(r, ".claude/agents/foo.md"), "w").write("---\nname: foo\ndescription: does foo\n---\nbody\n")
     json.dump({"hooks": {"Stop": []}}, open(os.path.join(r, ".claude/settings.json"), "w"))
+    os.makedirs(os.path.join(h, ".codex/skills/council"))
+    open(os.path.join(h, ".codex/skills/council/SKILL.md"), "w").write("---\nname: council\ndescription: y\n---\n")
+    open(os.path.join(h, ".codex/config.toml"), "w").write('token = "SECRETTOKEN"\n[mcp_servers.ctx]\ncommand = "x"\n')
     its = installed_view.detect(r, home=h, codex_cmd="definitely-not-a-cmd")
     kinds = sorted((i["kind"], i["name"]) for i in its)
-    assert kinds == [("agent", "foo"), ("hook", "Stop"), ("plugin", "codex@openai-codex"), ("skill", "council")], kinds
-    assert "SECRET" not in json.dumps(its) and "does foo" in json.dumps(its)
+    assert kinds == [("agent", "foo"), ("hook", "Stop"), ("mcp", "ctx"), ("plugin", "codex@openai-codex"), ("skill", "council")], kinds
+    tg = {i["name"]: i["target"] for i in its}
+    assert tg == {"foo": "Claude", "Stop": "Claude", "codex@openai-codex": "Claude + Codex", "council": "Claude + Codex", "ctx": "Codex"}, tg
+    assert "SECRET" not in json.dumps(its) and "SECRETTOKEN" not in json.dumps(its) and "does foo" in json.dumps(its)
     ok("modreload + installed_view")
 
 
