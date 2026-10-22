@@ -23,7 +23,7 @@ For future projects (researcher request M-20261021-043). What we learned about w
 - Crossed bootstrap over training seeds × paired traces; verdict = support / inconclusive / contradicted; no multiplicity hiding.
 - Always include the researcher's own baselines (original DERP, his HPA) and fair ones (tuned load HPA, fixed pods, oracle).
 - Parameter-matched controls for every architecture claim (e.g. MLP with the same parameter count as the LSTM).
-- Name arms precisely (DERP original vs enhanced DERP; LSTM = myLSTM 3×128 scratch; DInos+T = same + transfer).
+- Name arms precisely (DERP original vs enhanced DERP; LSTM = myLSTM 3×128 scratch; LSTM+transfer (formerly DInos+T) = same + transfer).
 - Closeness % is a progress indicator, never a result. Allowed / not-allowed claims written down (council C-20261021-01).
 - Before trusting a reported number, check it against the summary file; correct overclaims immediately.
 
