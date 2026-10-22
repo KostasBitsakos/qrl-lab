@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 import modreload  # noqa: E402
 import importlib  # noqa: E402
 _LOCAL_MODS = ["labdb", "file_view", "replytext", "k8s_view", "prom_view", "web_terminal", "sudo_ui", "race_view", "brain_view",
-               "perm_store", "ext_catalog", "summarize_runs", "agent_models", "paper_plots", "paper_build", "uploads", "installed_view", "access", "outage", "models_view", "banners", "sandbox_view", "topology_view", "topology_ui", "exp_view", "exp_figs", "usage_limits", "event_tail", "msg_structure"]
+               "perm_store", "ext_catalog", "summarize_runs", "agent_models", "paper_plots", "paper_build", "uploads", "installed_view", "access", "outage", "models_view", "banners", "sandbox_view", "topology_view", "topology_ui", "exp_view", "exp_figs", "usage_limits", "event_tail", "msg_structure", "notif_format"]
 for _n in _LOCAL_MODS:  # first import so they are in sys.modules, then reload those whose file changed
     importlib.import_module(_n)
 modreload.reload_changed(_LOCAL_MODS)
@@ -47,6 +47,7 @@ import ext_catalog  # noqa: E402
 import installed_view  # noqa: E402
 import access  # noqa: E402
 import outage  # noqa: E402
+import notif_format  # noqa: E402
 import msg_structure  # noqa: E402
 import term_prompt  # noqa: E402
 import banners  # noqa: E402
@@ -504,22 +505,27 @@ def usage_rings():
                    "→ `docs/free_offers.json`.")
     # offers_watch (M-20261021-056): local limit resets + UNVERIFIED candidates from official pages
     wev = _watch_events(os.path.join(ROOT, ".lab", "offers_watch_events.jsonl"))
-    wseen = st.session_state.setdefault("_watch_seen", now - 86400)
-    wn = sum(1 for e in wev if e.get("ts", 0) > wseen)
-    with st.expander("ειδοποιήσεις ορίων" + (f" · {wn} νέα" if wn else "")):
-        for e in wev[:8]:
-            tag = "όριο reset" if e.get("kind") == "limit_reset" else ":orange-badge[ανεπιβεβαίωτο]"
-            when = time.strftime("%d/%m %H:%M", time.localtime(e.get("ts", 0)))
-            link = f"[{e.get('title', '')}]({e['url']})" if e.get("url") else e.get("title", "")
-            kw = f" ({', '.join(e['matched'])})" if e.get("matched") else ""
-            st.markdown(f"- {when} · **{e.get('provider', '')}** · {tag} · {link}{kw}")
-        if not wev:
-            st.caption("Καμία ειδοποίηση ακόμη.")
-        if wn and st.button("Τα είδα", key="watch_seen_btn"):
-            st.session_state["_watch_seen"] = now
+    dpath = os.path.join(ROOT, ".lab", "notifications_dismissed.json")   # M-20261022-063: only the dismissals are stored
+    vis = notif_format.visible(wev, notif_format.load_dismissed(dpath), now)   # last 24 h, not dismissed; raw jsonl untouched
+    with st.expander("ειδοποιήσεις ορίων" + (f" · {len(vis)}" if vis else "")):
+        for prov, items in notif_format.group_by_provider([notif_format.format_event(e, now) for e in vis]).items():
+            st.markdown(f'<div style="border-left:4px solid {items[0]["brand"]};padding-left:6px;font-weight:700">'
+                        f'{items[0]["provider_label"]}</div>', unsafe_allow_html=True)
+            for f in items[:8]:
+                c1, c2 = st.columns([8, 1])
+                link = f" · [πηγή]({f['url']})" if f["url"] else ""
+                c1.markdown(f'<span style="color:{f["color"]}">{f["icon"]}</span> {f["text"]}{link}<br>'
+                            f'<span style="opacity:.6;font-size:.8em">{f["when"]} · {f["at"]}</span>', unsafe_allow_html=True)
+                if c2.button("✕", key="nd_" + f["id"], help="Απόκρυψη"):
+                    notif_format.dismiss(dpath, [f["id"]])
+                    st.rerun(scope="fragment")
+        if not vis:
+            st.caption("Καμία ενεργή ειδοποίηση (τελευταίες 24 ώρες).")
+        elif st.button("Καθαρισμός όλων", key="nd_all"):
+            notif_format.dismiss(dpath, [notif_format.event_id(e) for e in vis])
             st.rerun(scope="fragment")
-        st.caption("Αυτόματος έλεγχος κάθε 10 λεπτά (`tools/offers_watch.py`). Τα ανεπιβεβαίωτα δεν είναι προσφορές "
-                   "μέχρι να τα ελέγξει ο συντονιστής.")
+        st.caption("Έλεγχος κάθε 10 λεπτά (`tools/offers_watch.py`). Οι κρυμμένες δεν διαγράφονται από το αρχείο καταγραφής. "
+                   "Τα ανεπιβεβαίωτα δεν είναι προσφορές μέχρι να τα ελέγξει ο συντονιστής.")
 
 
 with st.sidebar:
