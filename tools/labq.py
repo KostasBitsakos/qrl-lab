@@ -66,8 +66,23 @@ def cmd_show(a, db):
     _print_thread(thread, full_id=a.id, clip=10**9 if a.full else 600)
 
 
+def _coordinator_model():
+    """Model of the current Claude coordinator session (latest SessionStart in .lab/events.jsonl), or None."""
+    try:
+        import agent_models
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".lab", "events.jsonl")
+        with open(path) as f:
+            ev = [json.loads(x) for x in f if x.strip()]
+        ident = agent_models.coordinator_identity(ev)
+        mdl = ident.get("model")
+        return agent_models.COORD_CLAUDE.get(mdl, mdl) if ident.get("role") == "coordinator" and mdl else None
+    except Exception:
+        return None
+
+
 def cmd_post(a, db):
-    print(db.post(a.author, _body(a), a.reply_to, kind=a.kind, set_status=a.status, model=a.model))
+    model = a.model or (_coordinator_model() if a.author == "coordinator" else None)   # M-20261022-011: never «άγνωστο»
+    print(db.post(a.author, _body(a), a.reply_to, kind=a.kind, set_status=a.status, model=model))
 
 
 def cmd_status(a, db):
