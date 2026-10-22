@@ -42,3 +42,9 @@ from evaluating DERP at eps=1 (paper protocol) — fair protocol gives ~1.3-1.4�
 - Others with code: Erlang, Autothrottle, ProSmart HPA (JSS 2025), VASIM (vertical). Rainbow ablation (Hessel et al., AAAI 2018) for c19.
 Fairness requirements for the baseline comparison (Codex r2): correct Poisson arrivals, equal tuning/interaction budgets, transfer
 pretraining cost charged, ≥10 seeds, paired test traces, CIs, SLO violations, pod-time, churn; include tuned HPA and no-transfer DDQN.
+
+## 5. Target picture (researcher M-20261022-050)
+Ideal ordering: Dinos+Transfer V.2 > Dinos > LSTM+transfer > LSTM > {DERP, MLP} > HPA-demand (load) > his HPA (old).
+The published DInos numbers map to Dinos+Transfer V.2, Dinos, DERP and his old HPA (not HPA-demand). The researcher accepts that
+the absolute numbers/17x cannot be reached under the fair protocol; the paper explains that DERP was also changed and improved
+(enhanced DERP = 10-step history) and why. Check with .lab/tuning/order_check.py <summary.json> [--suffix _dqn3].
