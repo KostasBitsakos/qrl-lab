@@ -127,6 +127,14 @@ def gauge(value, title, ref=None, height=220):
     return fig.update_layout(height=height, margin=dict(l=20, r=20, t=50, b=10), paper_bgcolor="rgba(0,0,0,0)")
 
 
+def spark(values, total, height=90):
+    """Tiny line of n_pass per record."""
+    fig = go.Figure(go.Scatter(y=values, mode="lines+markers", line=dict(color=PURPLE, width=2)))
+    fig.update_yaxes(range=[0, total], showticklabels=False)
+    fig.update_xaxes(showticklabels=False)
+    return fig.update_layout(height=height, margin=dict(l=5, r=5, t=5, b=5), paper_bgcolor="rgba(0,0,0,0)")
+
+
 def history_line(labels, values, fc=None, height=200):
     """Per-cycle closeness sparkline; fc = forecast dict (pred, lo, hi) drawn as the next point with its band."""
     fig = go.Figure(go.Scatter(x=labels, y=values, mode="lines+markers+text", text=[f"{v:.0f}%" for v in values],

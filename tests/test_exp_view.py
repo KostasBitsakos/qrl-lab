@@ -176,3 +176,21 @@ def test_branch_of():
     assert ev.branch_of(None, None, "/h/qrl-lab/code-tuning-astra/tuning/results/c1/x.json") == "astra"
     assert ev.branch_of("R-20261019-001", "/h/qrl-lab/code-tuning") == "opus"
     assert ev.branch_of() == "opus"
+
+
+def test_parse_fair_progress():
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "f.json")
+        assert ev.parse_fair_progress(p) is None
+        open(p, "w").write("nope")
+        assert ev.parse_fair_progress(p) is None
+        json.dump([{"n_pass": 2, "n_total": 7}, {"bad": 1},
+                   {"label": "x", "n_pass": 4, "n_total": 7, "v2_over_oracle": 1.05,
+                    "checks": [{"pair": "a>b", "mark": "✓", "diff": 5, "ci": [1, 9]},
+                               {"pair": "c>d", "mark": "zz", "diff": 1, "ci": None}]}], open(p, "w"))
+        r = ev.parse_fair_progress(p)
+        assert r["history"] == [2, 4] and r["n_pass"] == 4 and abs(r["pct"] - 400 / 7) < 1e-9
+        assert abs(r["v2_over_oracle_pct"] - 105) < 1e-9
+        assert [c["mark"] for c in r["checks"]] == ["✓", "?"] and r["checks"][0]["ci"] == [1, 9]
+        json.dump({"a": 1}, open(p, "w"))
+        assert ev.parse_fair_progress(p) is None

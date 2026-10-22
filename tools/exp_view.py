@@ -19,7 +19,7 @@ HISTORY_REL = os.path.join(".lab", "tuning", "closeness_history.json")
 ASTRA_RESULTS_REL = os.path.join("code-tuning-astra", "tuning", "results")
 BRANCHES = (("opus", "Opus", RESULTS_REL), ("astra", "astra", ASTRA_RESULTS_REL))
 ASTRA_REQUESTS = ("R-20261021-007", "R-20261021-010", "R-20261022-003")
-LOOP_REQUESTS = ("R-20261019-001", "R-20261020-005", "R-20261021-001", "R-20261021-005", "R-20261021-007", "R-20261021-009", "R-20261021-010", "R-20261022-002", "R-20261022-003")
+LOOP_REQUESTS = ("R-20261019-001", "R-20261020-005", "R-20261021-001", "R-20261021-005", "R-20261021-007", "R-20261021-009", "R-20261021-010", "R-20261022-002", "R-20261022-003", "R-20261022-005")
 LOOP_END = "2026-10-21T23:59:00+00:00"
 LIVE_MAX_AGE = 120.0
 CK_RE = re.compile(r"\.ck\d+\.json$")
@@ -571,3 +571,41 @@ def fit_sinusoid(t, load, info, iters=4):
         if sum(keep) < 10:
             return None, None
     return fit, [not k for k in keep]
+
+
+FAIR_REL = os.path.join(".lab", "tuning", "fair_progress.json")
+FAIR_MARKS = {"✓": "διάστημα εμπιστοσύνης > 0", "~": "θετικό αλλά το CI περιέχει το 0",
+              "✗": "όχι", "?": "λείπουν δεδομένα"}
+
+
+def parse_fair_progress(path):
+    """Pure parse of .lab/tuning/fair_progress.json (list written by order_check.py --json).
+
+    Returns None if missing/invalid/empty; else {latest, history (n_pass per valid record), pct, checks, n_pass,
+    n_total, v2_over_oracle_pct}. Records without integer n_pass/n_total are skipped.
+    """
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, list):
+        return None
+    recs = [r for r in data if isinstance(r, dict) and isinstance(r.get("n_pass"), int)
+            and isinstance(r.get("n_total"), int) and not isinstance(r.get("n_pass"), bool) and r["n_total"] > 0]
+    if not recs:
+        return None
+    last = recs[-1]
+    checks = []
+    for c in last.get("checks") or []:
+        if isinstance(c, dict):
+            m = c.get("mark") if c.get("mark") in FAIR_MARKS else "?"
+            ci = c.get("ci")
+            ci = list(ci) if isinstance(ci, (list, tuple)) and len(ci) == 2 else None
+            checks.append({"pair": str(c.get("pair", "")), "mark": m, "diff": c.get("diff"), "ci": ci})
+    r = last.get("v2_over_oracle")
+    ok = isinstance(r, (int, float)) and not isinstance(r, bool) and math.isfinite(r)
+    return {"latest": last, "label": last.get("label", ""), "history": [x["n_pass"] for x in recs],
+            "n_pass": last["n_pass"], "n_total": last["n_total"],
+            "pct": 100.0 * last["n_pass"] / last["n_total"], "checks": checks,
+            "v2_over_oracle_pct": 100.0 * r if ok else None}

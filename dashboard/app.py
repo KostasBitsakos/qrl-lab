@@ -1558,6 +1558,33 @@ def _runs_all():
         _d.close()
 
 
+@st.cache_data(ttl=30, show_spinner=False)
+def _fair_progress():
+    return exp_view.parse_fair_progress(os.path.join(ROOT, exp_view.FAIR_REL))
+
+
+def _fair_block():
+    """Second indicator: «Δίκαιη εικόνα» = n_pass/n_total of the target-order check (M-20261022-073)."""
+    fp = _fair_progress()
+    if not fp:
+        st.caption("Δίκαιη εικόνα: δεν υπάρχει ακόμη.")
+        return
+    st.plotly_chart(exp_figs.gauge(fp["pct"], f"Δίκαιη εικόνα ({fp['n_pass']}/{fp['n_total']})", height=200),
+                    width="stretch", config={"displayModeBar": False}, key="xg_fair")
+    if fp["v2_over_oracle_pct"] is not None:
+        st.metric("V.2 / oracle", f"{fp['v2_over_oracle_pct']:.0f}%")
+    if len(fp["history"]) > 1:
+        st.plotly_chart(exp_figs.spark(fp["history"], fp["n_total"]), width="stretch",
+                        config={"displayModeBar": False}, key="xg_fair_hist")
+    with st.expander("Έλεγχοι σειράς-στόχου"):
+        for c in fp["checks"]:
+            ci = f"[{c['ci'][0]}, {c['ci'][1]}]" if c["ci"] else "—"
+            st.markdown(f"{c['mark']} **{c['pair']}** · διαφορά {c['diff']} · CI {ci}")
+        st.caption("✓ = διάστημα εμπιστοσύνης > 0 · ~ = θετικό αλλά το CI περιέχει το 0 · ✗ = όχι · ? = λείπουν δεδομένα")
+    st.caption("Μετρά τη σειρά-στόχο V.2 > Dinos > LSTM+transfer > LSTM > DERP/MLP > HPA-demand > HPA "
+               "(test9, στοιχεία ανάπτυξης· όχι τελικό)")
+
+
 def _exp_overview():
     """Gauge: latest cycle closeness, forecast, runs left in the loop (reads files; launcher status read-only)."""
     hist = exp_view.load_history(EXP_HISTORY) or exp_view.SEED_HISTORY
@@ -1582,6 +1609,7 @@ def _exp_overview():
         st.plotly_chart(exp_figs.gauge(last["closeness"], "Πόσο κοντά είμαστε στους στόχους",
                                        ref=vals[-2] if len(vals) > 1 else None),
                         width="stretch", config={"displayModeBar": False}, key="xg_gauge")
+        _fair_block()
         st.caption(f"Τελευταίος κύκλος **{last['cycle']}** ({last['variant']}), λόγος LSTM+transfer/DERP {last.get('ratio')}× "
                    f"(στόχος 17.3×) · πηγή `{last['source']}` · {_PAPER_NOTE}.")
     with c2:
