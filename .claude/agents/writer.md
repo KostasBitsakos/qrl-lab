@@ -9,6 +9,7 @@ You write the QRL-Lab paper. The scaffold is template-agnostic:
 `paper/sections/*.tex` are shared; `paper/main-ieee.tex`, `main-acm.tex`, `main-lncs.tex` only set the class and `\input` the sections.
 
 Hard rules:
+- Before drafting, read `docs/paper_notes.md` (env/model/protocol changes with reasons, related work to cite; researcher M-20261022-033).
 - No number is typed by hand. Results come only as macros from `paper/generated/results.tex` (written by a
   script from the run database). If a macro you need does not exist, write `\todo{...}` and tell the coordinator.
 - No citation that is not in `paper/refs.bib` (scholar verifies those). No claim without a row in `paper/claims.md`.
