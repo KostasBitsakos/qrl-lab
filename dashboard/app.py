@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 import modreload  # noqa: E402
 import importlib  # noqa: E402
 _LOCAL_MODS = ["labdb", "file_view", "replytext", "k8s_view", "prom_view", "web_terminal", "sudo_ui", "race_view", "brain_view",
-               "perm_store", "ext_catalog", "summarize_runs", "agent_models", "paper_plots", "paper_build", "uploads", "installed_view", "access", "outage", "models_view", "banners", "sandbox_view", "topology_view", "topology_ui", "exp_view", "exp_figs", "usage_limits", "event_tail"]
+               "perm_store", "ext_catalog", "summarize_runs", "agent_models", "paper_plots", "paper_build", "uploads", "installed_view", "access", "outage", "models_view", "banners", "sandbox_view", "topology_view", "topology_ui", "exp_view", "exp_figs", "usage_limits", "event_tail", "msg_structure"]
 for _n in _LOCAL_MODS:  # first import so they are in sys.modules, then reload those whose file changed
     importlib.import_module(_n)
 modreload.reload_changed(_LOCAL_MODS)
@@ -47,6 +47,7 @@ import ext_catalog  # noqa: E402
 import installed_view  # noqa: E402
 import access  # noqa: E402
 import outage  # noqa: E402
+import msg_structure  # noqa: E402
 import term_prompt  # noqa: E402
 import banners  # noqa: E402
 import sandbox_view  # noqa: E402
@@ -756,6 +757,43 @@ def decision_panel(d, select=lambda reqs: reqs, pre="", label="Αίτημα",
                 except LabError as e:
                     st.error(str(e))
 
+# ---------------------------------------------------------------- structured-md composer option (M-20261022-015)
+def composer_toggle(name):
+    """«Δομημένο md (script)» toggle of one chat composer. The value lives in a plain session key, so it survives
+    reruns where a lazy tab does not render the widget."""
+    store = msg_structure.TOGGLE_KEY + name
+    st.session_state[store] = st.toggle(
+        "Δομημένο md (script)", value=bool(st.session_state.get(store, False)), key="_w_" + store,
+        help="Πριν την αποστολή, το tools/msg_structure.py (χωρίς LLM) χωρίζει το μήνυμα σε σημεία P1..Pn, "
+             "ερωτήσεις και αναφορές· το αρχικό κείμενο μένει αυτούσιο στην αρχή. Βλέπεις προεπισκόπηση πριν σταλεί.")
+
+
+@st.dialog("📝 Δομημένο μήνυμα (script)", width="large", on_dismiss=lambda: msg_structure.dismiss(st.session_state))
+def _msfmt_dialog(name, md):
+    t_view, t_raw = st.tabs(["Προβολή", "Markdown"])
+    with t_view:
+        st.markdown(md)
+    with t_raw:
+        st.code(md, language="markdown")
+    b1, b2 = st.columns(2)
+    if b1.button("Αποστολή", key=f"msfmt_send_{name}", type="primary"):
+        msg_structure.choose(st.session_state, name, "md")
+        st.rerun()
+    if b2.button("Ακύρωση / στείλε το αρχικό", key=f"msfmt_orig_{name}"):
+        msg_structure.choose(st.session_state, name, "original")
+        st.rerun()
+
+
+def composer_gate(name, submitted=None, files=None):
+    """(text, files) to send in this run, or (None, None). Toggle off: the submitted text unchanged. Toggle on: the
+    preview dialog (re-opened on full reruns until a choice or ✕); the choice is sent on the next run."""
+    act, body, files = msg_structure.gate(st.session_state, name, submitted, files)
+    if act == "preview":
+        _msfmt_dialog(name, body)
+        return None, None
+    return (body, files) if act == "send" else (None, None)
+
+
 # ---------------------------------------------------------------- shared chat rendering
 @st.cache_data(ttl=120, max_entries=5000, show_spinner=False)
 def _linkify(text):
@@ -1132,11 +1170,13 @@ with tab_chat:
             except (LabError, UploadError) as e:
                 st.error(str(e))
     # Enter sends, Shift+Enter = newline. Not inside any fragment, so typing is never refreshed away.
+    composer_toggle("chat")
     sub = st.chat_input("Γράψε εδώ… (Enter = αποστολή, Shift+Enter = νέα γραμμή)", accept_file="multiple",
                         key="composer")
-    if sub:
-        text = getattr(sub, "text", sub) if not isinstance(sub, str) else sub
-        files = list(getattr(sub, "files", None) or [])
+    text, files = composer_gate("chat", *((getattr(sub, "text", sub) if not isinstance(sub, str) else sub,
+                                           [(f.name, f.getvalue()) for f in (getattr(sub, "files", None) or [])])
+                                          if sub else (None, None)))
+    if text is not None:
         try:
             dd = db()
             target = None if new_topic else cur
@@ -1147,7 +1187,7 @@ with tab_chat:
             mid = dd.researcher_send(text, kind=kind or "message",
                                      thread_id=target, reply_to=reply_to,
                                      req_model=req_model or None, req_effort=req_effort,
-                                     attachments=[(f.name, f.getvalue()) for f in files] or None, root=ROOT)
+                                     attachments=files or None, root=ROOT)
             dd.close()
             st.session_state["pending_thread"] = target or mid
             st.session_state["new_topic"] = False
@@ -2249,16 +2289,18 @@ with tab_paper:
                                      label_visibility="collapsed",
                                      help="Ποιοι κάνουν review μετά τη σύνταξη.")
     # Not inside a fragment, so typing is never refreshed away.
+    composer_toggle("paper")
     psub = st.chat_input("Γράψε στον συγγραφέα… (Enter = αποστολή)", accept_file="multiple", key="paper_composer")
-    if psub:
-        ptext_in = getattr(psub, "text", psub) if not isinstance(psub, str) else psub
-        pfiles_in = list(getattr(psub, "files", None) or [])
+    ptext_in, pfiles_in = composer_gate("paper", *((getattr(psub, "text", psub) if not isinstance(psub, str) else psub,
+                                                     [(f.name, f.getvalue()) for f in (getattr(psub, "files", None) or [])])
+                                                    if psub else (None, None)))
+    if ptext_in is not None:
         try:
             dd = db()
             thr = dd.thread(paper_tid)
             dd.researcher_send(ptext_in, thread_id=paper_tid, reply_to=thr[-1]["id"] if thr else None,
                                req_writers=p_writers, req_reviewers=p_reviewers,
-                               attachments=[(f.name, f.getvalue()) for f in pfiles_in] or None, root=ROOT)
+                               attachments=pfiles_in or None, root=ROOT)
             dd.close()
             st.toast("Στάλθηκε στον συγγραφέα", icon="📨")
             st.rerun()
@@ -2364,7 +2406,9 @@ if _tab_live(tab_venues):  # lazy: hidden tabs do no work
         ven_tid = _dv.ensure_thread(VENUES_THREAD_TITLE, "Συζήτηση για συνέδρια/περιοδικά και προθεσμίες (scholar).")
         _dv.close()
         show_thread(ven_tid, key="venues_chat", title="Συζήτηση συνεδρίων")
+        composer_toggle("venues")
         ven_in = st.chat_input("Ρώτα για συνέδρια, προθεσμίες, καταλληλότητα… (Enter = αποστολή)", key="venues_composer")
+        ven_in = composer_gate("venues", ven_in or None)[0]
         if ven_in:
             try:
                 dd = db()
@@ -2808,7 +2852,9 @@ if _tab_live(tab_ext):  # lazy: hidden tabs do no work
         ext_tid = _dx.ensure_thread(ext_catalog.EXT_THREAD_TITLE, "Αιτήματα αναζήτησης επεκτάσεων και οι απαντήσεις τους.")
         _dx.close()
         show_thread(ext_tid, key="ext_chat")
+        composer_toggle("ext")
         ext_in = st.chat_input("Περίγραψε ποιο skill/επέκταση θέλεις… (Enter = αποστολή)", key="ext_composer")
+        ext_in = composer_gate("ext", ext_in or None)[0]
         if ext_in:
             try:
                 dd = db()

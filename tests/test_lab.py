@@ -1621,6 +1621,18 @@ def test_dashboard():
     assert (rm["req_model"], rm["req_effort"]) == ("sonnet", "high"), rm
     assert any("sonnet/high" in x.value for x in at.caption), "tag not shown"
     at.selectbox(key="req_model_sel").set_value(None); at.selectbox(key="req_effort_sel").set_value("med")
+    # structured-md toggle (M-20261022-015): preview first, nothing sent until «Αποστολή»
+    n_before = len(db.thread(tid))
+    at.toggle(key="_w_msfmt_chat").set_value(True).run()
+    at.chat_input[0].set_value("1 κανε αυτο AppTestS 2 εδω κατι αλλο").run()
+    assert not at.exception, at.exception
+    assert len(db.thread(tid)) == n_before, "sent before the preview"
+    assert any("**P2** 2 εδω κατι αλλο" in md.value for md in at.markdown), "preview missing"
+    at.button(key="msfmt_send_chat").click().run()
+    assert not at.exception, at.exception
+    body = [m for m in db.thread(tid) if "AppTestS" in m["body"]][-1]["body"]
+    assert body.startswith("#### Αρχικό μήνυμα") and "1 κανε αυτο AppTestS 2 εδω κατι αλλο\n" in body, body
+    at.toggle(key="_w_msfmt_chat").set_value(False).run()
     thr = db.thread(tid)
     n_threads = len(db.threads(100))
     # in_progress shows the live indicator
