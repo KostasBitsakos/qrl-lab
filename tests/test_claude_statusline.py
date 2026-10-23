@@ -24,9 +24,11 @@ def test_full_input_writes_only_whitelisted():
     rc, out = _run(json.dumps(FULL), p)
     assert rc == 0 and out == "Opus · 5ω 23% · 7ημ 41%\n"
     d = json.load(open(p))
-    assert set(d) == {"five_hour", "seven_day", "as_of", "model"} and d["model"] == "Opus"
+    assert set(d) == {"five_hour", "seven_day", "as_of", "model", "session_cost_usd", "session_id"} and d["model"] == "Opus"
     assert d["five_hour"] == {"used_percentage": 23.4, "resets_at": 1800000000.0}
-    assert "session_id" not in json.dumps(d) and "cost" not in d
+    assert d["session_cost_usd"] == 1.2 and d["session_id"] == "s" and "transcript_path" not in json.dumps(d)
+    st = json.load(open(os.path.join(os.path.dirname(p), "extra_credits_state.json"))) if os.path.exists(os.path.join(os.path.dirname(p), "extra_credits_state.json")) else {}
+    assert st == {}  # no purchase config in this temp dir
     assert [f for f in os.listdir(os.path.dirname(p)) if f.endswith(".tmp")] == []
 
 

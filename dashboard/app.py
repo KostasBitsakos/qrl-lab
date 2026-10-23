@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 import modreload  # noqa: E402
 import importlib  # noqa: E402
 _LOCAL_MODS = ["labdb", "file_view", "replytext", "k8s_view", "prom_view", "web_terminal", "sudo_ui", "race_view", "brain_view",
-               "perm_store", "ext_catalog", "summarize_runs", "agent_models", "paper_plots", "paper_build", "uploads", "installed_view", "access", "outage", "models_view", "banners", "sandbox_view", "topology_view", "topology_ui", "exp_view", "exp_figs", "usage_limits", "event_tail", "msg_structure", "notif_format"]
+               "perm_store", "ext_catalog", "summarize_runs", "agent_models", "paper_plots", "paper_build", "uploads", "installed_view", "access", "outage", "models_view", "banners", "sandbox_view", "topology_view", "topology_ui", "exp_view", "exp_figs", "usage_limits", "event_tail", "msg_structure", "notif_format", "extra_credits"]
 for _n in _LOCAL_MODS:  # first import so they are in sys.modules, then reload those whose file changed
     importlib.import_module(_n)
 modreload.reload_changed(_LOCAL_MODS)
@@ -63,6 +63,7 @@ import paper_build  # noqa: E402
 import exp_view  # noqa: E402
 import agent_models  # noqa: E402
 import usage_limits  # noqa: E402
+import extra_credits  # noqa: E402
 import exp_figs  # noqa: E402
 import event_tail  # noqa: E402
 from uploads import UploadError, attachment_paths  # noqa: E402
@@ -487,6 +488,15 @@ def usage_rings():
             '<span style="font-size:1.35rem;font-weight:700;margin-right:auto">🧪 QRL-Lab</span>'
             + usage_limits.ring_html("Claude", cw, "#d97757", now, step=RING_STEP_S)
             + usage_limits.ring_html("Codex", xw, "#10a37f", now, step=RING_STEP_S) + "</div>")
+    # purchased credits + who is awake (researcher 2026-10-23); tiny JSON reads only
+    _h = read_health() or {}
+    _ec = extra_credits.status("claude")
+    _d7 = next((w["pct"] for w in cw if w["label"] == usage_limits.LABELS["seven_day"]), None)
+    if extra_credits.show_credits(_d7, _h.get("state"), _ec):
+        st.caption("💳 " + extra_credits.sidebar_text(_ec) + ". ΕΚΤΙΜΗΣΗ από το κόστος των συνεδριών (ίσως διαφέρει από τη "
+                   "χρέωση)· το ακριβές υπόλοιπο: claude.ai → Settings → Usage.")
+    st.html(extra_credits.awake_html([extra_credits.awake_info("claude", _h, now),
+                                      extra_credits.awake_info("codex", _h.get("codex") or {}, now)]))
     offers = usage_limits.load_offers(os.path.join(ROOT, "docs", "free_offers.json"))
     seen = st.session_state.setdefault("_offers_seen", now - 86400)   # first view: last 24 h count as new
     n_new = sum(usage_limits.offer_is_new(o, seen) for o in offers)

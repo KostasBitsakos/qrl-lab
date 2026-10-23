@@ -17,6 +17,8 @@ import sys
 import time
 import traceback
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 LAB = os.path.join(os.environ.get("QRL_LAB_DIR") or os.path.abspath(os.path.join(os.path.dirname(__file__), "..")), ".lab")
 SESSION = "lab"
 WINDOW = "coordinator"  # tools/start-coordinator.sh: the window that is not `dashboard` / `health`
@@ -63,8 +65,13 @@ def _dialog(lines):
     return lines[q].strip()[:MAX_LINE], "\n".join(b[:200] for b in block)
 
 
-def detect(pane_text, window_exists=True, pane_cmd=None):
-    """Pure classifier. Returns {"state": ok|down|limit|permission|api_error, "detail": str, "line": str}."""
+def _explicit_out(line):
+    import extra_credits
+    return extra_credits.is_explicit_out(line)
+
+
+def detect(pane_text, window_exists=True, pane_cmd=None, extra_active=False):
+    """Pure classifier. Returns {"state": ok|down|limit|extra|permission|api_error, "detail": str, "line": str}."""
     if not window_exists:
         return {"state": "down", "detail": "το tmux window δεν υπάρχει", "line": ""}
     if pane_cmd and pane_cmd.strip().lower() in SHELLS:
@@ -80,6 +87,8 @@ def detect(pane_text, window_exists=True, pane_cmd=None):
         return None
     r = scan(PATTERNS[:2])
     if r:
+        if extra_active and r["state"] == "limit" and not _explicit_out(r["line"]):
+            r["state"] = "extra"  # Claude keeps working on purchased credits (researcher 2026-10-23); deputy.py ignores it
         return r
     dlg = _dialog(lines)
     if dlg:
@@ -186,7 +195,12 @@ def main():
     while True:
         heartbeat()
         try:
-            cur = step(detect(*sample()))
+            try:
+                import extra_credits
+                extra = extra_credits.status("claude")["active"]
+            except Exception:  # noqa: BLE001
+                extra = False
+            cur = step(detect(*sample(), extra_active=extra))
             try:
                 import deputy  # Codex deputy: file the request / start the window (never fatal)
                 deputy.tick(LAB)

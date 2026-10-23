@@ -4,7 +4,9 @@
 Claude Code pipes a JSON object to stdin (https://code.claude.com/docs/en/statusline). We keep ONLY
 rate_limits.{five_hour,seven_day}.{used_percentage,resets_at (epoch s)} (each may be absent), plus model.display_name
 and as_of, written atomically to ~/qrl-lab/.lab/usage/claude.json (override: $QRL_CLAUDE_USAGE_FILE). Nothing else
-from stdin is stored. Prints one status line, e.g. "Opus · 5ω 23% · 7ημ 41%". Never fails the status line: on any bad
+from stdin is stored, except cost.total_cost_usd (a number) and session_id, kept as "session_cost_usd" / "session_id"
+(M-2026-10-23: estimate of spend on purchased credits, see tools/extra_credits.py; the per-session baselines go to
+.lab/usage/extra_credits_state.json). Prints one status line, e.g. "Opus · 5ω 23% · 7ημ 41%". Never fails the status line: on any bad
 input it prints the model name (or "Claude") and exits 0. If stdin carries no rate-limit window, the file is left
 unchanged (an earlier reading is not erased by a message that simply lacks the field).
 """
@@ -13,6 +15,8 @@ import os
 import sys
 import tempfile
 import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_PATH = os.path.join(ROOT, ".lab", "usage", "claude.json")
@@ -39,6 +43,12 @@ def extract(data, now=None):
                 rec[key] = {"used_percentage": _num(w["used_percentage"]), "resets_at": _num(w.get("resets_at"))}
     if not rec:
         return None, model
+    cost = data.get("cost")
+    cost = _num(cost.get("total_cost_usd")) if isinstance(cost, dict) else None
+    sid = data.get("session_id")
+    if cost is not None and isinstance(sid, str) and sid:
+        rec["session_cost_usd"] = cost
+        rec["session_id"] = sid[:80]
     rec["as_of"] = time.time() if now is None else now
     if model:
         rec["model"] = model
@@ -77,6 +87,9 @@ def main(stdin=None, stdout=None, path=None):
         rec, model = extract(data)
         if rec:
             write_atomic(rec, path)
+            if "session_cost_usd" in rec:
+                import extra_credits
+                extra_credits.observe(rec["session_id"], rec["session_cost_usd"], usage_dir=os.path.dirname(path))
     except Exception:  # noqa: BLE001 - the status line must never break
         pass
     try:
