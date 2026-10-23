@@ -30,7 +30,8 @@ Legend: **kept** = carried forward; **dropped** = did not help; **open** = still
 | 17 | Noise at n=5 (cycles/c17_prereg.md) | noise5: DInos+T 82.7k, DERP 43.1k ~ HPA 43.3k (inconclusive); noise15: 79.5k vs 38.3k, LSTM ~ fixed; both REJECTED; ratio 1.9-2.1x (c17_brief.md) | **dropped** for B1; noise = stated limit |
 | 18 | Dinos V.2 search (a1..a10) + Transfer V.2, two branches, successive halving; n=5-7 on spike300_d5, noise5 robustness | V.2 a1h 86.4k val ≈ LSTM+transfer 86.9k (n=7, no detectable diff); V.2 − a1h scratch +4.7k [+1.1k,+8.9k]; LSTM-first > matched MLP; a2,a5,a6,a8,a9,a10 no gain; transfer = jumpstart (c18_n7_opus.md, c18_transfer_curve.md) | **kept** a1h |
 | 19 | DDQN techniques (n-step 3, dueling, PER) + transfer techniques (source, pretrain 40k, ft-eps) on V.2 a1h; gate at n=5 | n-step 3 +6.9k val, test9 +6.7k [+3.8k,+9.4k], 5/5 seeds — ADOPTED; dueling −2.2k, PER −15.6k, others ≤ +1.1k (c19_screen.md) | **kept** n-step 3 |
-| 20 | Archs a11/a12 (2×/3× LSTM128 + a1h head) with n-step 3, n=5 | running (c20_a12.md) | open |
+| 20 | Archs a12 (3× LSTM128 + a1h head) with n-step 3, n=5; n-step 5 | a12 V.2 86.4k vs a1h 93.4k val → no switch; n5 = n3 (c20_a12.md) | dropped |
+| 21 | Single guarded test10 confirmation, seeds 60-64, frozen recipe (a1h, n-step 3 all learning arms) | H1 V.2 > DERP ✓, H2 V.2 > enhanced DERP ✓, H3 Dinos > LSTM ✗ (stop); LSTM+transfer 90.6k, V.2 87.8k (c21_test10_result.md) | final |
 
 ## Notes
 - His HPA (`P/HPA/simpleagent.py:9-14`, verified 2026-10-20): scale up if CPU > 50 **or** memory > 50, else scale down.

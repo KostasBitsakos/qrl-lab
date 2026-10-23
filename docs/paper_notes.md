@@ -48,3 +48,14 @@ Ideal ordering: Dinos+Transfer V.2 > Dinos > LSTM+transfer > LSTM > {DERP, MLP} 
 The published DInos numbers map to Dinos+Transfer V.2, Dinos, DERP and his old HPA (not HPA-demand). The researcher accepts that
 the absolute numbers/17x cannot be reached under the fair protocol; the paper explains that DERP was also changed and improved
 (enhanced DERP = 10-step history) and why. Check with .lab/tuning/order_check.py <summary.json> [--suffix _dqn3].
+
+## 6. Reminders for the writing phase (researcher)
+- M-20261022-077: REMIND the researcher, when writing starts, to discuss the oracle (oracle_Dstep): what it is (heuristic with
+  D-step look-ahead, not an optimal upper bound), and that V.2 with n-step exceeds it (dev ~1.05×) — report it carefully.
+
+## 7. Final confirmation result (test10, 2026-10-23; .lab/tuning/cycles/c21_test10_result.md)
+Confirmed (pre-registered fixed sequence): Dinos+Transfer V.2 (a1h, n-step 3) > DERP (+24.8k [+17.9k,+31.8k]) and > enhanced DERP (+18.0k
+[+9.8k,+29.5k]) on spike300_d5, 5 fresh seeds. NOT confirmed: Dinos > LSTM (H3), so V.2 vs Dinos / LSTM+transfer is descriptive only
+(test10: LSTM+transfer 90.6k, MLP 90.2k, LSTM 90.0k, V.2 87.8k, Dinos 86.1k). Dev gains did not replicate (selection optimism and/or seed
+variance; Dinos sd 11k). Exploratory: V.2 has the highest validation AUC/jumpstart and earliest 95%-of-own-best crossing (5k ticks).
+Do NOT claim 'V.2 is the best model'. Disclose: test9 used as a development gate; arch chosen by its transfer arm; all screens listed.
