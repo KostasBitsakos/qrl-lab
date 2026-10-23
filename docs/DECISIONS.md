@@ -36,3 +36,4 @@ Before adding a decision, follow the procedure in `docs/rules/README.md` (M-2026
 - 2026-10-16 — handoff standing rules 1–5 and environment facts (D13). → rules/dashboard.md, rules/models.md, rules/security.md, rules/archive.md
 - 2026-10-16 — D12: ChatGPT handoff adopted. → rules/security.md, rules/archive.md
 - 2026-10-22 (M-20261022-007): model names LSTM / LSTM+transfer (was DInos+T) / Dinos / Dinos+Transfer V.2; test each model at its best checkpoint chosen on val; save convergence metrics (.lab/tuning/convergence.py).
+- 2026-10-23 (researcher): handoff rules when one coordinator sleeps (full write coordination for the awake one, detailed notes, agent strength per existing criteria, solo work only in new single-purpose branches, joint review → merge decision → delete those branches): docs/rules/handoff.md.
