@@ -59,3 +59,13 @@ Confirmed (pre-registered fixed sequence): Dinos+Transfer V.2 (a1h, n-step 3) > 
 (test10: LSTM+transfer 90.6k, MLP 90.2k, LSTM 90.0k, V.2 87.8k, Dinos 86.1k). Dev gains did not replicate (selection optimism and/or seed
 variance; Dinos sd 11k). Exploratory: V.2 has the highest validation AUC/jumpstart and earliest 95%-of-own-best crossing (5k ticks).
 Do NOT claim 'V.2 is the best model'. Disclose: test9 used as a development gate; arch chosen by its transfer arm; all screens listed.
+
+## 8. Post-test10 cycle (22-23, researcher +8 h, 2026-10-23) — in progress
+- c22 exploratory seed-variance study (seeds 65-74, val/test9 only): motivation = Dinos sd 11k on test10 (seed 62 collapse) and late
+  deterioration in some seeds (Dinos/62 −9.9k val from 10k→20k ticks; V.2/64 −17.5k from 5k→20k).
+- Council C-20261023-01 (Claude + Codex astra + scholar related work): package = Adam lr 1e-4 → 5e-5 + grad-norm clip 10 (Pascanu et al.
+  ICML 2013 for recurrent nets; Rainbow uses a much smaller lr) + pending-pod maturity features (pods ready in 1..5 ticks; partial
+  observability under start delay, cf. DRQN). Applied to ALL learning arms. Deferred: LayerNorm-LSTM (Ba et al. 2016), window 20, GRU.
+  Rejected with reason: wider/deeper LSTM (a11/a12 worse), L2-SP (no RL evidence found), PER/dueling (hurt), longer pretraining.
+- New held-out split test11 (12000-12019) because test10 is single-use; same guard. Reporting: crossed 95% CIs + IQM (Agarwal et al.
+  NeurIPS 2021); seed variance reported (Henderson et al. AAAI 2018).
