@@ -13,7 +13,7 @@ import re
 import sys
 import time
 
-LAB = os.environ.get("QRL_LAB_DIR") or os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".lab"))
+LAB = os.path.join(os.environ.get("QRL_LAB_DIR") or os.path.abspath(os.path.join(os.path.dirname(__file__), "..")), ".lab")
 MAX_LINE = 300
 
 # (state, regex). Named group `when` = the reset text, verbatim, if the line has one.

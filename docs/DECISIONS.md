@@ -1,3 +1,6 @@
+---
+description: Dated log of every accepted researcher decision (newest first) with links to the active rules in docs/rules
+---
 # Accepted decisions — dated log
 
 Newest first, one or two lines per decision. The rules themselves live in [`docs/rules/`](rules/README.md)

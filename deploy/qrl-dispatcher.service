@@ -1,0 +1,17 @@
+[Unit]
+Description=QRL-Lab dispatcher (event-driven coordinator: Claude or Codex)
+After=network-online.target
+# a crash loop must not burn the quota: at most 5 starts in 10 minutes
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory={ROOT}
+EnvironmentFile=%h/.config/qrl-lab/env
+ExecStart=/usr/bin/env python3 {ROOT}/tools/dispatcher.py run
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target

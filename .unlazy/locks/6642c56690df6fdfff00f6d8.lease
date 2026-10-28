@@ -1,0 +1,12 @@
+{
+  "scope": "codex-deputy",
+  "leaf": "leaf-1.1.2",
+  "globs": [
+    "tools/deputy.py",
+    "tools/labdb.py",
+    "tests/test_lab.py",
+    "tests/test_deputy_write.py",
+    "docs/deputy_handoff.md"
+  ],
+  "pid": 10
+}

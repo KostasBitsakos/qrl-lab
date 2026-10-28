@@ -1,3 +1,6 @@
+---
+description: Living notes for the paper - every env/model/protocol change with why and evidence; section 6 lists items to raise before writing (oracle)
+---
 # Paper notes — what the publication will need (researcher M-20261022-033)
 
 Living file. Every change to the environment, models or protocol that may appear in the paper goes here with WHY and the

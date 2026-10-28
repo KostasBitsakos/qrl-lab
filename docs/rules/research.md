@@ -1,3 +1,6 @@
+---
+description: Active research and paper rules - claims discipline, focus on reproducing the DInos picture, sources, venues
+---
 # Research and paper — active rules
 
 Claims discipline (no speed-up from simulator timings; parameter savings only next to a parameter-matched control;

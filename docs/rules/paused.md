@@ -1,3 +1,6 @@
+---
+description: Decided but paused items (quantum screens QC4/QC1, IBM Quantum, real-cluster calibration, stage-B SLO) with revive conditions
+---
 # Paused items (not dropped)
 
 These stay decided but paused. The researcher has not decided to drop them. Each line gives its revive condition.

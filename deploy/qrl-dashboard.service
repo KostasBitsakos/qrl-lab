@@ -1,0 +1,15 @@
+[Unit]
+Description=QRL-Lab dashboard (Streamlit on 127.0.0.1:8501 only)
+
+[Service]
+Type=simple
+WorkingDirectory={ROOT}
+EnvironmentFile=%h/.config/qrl-lab/env
+# core split (researcher 2026-10-21): CPUs 0-3 are reserved for the dashboard; experiments use 8-39
+CPUAffinity=0-3
+ExecStart={ROOT}/.venv/bin/streamlit run {ROOT}/dashboard/app.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

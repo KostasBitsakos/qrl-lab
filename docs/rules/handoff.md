@@ -1,3 +1,6 @@
+---
+description: Awake/asleep rules when Claude or Codex hits its limit - full coordination, solo notes, single-purpose branches, joint merge review
+---
 # Handoff when one coordinator "sleeps" (researcher, 2026-10-23)
 Convention: **awake** = the coordinator (Claude or Codex) that currently has usage left and works; **asleep** = the one that hit its usage
 limit and cannot work until its reset.

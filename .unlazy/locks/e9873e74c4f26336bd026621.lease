@@ -1,0 +1,15 @@
+{
+  "scope": "codex-deputy",
+  "leaf": "leaf-1.1.1",
+  "globs": [
+    "dashboard/app.py",
+    "tools/agent_models.py",
+    "tools/race_view.py",
+    "tools/brain_view.py",
+    "tests/test_agent_models.py",
+    "tests/test_brain_view.py",
+    "tests/test_dashboard_codex_routing.py",
+    "docs/agents_tab_audit.md"
+  ],
+  "pid": 3
+}

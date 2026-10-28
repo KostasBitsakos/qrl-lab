@@ -1,0 +1,16 @@
+{"ts": 1792401588.3398714, "hook_event_name": "HealthState", "summary": "- -> ok", "state": "ok"}
+{"ts": 1792401765.2432497, "hook_event_name": "HealthState", "summary": "ok -> permission", "state": "permission"}
+{"ts": 1792401947.3767338, "hook_event_name": "HealthState", "summary": "permission -> ok", "state": "ok"}
+{"ts": 1792401961.2096093, "hook_event_name": "HealthState", "summary": "ok -> permission", "state": "permission"}
+{"ts": 1792403161.6315856, "hook_event_name": "HealthState", "summary": "permission -> ok", "state": "ok"}
+{"ts": 1792403201.77886, "hook_event_name": "HealthState", "summary": "ok -> permission", "state": "permission"}
+{"ts": 1792403462.0542445, "hook_event_name": "HealthState", "summary": "permission -> ok", "state": "ok"}
+{"ts": 1792403482.1484084, "hook_event_name": "HealthState", "summary": "ok -> permission", "state": "permission"}
+{"ts": 1792404381.3020256, "hook_event_name": "HealthState", "summary": "permission -> ok", "state": "ok"}
+{"ts": 1792404401.3596509, "hook_event_name": "HealthState", "summary": "ok -> permission", "state": "permission"}
+{"ts": 1792405802.115722, "hook_event_name": "HealthState", "summary": "permission -> ok", "state": "ok"}
+{"ts": 1792405822.2065701, "hook_event_name": "HealthState", "summary": "ok -> permission", "state": "permission"}
+{"ts": 1792413002.0839887, "hook_event_name": "HealthState", "summary": "permission -> ok", "state": "ok"}
+{"ts": 1792413022.170431, "hook_event_name": "HealthState", "summary": "ok -> permission", "state": "permission"}
+{"ts": 1792418401.5133345, "hook_event_name": "HealthState", "summary": "permission -> ok", "state": "ok"}
+{"ts": 1792418461.5925014, "hook_event_name": "HealthState", "summary": "ok -> permission", "state": "permission"}

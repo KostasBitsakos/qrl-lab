@@ -57,3 +57,10 @@ at the start of every session, the rest when relevant. The rules in AGENTS.md (i
 
 ## State you keep
 `docs/PLAN.md` §11 (timeline status) and §13 (decisions); `docs/DECISIONS.md` for accepted decisions.
+
+<!-- qrl-v0.3 dispatcher -->
+## Dispatcher mode (v0.3)
+When your task text starts with `[QRL-Lab task`, you were started headless by `tools/dispatcher.py` for one task:
+follow `prompts/coordinator.md` (also in your system prompt) instead of the QRL-INBOX protocol above. Your final
+message is posted to the dashboard by the dispatcher. Ask Codex with `python3 tools/ask_peer.py` (logged, and it works
+the same when Codex coordinates); the `codex:codex-rescue` subagent stays available in interactive sessions.

@@ -1,3 +1,6 @@
+---
+description: Kubernetes HPA (autoscaling/v2, v1.34.0) algorithm read from source and docs - spec for the fair HPA baseline
+---
 # HPA baseline specification (autoscaling/v2), CPU utilization
 
 Read 2026-10-17. Code: `kubernetes/kubernetes` tag **v1.34.0**, `pkg/controller/podautoscaler/` (`horizontal.go`, `replica_calculator.go`, `metrics/utilization.go`) and `pkg/apis/autoscaling/v2/defaults.go`. Docs: current kubernetes.io pages (version menu lists v1.33-v1.37; the page cites "stable since v1.37" for tolerance), HPA concept page and kube-controller-manager flag reference. Tags newer than v1.34.0 were not read. Tags: [D] docs, [F] flags page, [C] code. Caveat: the code was read through a summarizing fetch tool, so quoted fragments are exact but connecting prose is paraphrase (items marked *(paraphrase)* should be re-read in the raw file before the paper cites them).

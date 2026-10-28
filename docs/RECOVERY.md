@@ -1,3 +1,6 @@
+---
+description: Old (pre-v0.3) VM outage recovery - cron watchdog.sh + boot_recover.sh restarting the tmux lab; replaced by systemd units in v0.3
+---
 # VM outage recovery
 
 What happens when the VM reboots or loses power (approved as R-20261017-016, option 1).

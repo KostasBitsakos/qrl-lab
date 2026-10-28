@@ -1,0 +1,13 @@
+- [Researcher name](researcher-name.md) — call him Κώστα in every reply
+- [Experiment loop](experiment-loop.md) — non-stop sim tuning loop till 22/10 (extended); recreate hourly cron after restart
+- [Tuning engineer = Opus](tuning-engineer-opus.md) — loop implementation on Opus + cross-check; env variants allowed
+- [Rules contradiction check](rules-contradiction-check.md) — check rule mds for conflicts and ask before adding
+- [Engineer test CPU](engineer-test-cpu.md) — no CPU-min cap; tests only on cores 4-7 (see core-split), never experiments
+- [Core split](core-split.md) — 0-3 dashboard, 4-7 agents/tests, 8-39 experiments; never pin the coordinator
+- [Token saving](token-saving.md) — use/install token-saving skills/plugins; scripts over LLM; weekly limit tight
+- [Parallel branches](parallel-branches.md) — Opus vs astra parallel branches only for this loop; ask before reusing
+- [Initiative + strategy](initiative-strategy.md) — important tasks: research best practice online, write strategy, then execute
+- [Deputy Codex](deputy-codex.md) — Codex = full acting coordinator when Claude is limited; new -codex branches; merge jointly
+- [Next cycle: baseline + Poisson](next-cycle-baseline-poisson.md) — DRe-SCale LSTM-PPO chosen; ask Gwydion?; build a correct Poisson process
+- [Tutorials request](tutorials-request.md) — conceptual tutorials on his work (not code); style guide + writer + beginner read test
+- [Writing reminders](writing-reminders.md) — remind him to discuss the oracle when writing starts (paper_notes §6)

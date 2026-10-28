@@ -517,6 +517,7 @@ def usage_rings():
     wev = _watch_events(os.path.join(ROOT, ".lab", "offers_watch_events.jsonl"))
     dpath = os.path.join(ROOT, ".lab", "notifications_dismissed.json")   # M-20261022-063: only the dismissals are stored
     vis = notif_format.visible(wev, notif_format.load_dismissed(dpath), now)   # last 24 h, not dismissed; raw jsonl untouched
+    vis = list({notif_format.event_id(e): e for e in vis}.values())   # same event logged twice → one row (duplicate key, 2026-10-26)
     # stable label + remembered open state: a dismissal must not collapse the dropdown (M-20261022-068)
     with st.expander("ειδοποιήσεις ορίων", expanded=st.session_state.get("_nd_open", False)):
         st.caption(f"{len(vis)} ενεργές (τελευταίες 24 ώρες)" if vis else "")
@@ -2940,3 +2941,13 @@ with tab_term:
                 st.rerun()
             else:
                 st.error(f"Δεν άνοιξε: {msg}")
+
+
+# qrl-v0.3 coordinator panel (added by tools/install_v03.py; remove this block to remove the panel)
+try:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from coord_panel import render_coordinator_panel
+    with st.sidebar:
+        render_coordinator_panel()
+except Exception as _qrl_panel_error:  # the panel must never break the dashboard
+    st.sidebar.warning(f"Πάνελ συντονιστή: {_qrl_panel_error}")

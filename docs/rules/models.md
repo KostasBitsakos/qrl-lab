@@ -1,3 +1,6 @@
+---
+description: Active rules for model routing, Codex roles and model/effort table, engineer model choice
+---
 # Models and agents — active rules
 
 Routing defaults and the Codex call procedure: see CLAUDE.md «Routing» and «Codex»; researcher overrides in

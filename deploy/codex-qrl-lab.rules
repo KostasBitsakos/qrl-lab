@@ -1,0 +1,25 @@
+# QRL-Lab execution policy for Codex (installed to ~/.codex/rules/qrl-lab.rules by tools/install_v03.py).
+# "forbidden": never runs. "prompt": needs a human; in `codex exec` (no human) it is refused.
+# Check:  codex execpolicy check --rules ~/.codex/rules/qrl-lab.rules kubectl delete pod x
+
+prefix_rule(
+    pattern = ["kubectl", ["apply", "create", "scale", "delete", "patch", "edit", "rollout", "replace"]],
+    decision = "forbidden",
+    justification = "QRL-Lab: cluster changes only through an approved request and tools/launch_run.py.",
+)
+prefix_rule(pattern = ["helm"], decision = "forbidden", justification = "QRL-Lab: no Helm without approval.")
+prefix_rule(
+    pattern = [["python3", "python"], ["tools/labq.py", "./tools/labq.py"], ["decide", "say"]],
+    decision = "forbidden",
+    justification = "Researcher-only command: decisions and researcher messages come from the dashboard.",
+)
+prefix_rule(
+    pattern = [["python3", "python"], ["tools/dispatcher.py", "./tools/dispatcher.py"], ["set", "clear", "run", "exhaust"]],
+    decision = "forbidden",
+    justification = "Researcher-only: coordinator choice, failover and the dispatcher service.",
+)
+prefix_rule(pattern = ["sqlite3"], decision = "forbidden", justification = "Use tools/labq.py, never raw SQL.")
+prefix_rule(pattern = ["git", "push"], decision = "forbidden", justification = "Push needs the researcher's approval.")
+prefix_rule(pattern = ["sudo"], decision = "forbidden", justification = "sudo is the researcher's.")
+prefix_rule(pattern = ["crontab"], decision = "forbidden", justification = "Scheduling is the dispatcher's job.")
+prefix_rule(pattern = ["rm", "-rf"], decision = "prompt", justification = "Destructive delete needs a human.")

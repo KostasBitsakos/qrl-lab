@@ -1,3 +1,6 @@
+---
+description: Decisions and findings from the claude.ai planning chat after PLAN v0.2 (16/10), the project's starting brief
+---
 # Handoff from the claude.ai planning chat — 2026-10-16 (after PLAN v0.2)
 
 For: the QRL-Lab coordinator. From: the researcher, via the planning chat (Claude) where the kit was designed.

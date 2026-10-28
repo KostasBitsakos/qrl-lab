@@ -1,3 +1,6 @@
+---
+description: Index of active rules split by topic, precedence, contradiction-check procedure and resolved conflicts C1-C6
+---
 # Rules index
 
 The accepted decisions of `docs/DECISIONS.md` (dated log) are kept here as active rules, split by topic

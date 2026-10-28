@@ -11,3 +11,6 @@ __pycache__/
 .lab/
 .mcp.json.disabled
 docs/uploads/
+# qrl-v0.3 generated files (rebuilt by the dispatcher)
+docs/INDEX.md
+docs/index.json

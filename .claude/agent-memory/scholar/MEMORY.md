@@ -1,0 +1,7 @@
+- [Load-metrics sources](reference_load_metrics_sources.md) — verified Redis/K8s load literature, tool quirks (no PDF reading), known gaps
+- [HPA sources](reference_hpa_sources.md) — verified HPA rules/defaults, k8s v1.34.0 code, docs/hpa_spec.md
+- [Venue facts](reference_venue_facts.md) — verified DSN/SIGMETRICS/PDP/CCGrid/ICPE dates, CORE 403 dead end; 2026-10-17
+- [Acceptance rates](reference_acceptance_rates.md) — CCGrid/SIGMETRICS/PDP 2024-26 sources, DOIs, gaps; 2026-10-17
+- [Browser/search tools eval](reference_browser_search_tools.md) — Perplexity, HyperFrames, Chrome/Playwright MCP, Firecrawl verdicts 2026-10-20
+- [SOTA autoscaler search](reference_sota_autoscaler_search.md) — DRe-SCale pick, AWARE/gym-hpa/Lipari facts, r.jina.ai PDF trick; 2026-10-22
+- [Token-saving tools](reference_token_saving_tools.md) — RTK, claude-mem, Serena, built-in cost features; verified 2026-10-17

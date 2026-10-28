@@ -38,7 +38,10 @@
       "Bash(git -C code diff *)",
       "Bash(git -C code log *)",
       "Bash(git -C code add *)",
-      "Bash(git -C code commit *)"
+      "Bash(git -C code commit *)",
+      "Bash(python3 tools/ask_peer.py *)",
+      "Bash(python3 tools/build_md_index.py*)",
+      "Bash(python3 tools/dispatcher.py status)"
     ],
     "ask": [
       "Bash(git push *)",
@@ -91,7 +94,17 @@
       "Edit(tools/sudo_grant.py)",
       "Write(tools/sudo_grant.py)",
       "Edit(.claude/settings.json)",
-      "Write(.claude/settings.json)"
+      "Write(.claude/settings.json)",
+      "Bash(python3 tools/dispatcher.py set *)",
+      "Bash(python3 tools/dispatcher.py clear *)",
+      "Bash(python3 tools/dispatcher.py exhaust *)",
+      "Bash(python3 tools/dispatcher.py run*)",
+      "Bash(systemctl --user stop qrl-*)",
+      "Bash(systemctl --user disable qrl-*)",
+      "Edit(.lab/dispatch.db)",
+      "Write(.lab/dispatch.db)",
+      "Edit(tools/install_v03.py)",
+      "Write(tools/install_v03.py)"
     ]
   },
   "hooks": {
@@ -170,6 +183,17 @@
           {
             "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR\"/tools/lab_event_hook.py"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/tools/perm_hook.py",
+            "timeout": 100
           }
         ]
       }

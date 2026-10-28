@@ -1,0 +1,22 @@
+{
+  "_comment": "Merged into .claude/settings.json by tools/install_v03.py (adds entries, never removes any).",
+  "permissions": {
+    "allow": [
+      "Bash(python3 tools/ask_peer.py *)",
+      "Bash(python3 tools/build_md_index.py*)",
+      "Bash(python3 tools/dispatcher.py status)"
+    ],
+    "deny": [
+      "Bash(python3 tools/dispatcher.py set *)",
+      "Bash(python3 tools/dispatcher.py clear *)",
+      "Bash(python3 tools/dispatcher.py exhaust *)",
+      "Bash(python3 tools/dispatcher.py run*)",
+      "Bash(systemctl --user stop qrl-*)",
+      "Bash(systemctl --user disable qrl-*)",
+      "Edit(.lab/dispatch.db)",
+      "Write(.lab/dispatch.db)",
+      "Edit(tools/install_v03.py)",
+      "Write(tools/install_v03.py)"
+    ]
+  }
+}

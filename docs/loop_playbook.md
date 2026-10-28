@@ -1,3 +1,6 @@
+---
+description: Lessons on HOW to run an autonomous experiment/tuning loop (19-22/10), for future projects; not results
+---
 # Experiment-loop playbook (lessons on HOW to run an autonomous tuning loop) — QRL-Lab, 2026-10-19 → 2026-10-22
 For future projects (researcher request M-20261021-043). What we learned about working, not the research results
 (those are in docs/tuning_experiments.md). Each item: the practice, and where it came from.

@@ -1,0 +1,46 @@
+---
+description: Registry of every experiment batch (simulator tuning loop c1-c24, W0 study, Kubernetes calibration, F1 checks) with status and result pointers
+---
+# EXPERIMENTS — registry of every experiment batch
+
+<!-- One row per batch, newest first. Kept by the coordinator (Claude or Codex). Runs started through
+     tools/launch_run.py are also in .lab/lab.db (`python3 tools/launch_run.py list`, dashboard tab 📈). Batches
+     started any other way (older ones) are listed here too, with how to check them. -->
+
+Built 2026-10-28 by the v0.3 upgrade session from: `launch_run.py list` (default shows the latest 200; the full set,
+1532 runs in 23 requests, via `LabDB().runs(limit=100000)`), `docs/tuning_experiments.md` (one line per cycle),
+`.lab/tuning/cycles/`, `docs/handoffs/coordinator_2026-10-23.md`, `.lab/codex-handoff/`, `.lab/outbox/`, memory.
+**Nothing is running** (28/10: no launcher supervisor, driver or simulator process in `ps`; no GPU on this VM).
+Run dirs: `.lab/runs/<run_id>/`. Simulator results of the loop: `code-tuning/tuning/results/<tag>/` (branch 1, Opus)
+and `code-tuning-astra/tuning/results/<tag>/` (branch 2, Codex astra). Tag = first part of the run name (e.g. `c24c`).
+"cN" files below are in `.lab/tuning/cycles/`.
+
+| id (R-/run) | what | where it runs / ran | outputs | status (date) | result → pointer |
+|---|---|---|---|---|---|
+| R-20261023-001 · c24c (46) | **test11**: single guarded confirmation of the frozen recipe (a1h, n-step 3), seeds 80-84, split test11 | sim, cores 8-39, driver `.lab/tuning/drive_chunks.py`, sandbox v12 (120.6/160 CPU-h) | `.lab/tuning/c24c_summary.json`, `c24c_order.json`, `c24c_convergence.json`, `c24c_iqm.txt` | done 23/10, 46/46 exit 0 | H1 V.2>DERP +21.8k, H2 V.2>enh. DERP +15.4k confirmed; H3 Dinos>LSTM not confirmed (testing stopped); V.2 not first (−5.3k vs LSTM+transfer) → `c24_test11_result.md` (Codex-checked) |
+| R-20261023-001 · c23screen (32) | c23 "package" screen on Dinos/LSTM/V.2, seeds 65-74 | sim, cores 8-39 | `.lab/tuning/c23scr_summary.json`, `c23tr_summary.json` | done 23/10 | NOT adopted (Dinos 90.9k→86.3k, LSTM 88.2k→78.8k, V.2 =) → `c23_screen.md` |
+| R-20261022-002/-003 · c20vb1 (8), c20vb2 (30) | c22 exploratory seed-variance study of frozen arms (tags c20vs/c20vt/c20vv), seeds 65-74, val+test9 | sim, both branches | `.lab/tuning/c20vb*_entries.json`; results `code-tuning*/tuning/results/c20vs`, `c20vt`, `c20vv` | done 23/10 | **unknown**: no own result note found (these seeds were reused as incumbents in `c23_screen.md`); prereg `c22_variance_prereg.md`; check with `sum_c10` on tags c20vs/c20vt/c20vv |
+| R-20261022-005 · c18c (46) | **test10** confirmation (c21), seeds 60-64, frozen recipe | sim, cores 8-39 | `.lab/tuning/c18c_summary.json`, `c18c_convergence.json` | done 23/10, 46/46 | H1, H2 confirmed; H3 Dinos>LSTM not; LSTM+transfer 90.6k, V.2 87.8k → `c21_test10_result.md` |
+| R-20261021-009/-010, R-20261022-002/-003 · c19*, c20* (≈95) | c19 DDQN/transfer techniques on V.2 a1h (n-step, dueling, PER, source/pretrain/ft-eps); c20 arch a12, n-step 5 | sim, branch 1 (8-19) + branch 2 astra (20-31) | `code-tuning*/tuning/results/c19*`, `c20*` | done 22/10 (c20a12: 4 stopped; c19t3v: 3 failed) | n-step 3 adopted (+6.7k test9, 5/5 seeds); dueling −2.2k, PER −15.6k; a12 no switch → `c19_screen.md`, `c20_a12.md` |
+| R-20261021-005/-007/-009/-010 · c17rest, c18h*, c18a* (≈260) | c18 Dinos V.2 architecture search a1..a10 + Transfer V.2, successive halving, two branches | sim, two branches | `c18_n7_opus.md`, `c18_transfer_curve.md`, `.lab/codex-handoff/c18_audit.md` | done 22/10 (c18h2: 3 stopped) | a1h kept: V.2 86.4k val ≈ LSTM+transfer 86.9k (n=7) → `docs/tuning_experiments.md` row 18 |
+| R-20261021-001 · c14rest, c15, c16, c17 (99) | robustness (d7, multispike), 5 seeds pooled, noise5/noise15 | sim, cores 8-39 | `c14_brief.md`, `c15_brief.md`, `c16_brief.md`, `c17_brief.md` | done 21/10 | spike300_d5 = B1 candidate (DInos+T 86.7k > LSTM 82.9k > … > HPA 47.5k); noise rejected → `docs/tuning_experiments.md` rows 14-17 |
+| R-20261019-001 + R-20261020-005 · cycle1 … c13c (≈690) | tuning loop cycles 1-13: sim_v2, legacy env port, coupled env, fixed LSTM agent, conditioning, his original env, delays D=5/10/15/20, spike300_d5 | sim, cores 8-39, sandboxes 500 + 200 CPU-h | `.lab/tuning/cycles/c1_*` … `c13_*`, `.lab/tuning/drive_c*.log` | done 19-21/10 | 17x = protocol artefact (DERP at eps=1) → `c3_synthesis.md`; his env + spike300_d5 picture → `c9_codex_verdict.md`, `c12_brief.md`, `c13_brief.md`; summary `docs/tuning_experiments.md` |
+| R-20261017-021 · tuning-w1 … w10 (173) | pre-loop tuning sandbox on sim W0 (screen, 150k/300k steps, lr/gamma, confirm, transfer) | sim | `.lab/tuning/w*_spec.json`, `brief_w2.md`, `drive_w1.log`, `drive_w3b.log` | done 18-19/10; **1 run still "starting"** in the db: `20261019-092534-R-20261017-021-s93-a1` (stale row) | **unknown**: no summary note found; check `.lab/tuning/brief_w2.md`, `.lab/outbox/daily-2026-10-20.md`, run dirs |
+| R-20261017-022 (5) | Kubernetes calibration stage B (200m CPU): create, 3 pods, bootstrap, sweep c1, c2 | real cluster, namespace `qrl-calib` | `.lab/runs/20261018-04*-R-20261017-022-*/` | failed at sweep c2 (rebalance 1→2 pods), rollback ok, 18/10 | fix committed (84367e1), not re-run → `.lab/outbox/stageB-rerun-ask.md`; calibration paused (`docs/rules/paused.md`) |
+| R-20261017-015 (10) | exploratory W0 study: comparators + DInos+T / LSTM scratch / DERP, 3 seeds, old reward | sim W0 | `.lab/runs/R-20261017-015-analysis.json` | done 17/10 | pipeline works; DERP collapses (−1,378.8k); old reward = not a result → `.lab/outbox/w0-results.md` |
+| R-20261017-004, -010, -013 (3) | W0 preflight gate, diagnosis, preflight rev1 | sim W0 | `.lab/runs/20261017-14*-R-20261017-0{04,10}-*/`, `…-R-20261017-013-*/` | 004 failed gate, 010 done, 013 failed gate (17/10) | "HPA" loses to static-ramp −6.9k [−8.5k, −5.2k] → `.lab/outbox/preflight-result.md`, `diag-result.md`, `rev1-result.md` |
+| R-20261016-021, -022 (32) | Kubernetes calibration stage A: namespace, 3 pods, bootstrap, sweeps c1…c30 | real cluster, `qrl-calib` | `.lab/runs/2026101{6,7}-*-R-20261016-02{1,2}-*/` | 021: all sweeps failed; 022: c1 done, rest failed (memory trip); rollbacks done | 1 pod ≈116-118k ops/s at c=1, no saturation → `.lab/outbox/calib-status.md` |
+| R-20261016-020 (2) | set-env + rollout-wait on the cluster | real cluster | `.lab/runs/20261016-2320*-R-20261016-020-*/` | done 16/10 | **unknown** purpose/result; check those run dirs' `output.log` |
+| R-20261016-012 (6) | reproduction of stored DInos rewards, legacy vs fixed seed, 3 seeds | sim (his code) | `.lab/runs/20261016-2137*-R-20261016-012-*/` | done 16/10 | reproduces stored per-episode rewards within ~1% (models 2/5/10/20) → `docs/INVENTORY.md:101` |
+| R-20261016-011 (2) | F1 verification: lstm_transfer vs HPA, 5000 steps, 5 seeds | sim (his code) | `.lab/runs/20261016-210857-R-20261016-011-e{0,1}*/` | done 16/10 | his final models 564k-724k/episode, slightly below "always 1 VM" (PLAN §2 F1) → `.lab/outbox/M-022-decisions.md:3,12` |
+
+## Before the launcher (not in lab.db)
+- Researcher's original DInos runs: `~/simulations/redisk8s/timeseries/Pytorch/lstm_transfer/final_metrics_lstm/`
+  (model_1…model_20; paper Fig. 6 = model_5, `.lab/outbox/M-037-findings.md`). Read-only.
+
+## Open / next
+- Decision R-20261023-004 (close the loop or one exploratory run) is still open (`.lab/tmp/daily_1025.md:6`).
+- Next round (memory, M-20261022-033): DRe-SCale LSTM-PPO baseline + a correct Poisson arrival process; ask first
+  whether Gwydion is also wanted. Not started; needs a new approved spec.
+- Single-purpose branches dinos-tuning-c19/-c20/-c22/-c23 (worktrees `code-tuning-c19` …) await a joint merge/delete
+  decision (`docs/handoffs/coordinator_2026-10-23.md` «Next steps» 3).
