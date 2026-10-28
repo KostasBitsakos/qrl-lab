@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 import modreload  # noqa: E402
 import importlib  # noqa: E402
 _LOCAL_MODS = ["labdb", "file_view", "replytext", "k8s_view", "prom_view", "web_terminal", "sudo_ui", "race_view", "brain_view",
-               "perm_store", "ext_catalog", "summarize_runs", "agent_models", "paper_plots", "paper_build", "uploads", "installed_view", "access", "outage", "models_view", "banners", "sandbox_view", "topology_view", "topology_ui", "exp_view", "exp_figs", "usage_limits", "event_tail", "msg_structure", "notif_format", "extra_credits"]
+               "perm_store", "ext_catalog", "summarize_runs", "agent_models", "paper_plots", "paper_build", "uploads", "installed_view", "access", "outage", "models_view", "banners", "sandbox_view", "topology_view", "topology_ui", "exp_view", "exp_figs", "usage_limits", "event_tail", "msg_structure", "notif_format", "extra_credits", "knowledge_view"]
 for _n in _LOCAL_MODS:  # first import so they are in sys.modules, then reload those whose file changed
     importlib.import_module(_n)
 modreload.reload_changed(_LOCAL_MODS)
@@ -55,6 +55,7 @@ import sandbox_view  # noqa: E402
 import res_view  # noqa: E402
 import token_savings  # noqa: E402
 import topology_ui  # noqa: E402
+import knowledge_view  # noqa: E402
 import changes_view  # noqa: E402
 import models_view  # noqa: E402
 import summarize_runs  # noqa: E402
@@ -1013,7 +1014,7 @@ DEC_TAB = "✅ Αποφάσεις"
 _open_files = "path" in st.query_params and not st.session_state.get("fb_tab_done")
 st.session_state["fb_tab_done"] = True
 TAB_NAMES = [HOME_TAB, DEC_TAB, "🤖 Πράκτορες", "📈 Πειράματα", "⚖️ Council",
-             "🖥️ Πόροι", "☸️ Kubernetes", "📡 Prometheus", "📊 Grafana", FILES_TAB, "📝 Paper", "🎓 Συνέδρια", "🧾 Ιστορικό", "🔐 Sudo", "🧩 Επεκτάσεις", "🔌 Διακοπές", "🧭 Ιστορικό αλλαγών", "🧠 Μοντέλα", "🏛️ Αρχιτεκτονική", "⌨️ Terminal"]
+             "🖥️ Πόροι", "☸️ Kubernetes", "📡 Prometheus", "📊 Grafana", FILES_TAB, "📝 Paper", "🎓 Συνέδρια", "🧾 Ιστορικό", "🔐 Sudo", "🧩 Επεκτάσεις", "🔌 Διακοπές", "🧭 Ιστορικό αλλαγών", "🧠 Μοντέλα", "🏛️ Αρχιτεκτονική", "⌨️ Terminal", "🗂️ Γνώση"]
 # Tab persistence (F5 / shared link): st.tabs(key="tab", bind="query-params") in Streamlit 1.66 keeps the active
 # label in ?tab=... and restores it on load; ?path=... (file deep link) only picks the default when ?tab is absent.
 # The default is part of the tabs widget identity: it must stay the same on every rerun of the session, otherwise the first
@@ -1029,10 +1030,10 @@ if _side:  # tabs in the left column, the terminal in a right-hand column
         st.iframe(_term_url, height=700)
     with _left:
         (tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_prom, tab_grafana, tab_files, tab_paper, tab_venues,
-         tab_audit, tab_sudo, tab_ext, tab_outage, tab_changes, tab_models, tab_arch, tab_term) = st.tabs(TAB_NAMES, default=_tab_default, key="tab", bind="query-params")
+         tab_audit, tab_sudo, tab_ext, tab_outage, tab_changes, tab_models, tab_arch, tab_term, tab_know) = st.tabs(TAB_NAMES, default=_tab_default, key="tab", bind="query-params")
 else:
     (tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_prom, tab_grafana, tab_files, tab_paper, tab_venues,
-     tab_audit, tab_sudo, tab_ext, tab_outage, tab_changes, tab_models, tab_arch, tab_term) = st.tabs(TAB_NAMES, default=_tab_default, key="tab", bind="query-params")
+     tab_audit, tab_sudo, tab_ext, tab_outage, tab_changes, tab_models, tab_arch, tab_term, tab_know) = st.tabs(TAB_NAMES, default=_tab_default, key="tab", bind="query-params")
 
 # ================================================================ conversation
 with tab_chat:
@@ -2836,6 +2837,22 @@ if _tab_live(tab_models):  # lazy: hidden tabs do no work
 if _tab_live(tab_arch):  # lazy: hidden tabs do no work
     with tab_arch:
         topology_ui.show(_unlocked, pin_form, _cinfo.get("login", "?") if _on_tailnet else "researcher")
+
+# ================================================================ knowledge map (docs/index.json)
+if _tab_live(tab_know):  # lazy: hidden tabs do no work
+    with tab_know:
+        st.subheader("Πώς βρίσκει πληροφορία ο συντονιστής")
+        st.graphviz_chart(knowledge_view.DOT)
+        st.caption("⭐ = σημεία εισόδου. Τα αρχεία προέρχονται από docs/index.json (παράγεται από tools/build_md_index.py).")
+        try:
+            _kt = knowledge_view.build_tree(knowledge_view.load(ROOT))
+        except Exception as _e:
+            _kt = {}
+            st.warning(f"Δεν διαβάστηκε το docs/index.json: {_e}")
+        st.markdown("**Σημεία εισόδου:** " + ", ".join(f"`{p}`" for p in knowledge_view.ENTRY_POINTS))
+        for _fold, _fl in _kt.items():
+            with st.expander(f"📁 {_fold} ({len(_fl)})", expanded=any(e["path"] in knowledge_view.ENTRY_POINTS for e in _fl)):
+                st.markdown("".join(knowledge_view.file_html(e) for e in _fl), unsafe_allow_html=True)
 
 # ================================================================ extensions (catalog only from .lab/extensions_catalog.json)
 if _tab_live(tab_ext):  # lazy: hidden tabs do no work
