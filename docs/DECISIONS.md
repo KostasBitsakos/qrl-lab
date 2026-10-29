@@ -40,3 +40,26 @@ Before adding a decision, follow the procedure in `docs/rules/README.md` (M-2026
 - 2026-10-16 — D12: ChatGPT handoff adopted. → rules/security.md, rules/archive.md
 - 2026-10-22 (M-20261022-007): model names LSTM / LSTM+transfer (was DInos+T) / Dinos / Dinos+Transfer V.2; test each model at its best checkpoint chosen on val; save convergence metrics (.lab/tuning/convergence.py).
 - 2026-10-23 (researcher): handoff rules when one coordinator sleeps (full write coordination for the awake one, detailed notes, agent strength per existing criteria, solo work only in new single-purpose branches, joint review → merge decision → delete those branches): docs/rules/handoff.md.
+
+- 2026-10-26 · R-20261023-004 (after test11: close loop / val-only exploratory run / both) REJECTED by the researcher («Όχι / απόρριψη»). No run, no council, no final summary started from it. Follow-up question R-20261028-001.
+
+## 2026-10-28 — Trim always-loaded rules; disable unused connectors (M-20261028-004, researcher «κάντε το ναι»)
+- CLAUDE.md and AGENTS.md shortened; removed duplicates; interactive-only sections moved verbatim to
+  `docs/rules/interactive.md`. No rule was dropped (backups `.lab/*.md.bak-20261028`).
+- `~/.claude/settings.json`: `enabledPlugins["data@synced"]=false`, `disableClaudeAiConnectors=true`.
+- Superseded same day (M-20261028-006, «για αυτό το project»): toggles moved to `.claude/settings.local.json`;
+  `~/.claude/settings.json` restored. `tools/build_md_index.py` also indexes `.lab/tuning`, `.lab/council`, `.lab/codex-handoff`.
+
+## 2026-10-28 — R-20261028-001 (researcher)
+New experiment cycle, to start only on the phrase «ξεκινα μπανάνες!» (reply «ξεκινανω capteain cagarou»): all current
+models + a replicated related-paper model (DRe-SCale LSTM-PPO, see STATE §4.3); new Poisson microservice workload with
+noise and spikes; env with latency/CPU/memory; Claude and Codex on separate branches; full decision autonomy for the
+cycle (Claude↔Codex agree among themselves); deadline 2/11/2026; daily progress report. Stated target ordering:
+Dinos+Transfer V.2 > LSTM+transfer > Dinos > LSTM > paper model > DERP > HPA. Text: `labq.py request R-20261028-001`.
+
+## 2026-10-29 — R-20261028-002 approved: dashboard items 2d,3,5,6,7,8 implemented (dd26185..1bfe9cc); see docs/dashboard_requests_20261028.md
+
+## 2026-10-29 — R-20261029-001 (researcher): CPU-h budget for the R-20261028-001 cycle
+Option 1 chosen: one sandbox approval of **160 CPU-h, valid 7 days**; Claude+Codex approve the cycle's child specs
+themselves within it (`launch_run.py sandbox-start`), per M-20261028-011 «κρινετε σεις τα specs του κυκλου».
+The sandbox request is filed only after «ξεκινα μπανάνες!»; until then nothing runs. Text: `labq.py request R-20261029-001`.
