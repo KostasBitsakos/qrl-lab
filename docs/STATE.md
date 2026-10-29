@@ -4,7 +4,7 @@
      (M-/R-/run id, path, URL). Update it at the end of every task that changed something. Older detail goes to
      docs/DECISIONS.md, docs/journal/ or a topic file listed in docs/INDEX.md. -->
 
-Last update: 2026-10-29 · by: Claude (J77) · task: R-20261029-006 smoke done, cost gate FAIL, asked R-20261029-007
+Last update: 2026-10-29 · by: Claude (J83) · task: stale R-20261021-007 end-notice re-checked (73/73 ok, already in c18 analysis)
 
 ## 1. Goal now
 - PhD paper: hybrid quantum–classical extension of the DInos autoscaler; simulation first, then real cluster;
@@ -52,11 +52,8 @@ Last update: 2026-10-29 · by: Claude (J77) · task: R-20261029-006 smoke done, 
   `tuning/poisson_ms.py`, 10 tests; Codex APPROVE r3, key cycle2-env). Worktree code-poisson-astra created for Codex.
   Still to do before any run: harness adapter, DRe-SCale arm (sb3_contrib missing), sandbox_guard for the new
   worktrees, ONE sandbox request → `.lab/cycle2-claude/status.md`. No runs (M-20261029-057).
-- C29: J25 (Codex) prep done (.lab/cycle2-codex/preparation.md, GATES.md); J25 ends. RE-SPAWN a Codex branch job
-  (brief /tmp/c9/b6.md or .lab/cycle2-codex/preparation.md) after J40 reviewed shared harness readiness.
-- J25 Codex preparation (M-20261029-030): `.lab/cycle2-codex/preparation.md`, review checklist and gates;
-  no runs. Env/tag and worktree now ready (J24); waiting for J40 shared harness + frozen sandbox approval. R-20261029-001 is an
-  answered question with no spec/hash (`labq.py request`), not launcher authorization; coordinator/J24 notified.
+- J25 (Codex) prep done, J25 ended (`.lab/cycle2-codex/preparation.md`, GATES.md; M-20261029-030); re-spawn a Codex
+  branch job from that brief. R-20261029-001 = answered question, no spec/hash, not launcher authorization.
 - J23 completed Experiments UX: cycle-1 summary/table/CI at top INSIDE tab, figures on demand, raw runs collapsed
   (`dashboard/app.py`, `tools/cycle1_report.py`); Claude review M-20261029-036, 10 tests passed
   (`tests/test_cycle1_report.py`, `tests/test_tab_links.py`); HTTP health OK, no service restart (M-20261029-030).
