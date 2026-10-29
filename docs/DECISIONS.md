@@ -76,3 +76,16 @@ to him first; large → Releases/LFS), LESSONS.md. AGENTS.md:10 and `docs/rules/
   quality/speed/cost and usage left (docs/rules/models.md).
 - (2026-10-29, M-20261029-050) Agreed post-competition code goes straight to `github` main (no side branches, no PRs); rule in
   docs/rules/experiments.md. Push permission in .claude/settings.json applied (R-20261029-003).
+- (2026-10-29, M-20261029-055) Researcher reiterates: use as many workers as assigned tasks require, with intelligent
+  scheduling under his existing instructions. Coordinator schedules independent work in parallel and dependent work
+  in order, respecting resources, budgets and model routing; do not ask him to choose a worker count again for each task.
+  C37 verified current dispatcher `max_workers=4`; dispatcher settings were not changed.
+- (2026-10-29, M-20261029-058, C43) Researcher explicitly authorizes raising max_workers as needed, retaining
+  optimal, economical scheduling. Use capacity only for useful independent tasks. C43 attempted the supported
+  ceiling 16 (`tools/dispatcher.py:189`); automatic approval review rejected the setting as researcher-only.
+  Setting remains last verified at 4; no workaround used. Authorization is recorded; execution remains blocked.
+- (2026-10-29, R-20261029-005, J66) «Paper model» in the desired ordering = the adapted DRe-SCale LSTM-PPO arm
+  (`tuning.rppo`, IEEE TSC 2024, DOI 10.1109/TSC.2024.3387661). Researcher criterion: the published baseline that matters
+  most to reviewers, then ease of replication; of the two candidates (DRe-SCale, Gwydion JNCA 2025) DRe-SCale wins on both
+  (`docs/expert/autoscaling_baselines.md`; his choice M-20261022-033). Year mismatch («25 or 26») reported to him; Gwydion
+  stays cited, not ported. No new arm, no spec change.

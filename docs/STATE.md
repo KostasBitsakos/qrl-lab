@@ -4,8 +4,7 @@
      (M-/R-/run id, path, URL). Update it at the end of every task that changed something. Older detail goes to
      docs/DECISIONS.md, docs/journal/ or a topic file listed in docs/INDEX.md. -->
 
-Last update: 2026-10-29 · by: Claude (J64) · task: concrete review + filed R-20261029-006; pre-cleanup copy:
-`docs/archive/STATE_2026-10-29_before_cleanup.md`
+Last update: 2026-10-29 · by: Claude (J66) · task: R-20261029-005 answered (paper model = DRe-SCale); pre-cleanup: `docs/archive/STATE_2026-10-29_before_cleanup.md`
 
 ## 1. Goal now
 - PhD paper: hybrid quantum–classical extension of the DInos autoscaler; simulation first, then real cluster;
@@ -25,7 +24,7 @@ Last update: 2026-10-29 · by: Claude (J64) · task: concrete review + filed R-2
   expires 05/11 05:10 UTC, spec `.lab/j64/final.json`, hash 1764ff9b…4052). Next on approval: ONLY 14 smoke via
   `launch_run.py sandbox-start` with branch smoke.json children; then cost gate. Root .git writable in Claude runs.
 - C62 → J60: prepare smoke-only package; downstream execution gated on cost, full arm coverage and peer review.
-  Original HPA requires adapter (not HPA-demand); paper-model mapping UNKNOWN, asked R-20261029-005
+  Original HPA requires adapter (not HPA-demand); paper model = adapted DRe-SCale (R-20261029-005 answered, J66)
   (`docs/cycle2_plan.md` §3; `.lab/j60/reconciliation.md`). No final coverage/feasibility claim.
 - J60 handoff: both actual manifests embedded in `.lab/j60/aggregate.json` (REVIEW CANDIDATE, NOT filed), exact
   duplicated incumbent schedule and timing/reference limits in `reconciliation.md`; digest list `review-sha256.txt`.
@@ -33,7 +32,7 @@ Last update: 2026-10-29 · by: Claude (J64) · task: concrete review + filed R-2
   J58 tooling tests13 pass. Claude concrete review FAILED usage limit until05:06, no verdict (`review.answer.txt`).
   Guard/workflow unapproved/uncommitted; Codex wrapper uncommitted, Claude cc83534 verified identical. Next owner
   coordinator: `.lab/j60/handoff.md`, obtain concrete review, scoped commits without Git bypass, renew filing-time
-  expiry, duplicate check then ONE request. No runs. Original-HPA adapter required; paper mapping R-20261029-005.
+  expiry, duplicate check then ONE request. No runs. Original-HPA adapter required; paper model = DRe-SCale (R-20261029-005).
 - J40 DONE 30/10: shared harness tag `cycle2-harness-v1` = b609b93 (code-poisson; dinos-poisson-astra ff to it), Codex
   APPROVE r3 key cycle2-harness. pms:<v> via c5 (`--env-family orig --orig-variant pms:poisson_ms`), native RecurrentPPO
   DRe-SCale `python -m tuning.rppo` (sb3_contrib not installable headless), references `python -m tuning.pms_reference`;
@@ -69,7 +68,8 @@ Last update: 2026-10-29 · by: Claude (J64) · task: concrete review + filed R-2
 - Nothing is running (`python3 tools/launch_run.py list`); all sandboxes expired (latest R-20261023-001, 120.6/160 CPU-h).
 
 ## 3. Waiting for the researcher
-- R-20261029-005: identify «paper model» in desired ordering; preparation continues, full comparison freeze gated.
+- R-20261029-005 ANSWERED 29/10 (J66): «paper model» = adapted DRe-SCale LSTM-PPO (arm `tuning.rppo`); criterion
+  reviewer weight, then ease of replication; told him DRe-SCale is IEEE TSC 2024 (Gwydion is the 2025 one) — he may correct.
 - M-20261029-009: (a) results-retention policy (keep per-seed JSON + result md + best ckpt; audit that every
   test10/11 number traces to a file) — awaiting OK. Worker-count clarification resolved by M-20261029-055 (§2).
 - `labq.py pending` on 28/10: 25 open messages, oldest M-20261016-043; waiting_approval: M-20261020-019,

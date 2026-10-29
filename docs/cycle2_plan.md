@@ -11,7 +11,8 @@ Expert background: `docs/expert/`; skills: `rl-eval-protocol`, `drl-tuning`, `po
 - Compare all our agents + one adapted published baseline on a new, noisy, correctly generated Poisson microservice
   workload with latency/CPU/memory signals. Cycle-1 numbers are not targets (M-20261029-017); its lessons are kept
   (n-step 3, reward-div 10, obs-scale, ≥10 seeds, single-use test, fixed-sequence tests: `c24_freeze.md`, STATE §5-6).
-- Researcher's desired order: V.2 > LSTM+transfer > Dinos > LSTM > paper model > DERP > HPA. We test it; we do not
+- Researcher's desired order: V.2 > LSTM+transfer > Dinos > LSTM > paper model > DERP > HPA («paper model» = adapted
+  DRe-SCale LSTM-PPO, R-20261029-005). We test it; we do not
   engineer it. If V.2 does not win on return, the pre-registered secondary questions (§6 H-noise, H-shift, H-sample)
   look for its real advantage; reported either way.
 
