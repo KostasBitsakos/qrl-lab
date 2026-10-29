@@ -26,6 +26,10 @@ CYCLE2_BRANCHES = {"code-poisson": "dinos-poisson", "code-poisson-astra": "dinos
 CYCLE2_ENV_COMMIT = "238003f58a7ae547c9ff03b05f5484ea5a1c342b"
 # Peeled reviewed cycle2-harness-v1 commit (J40, Codex APPROVE r3) and the shared harness files pinned to it.
 CYCLE2_HARNESS_COMMIT = "b609b939085ee3e07c334b94d2cd79929938df9b"
+# Reviewed launcher wrapper added after the harness freeze (cc83534:tuning/cycle2_entry.py).
+# Separate content pin leaves both existing frozen commits intact.
+CYCLE2_ENTRY_SHA256 = "1b5a6f2922422e26b15f6729969f5870e994f1922d867cfa7f5ac880117d000e"
+CYCLE2_ENTRY_FILE = "tuning/cycle2_entry.py"
 CYCLE2_HARNESS_FILES = ("tuning/pms_adapter.py", "tuning/rppo.py", "tuning/pms_reference.py",
                         "tuning/legacy/c5_protocol.py", "tuning/legacy/orig_variants.py",
                         # shared evaluation helpers (greedy_fn, summarize) and the transfer source env (Codex J48 r1)
@@ -158,6 +162,8 @@ def select_worktree(sb, child):
             raise LabError("Cycle2 frozen_env_commit must equal the reviewed environment commit.")
         if sb.get("frozen_harness_commit") != CYCLE2_HARNESS_COMMIT:
             raise LabError("Cycle2 frozen_harness_commit must equal the reviewed harness commit.")
+        if sb.get("frozen_entry_sha256") != CYCLE2_ENTRY_SHA256:
+            raise LabError("Cycle2 frozen_entry_sha256 must equal the reviewed wrapper digest.")
     return selected
 
 
@@ -174,6 +180,13 @@ def verify_sandbox_protected(sb, root=None):
             raise LabError("Protected file tree missing from reviewed environment commit.")
         verify_protected(wt, CYCLE2_ENV_COMMIT, tuple(sorted(tracked)) + ("tuning/poisson_ms.py",))
         verify_protected(wt, CYCLE2_HARNESS_COMMIT, CYCLE2_HARNESS_FILES)
+        try:
+            with open(os.path.join(wt, CYCLE2_ENTRY_FILE), "rb") as f:
+                entry_hash = _sha(f.read())
+        except OSError as exc:
+            raise LabError("Protected wrapper is missing or unreadable. Nothing was started.") from exc
+        if entry_hash != CYCLE2_ENTRY_SHA256:
+            raise LabError("Protected wrapper differs from reviewed digest. Nothing was started.")
         # Reject extra importable sources even if gitignored. Bytecode caches are generated normally.
         for directory in dirs:
             for base, subdirs, names in os.walk(os.path.join(wt, directory)):

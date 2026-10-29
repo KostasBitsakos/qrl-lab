@@ -13,7 +13,7 @@ any number of workers (J<n>, do the longer work in parallel). Runs see their own
   work.py say JOB|coordinator TEXT            message another job (or escalate to the chat coordinator)
   work.py agree JOB TEXT                      record the agreement reached with JOB (also posted for the researcher)
   work.py inbox [--wait S]                    read messages addressed to you
-  work.py commit -m MSG                       git commit only the files you claimed (serialised between jobs)
+  work.py commit [--worktree PATH] -m MSG     git commit only the files you claimed (serialised between jobs)
   work.py cancel JOB                          chat coordinator: stop a worker (e.g. the researcher changed their mind)
 
 Every command except `inbox` also prints messages waiting for you, so a busy job sees a negotiation request on its
@@ -253,22 +253,68 @@ def _post_agreement(root, w, me, other, text):
                 pass
 
 
-def git_commit(root, paths, message):
+def commit_scope(root, paths, worktree=None):
+    """Resolve claims to literal files, never a nested repository/gitlink."""
+    root = os.path.realpath(root)
+    target = os.path.realpath(os.path.join(root, worktree or "."))
+    norm_path(root, target)  # also rejects symlink escapes
+
+    def git(*args):
+        p = subprocess.run(["git", *args], cwd=target, capture_output=True, text=True)
+        if p.returncode:
+            raise LabError(p.stderr.strip() or "Git worktree validation failed")
+        return p.stdout
+
+    if os.path.realpath(git("rev-parse", "--show-toplevel").strip()) != target:
+        raise LabError("--worktree must name a Git worktree root.")
+    selected = []
+    for path in paths:
+        absolute = os.path.join(root, norm_path(root, path))
+        if absolute == target or absolute.startswith(target + os.sep):
+            selected.append(os.path.relpath(absolute, target))
+    if not selected:
+        raise LabError("You hold no claims beneath the selected worktree.")
+    candidates = set(git("ls-files", "--cached", "--others", "--exclude-standard", "-z").split("\0")) - {""}
+    files = sorted(p for p in candidates if any(overlaps(p, q) for q in selected))
+    gitlinks = {record.split("\t", 1)[1] for record in git("ls-files", "--stage", "-z").split("\0")
+                if record.startswith("160000 ")}
+    for path in files:
+        norm_path(target, path)
+        if path in gitlinks:
+            raise LabError(f"Refusing to stage nested worktree/submodule gitlink: {path}")
+        # Even an untracked nested repository must never be staged as a gitlink.
+        parent = os.path.dirname(os.path.join(target, path))
+        while not os.path.isdir(parent):
+            parent = os.path.dirname(parent)
+        probe = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=parent,
+                               capture_output=True, text=True)
+        if probe.returncode or os.path.realpath(probe.stdout.strip()) != target:
+            raise LabError(f"Claim crosses a nested repository: {path}")
+    return target, [":(literal)" + p for p in files]
+
+
+def git_commit(root, paths, message, worktree=None):
     lock_path = os.path.join(root, ".lab", "git.lock")
     with open(lock_path, "w") as lf:
         fcntl.flock(lf, fcntl.LOCK_EX)
         try:
-            # one path at a time: a claimed path that was never created must not fail the others
-            added = [q for q in paths if subprocess.run(["git", "add", "-A", "--", q], cwd=root,
-                                                        capture_output=True).returncode == 0]
-            staged = subprocess.run(["git", "diff", "--cached", "--name-only", "--"] + added, cwd=root,
-                                    capture_output=True, text=True).stdout.strip()
-            if not added or not staged:
+            target, scoped = commit_scope(root, paths, worktree)
+            if not scoped:
                 return subprocess.CompletedProcess([], 0, "nothing to commit in your claimed files\n", "")
-            p = subprocess.run(["git", "commit", "-m", message, "--"] + added, cwd=root, capture_output=True, text=True)
+            p = subprocess.run(["git", "add", "-A", "--"] + scoped, cwd=target,
+                               capture_output=True, text=True)
+            if p.returncode:
+                return p
+            p = subprocess.run(["git", "diff", "--cached", "--name-only", "--"] + scoped,
+                               cwd=target, capture_output=True, text=True)
+            if p.returncode:
+                return p
+            if not p.stdout.strip():
+                return subprocess.CompletedProcess([], 0, "nothing to commit in your claimed files\n", "")
+            return subprocess.run(["git", "commit", "--only", "-m", message, "--"] + scoped,
+                                  cwd=target, capture_output=True, text=True)
         finally:
             fcntl.flock(lf, fcntl.LOCK_UN)
-    return p
 
 
 def main(argv=None):
@@ -298,6 +344,7 @@ def main(argv=None):
     s.add_argument("--wait", type=int, default=0)
     s = sub.add_parser("commit")
     s.add_argument("-m", "--message", required=True)
+    s.add_argument("--worktree", help="Git worktree root within the lab (default: lab root)")
     s = sub.add_parser("cancel")
     s.add_argument("job")
     a = ap.parse_args(argv)
@@ -366,7 +413,7 @@ def main(argv=None):
         paths = [c["path"] for c in w.claims(me)]
         if not paths:
             raise LabError("You hold no claims: claim the files you changed first.")
-        p = git_commit(root, paths, a.message)
+        p = git_commit(root, paths, a.message, a.worktree)
         print((p.stdout or "") + (p.stderr or ""))
         rc = p.returncode
     elif a.cmd == "cancel":

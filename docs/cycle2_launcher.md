@@ -14,7 +14,8 @@ Use ONE `kind: sandbox`, `scope: sim` parent with the existing normal spec envel
     {"repo": "code-poisson-astra", "branch": "dinos-poisson-astra"}
   ],
   "frozen_env_commit": "238003f58a7ae547c9ff03b05f5484ea5a1c342b",
-  "frozen_harness_commit": "b609b939085ee3e07c334b94d2cd79929938df9b"
+  "frozen_harness_commit": "b609b939085ee3e07c334b94d2cd79929938df9b",
+  "frozen_entry_sha256": "1b5a6f2922422e26b15f6729969f5870e994f1922d867cfa7f5ac880117d000e"
 }
 ```
 
@@ -41,6 +42,12 @@ bytes, altered bytes, wrong branch, extra Python sources in protected directorie
 customizations fail closed. The supervisor repeats the check immediately before spawning; working files must
 remain frozen throughout active runs. Legacy cycle1 parents retain their original qrl-dev checks. These guards
 prevent operational mistakes; they do not isolate hostile Python code or provide an immutable filesystem.
+
+J60 adds a separate digest pin for `tuning/cycle2_entry.py`, whose reviewed bytes postdate the harness freeze
+(`cc83534:tuning/cycle2_entry.py`, identical in both branches). Both the parent digest and working file must
+match the guard's reviewed constant. Missing/changed bytes refuse reservation and are checked again before spawn.
+The environment and harness commit pins remain unchanged. J60's implementation/review status is recorded in
+`.lab/j60/handoff.md`; this documentation is not an approval and the guard change requires independent review.
 
 ## Remaining approval dependency and budget contract
 

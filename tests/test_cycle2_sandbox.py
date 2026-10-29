@@ -29,7 +29,7 @@ def setup(tmp_path, monkeypatch):
     wt = tmp_path / 'code-poisson'
     wt.mkdir()
     git(wt, 'init', '-q', '-b', 'dinos-poisson')
-    for rel in G.PROTECTED_FILES + G.CYCLE2_HARNESS_FILES + ('tuning/poisson_ms.py', 'sim_v2/policies.py', 'toy.py'):
+    for rel in G.PROTECTED_FILES + G.CYCLE2_HARNESS_FILES + (G.CYCLE2_ENTRY_FILE, 'tuning/poisson_ms.py', 'sim_v2/policies.py', 'toy.py'):
         p = wt / rel
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text('# fixture\n')
@@ -40,11 +40,13 @@ def setup(tmp_path, monkeypatch):
     git(wt, 'worktree', 'add', '-qb', 'dinos-poisson-astra', str(tmp_path / 'code-poisson-astra'))
     monkeypatch.setattr(G, 'CYCLE2_ENV_COMMIT', sha)
     monkeypatch.setattr(G, 'CYCLE2_HARNESS_COMMIT', sha)
+    monkeypatch.setattr(G, 'CYCLE2_ENTRY_SHA256', G._sha(b'# fixture\n'))
     monkeypatch.setenv('QRL_LAB_DIR', str(tmp_path))
     monkeypatch.setattr(L, 'subprocess', SimpleNamespace(**(vars(subprocess) | {'Popen': lambda *a, **kw: None})))
     monkeypatch.setattr(L.os, 'sched_getaffinity', lambda pid: set(range(8, 40)))
     sb = dict(worktrees=[dict(repo=r, branch=b) for r, b in G.CYCLE2_BRANCHES.items()],
-              frozen_env_commit=sha, frozen_harness_commit=sha, cpu_hours_budget=1.0, max_parallel=4,
+              frozen_env_commit=sha, frozen_harness_commit=sha, frozen_entry_sha256=G.CYCLE2_ENTRY_SHA256,
+              cpu_hours_budget=1.0, max_parallel=4,
               seed_ranges_allowed=[[100, 119]], seed_ranges_forbidden=[], cpu_affinity='8-39',
               per_run_wall_clock_hours=1.0,
               expires=(dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=7)).isoformat())
@@ -227,3 +229,43 @@ def test_harness_files_pinned(setup, monkeypatch, rel):
     monkeypatch.setattr(G, 'CYCLE2_HARNESS_COMMIT', '0' * 40)
     with pytest.raises(LabError, match='frozen_harness_commit'):
         L.start_sandbox(db, rid, child('code-poisson-astra'))
+
+
+@pytest.mark.parametrize('repo', list(G.CYCLE2_BRANCHES))
+@pytest.mark.parametrize('mutation', ['changed', 'missing'])
+def test_entry_wrapper_pinned(setup, repo, mutation):
+    root, parent, db, rid = setup
+    sb = G.select_worktree(parent['sandbox'], child(repo))
+    G.verify_sandbox_protected(sb, str(root))
+    wrapper = root / repo / G.CYCLE2_ENTRY_FILE
+    if mutation == 'changed':
+        wrapper.write_text('# unreviewed dispatch\n')
+    else:
+        wrapper.unlink()
+    with pytest.raises(LabError, match='Protected wrapper'):
+        L.start_sandbox(db, rid, child(repo))
+    assert not db.runs(), 'wrapper refusal must precede reservation'
+
+
+@pytest.mark.parametrize('value', [None, '0' * 64])
+def test_entry_parent_pin_required(setup, value):
+    root, parent, db, rid = setup
+    if value is None:
+        del parent['sandbox']['frozen_entry_sha256']
+    else:
+        parent['sandbox']['frozen_entry_sha256'] = value
+    with pytest.raises(LabError, match='frozen_entry_sha256'):
+        G.check_child(child(), parent, str(root))
+
+
+def test_entry_wrapper_supervisor_recheck(setup, monkeypatch):
+    root, parent, db, rid = setup
+    run = L.start_sandbox(db, rid, child())[0]
+    (root / 'code-poisson' / G.CYCLE2_ENTRY_FILE).write_text('# post-reservation edit\n')
+    monkeypatch.setattr(L, 'LabDB', lambda: db)
+    def forbidden_spawn(*args, **kwargs):
+        raise AssertionError('must refuse changed wrapper before Popen')
+    monkeypatch.setattr(L.subprocess, 'Popen', forbidden_spawn)
+    L.supervise(run)
+    assert db.run(run)['status'] == 'failed'
+    assert 'Protected wrapper' in (Path(db.run(run)['run_dir']) / 'output.log').read_text()
