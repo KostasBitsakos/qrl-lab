@@ -20,9 +20,10 @@ Last update: 2026-10-29 · by: claude (J18) · task: md cleanup (M-20261029-017)
 - Order (C9): GitHub push → md cleanup → cycle-2 implementation.
 
 ## 2. In progress (what · id · owner · next check)
-- J17 (claude): curated first GitHub upload (code, best models, lessons) to
-  github.com/KostasBitsakos/dinos_sofia_k8s_redis_scaling; deploy key works (ssh -T OK, repo empty, C16); needs a
-  joint Claude+Codex review before push (R-20261029-002).
+- J17 (claude): curated GitHub upload READY, Codex APPROVED round 2 (key github-export; briefs `.lab/export/`), push
+  NOT done (headless permission denied `git push`). Exact approved refs: export-main 901fe54→main, cycle1-claude
+  afc4ea7, cycle1-codex ad283e4 (log-free snapshots of dinos-tuning 5eae972 / -astra 16d9bf4; worktree `export/`).
+  Push = `git push github 901fe54:refs/heads/main afc4ea7:refs/heads/cycle1-claude ad283e4:refs/heads/cycle1-codex`.
 - J18 (claude): md cleanup (this update); J19 (claude): Experiments-tab UX + cycle-1 report. J10/J11 (codex) FAILED:
   «gpt-5.1-codex-max not supported with ChatGPT account» (M-20261029-019/020) — Codex peer calls fail until the model
   in `~/.codex/config.toml` or `peer_codex_model` is changed by the researcher (M-20261029-025).
