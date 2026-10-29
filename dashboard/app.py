@@ -29,7 +29,8 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 import modreload  # noqa: E402
 import importlib  # noqa: E402
 _LOCAL_MODS = ["labdb", "file_view", "replytext", "k8s_view", "prom_view", "web_terminal", "sudo_ui", "race_view", "brain_view",
-               "perm_store", "ext_catalog", "summarize_runs", "agent_models", "paper_plots", "paper_build", "uploads", "installed_view", "access", "outage", "models_view", "banners", "sandbox_view", "topology_view", "topology_ui", "exp_view", "exp_figs", "usage_limits", "event_tail", "msg_structure", "notif_format", "extra_credits", "knowledge_view", "knowledge_tree", "tab_links", "cycle2_report"]
+               "perm_store", "ext_catalog", "summarize_runs", "agent_models", "paper_plots", "paper_build", "uploads", "installed_view", "access", "outage", "models_view", "banners", "sandbox_view", "topology_view", "topology_ui", "exp_view", "exp_figs", "usage_limits", "event_tail", "msg_structure", "notif_format", "extra_credits", "knowledge_view", "knowledge_tree", "tab_links", "mobile_view", "tutorials_view", "cycle2_report"]
+_LOCAL_MODS.append("token_metrics")
 for _n in _LOCAL_MODS:  # first import so they are in sys.modules, then reload those whose file changed
     importlib.import_module(_n)
 modreload.reload_changed(_LOCAL_MODS)
@@ -53,7 +54,7 @@ import term_prompt  # noqa: E402
 import banners  # noqa: E402
 import sandbox_view  # noqa: E402
 import res_view  # noqa: E402
-import token_savings  # noqa: E402
+import token_metrics  # noqa: E402
 import topology_ui  # noqa: E402
 import knowledge_view  # noqa: E402
 import knowledge_tree  # noqa: E402
@@ -72,6 +73,7 @@ import usage_limits  # noqa: E402
 import extra_credits  # noqa: E402
 import exp_figs  # noqa: E402
 import cycle1_report  # noqa: E402
+import tutorials_view  # noqa: E402
 import event_tail  # noqa: E402
 from uploads import UploadError, attachment_paths  # noqa: E402
 
@@ -408,6 +410,11 @@ def read_text(path):
         return None
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def token_snapshot():
+    return token_metrics.snapshot(ROOT)
+
+
 # ---------------------------------------------------------------- sidebar (auto-refresh)
 LOGO_SVG = (
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 170" width="100%" role="img" aria-label="Πάρις">'
@@ -556,6 +563,8 @@ def usage_rings():
 
 with st.sidebar:
     usage_rings()
+    # token-savings card below the logo and the usage rings (researcher M-20261029-288)
+    st.html(token_metrics.card_html(token_snapshot()))
 _recent_denied = access.recent(1, max_age=3600)
 if _recent_denied:
     st.sidebar.error(f"🛡️ Απορρίφθηκε πρόσβαση ({_recent_denied[0].get('reason')}) · login: "
@@ -1028,7 +1037,7 @@ DEC_TAB = "✅ Αποφάσεις"
 _open_files = "path" in st.query_params and not st.session_state.get("fb_tab_done")
 st.session_state["fb_tab_done"] = True
 TAB_NAMES = [HOME_TAB, DEC_TAB, "🤖 Πράκτορες", "📈 Πειράματα", "⚖️ Council",
-             "🖥️ Πόροι", "☸️ Kubernetes", "📡 Prometheus", "📊 Grafana", FILES_TAB, "📝 Paper", "🎓 Συνέδρια", "🧾 Ιστορικό", "🔐 Sudo", "🧩 Επεκτάσεις", "🔌 Διακοπές", "🧭 Ιστορικό αλλαγών", "🧠 Μοντέλα", "🏛️ Αρχιτεκτονική", "⌨️ Terminal", "🗂️ Γνώση"]
+             "🖥️ Πόροι", "☸️ Kubernetes", "📡 Prometheus", "📊 Grafana", FILES_TAB, "📝 Paper", "🎓 Συνέδρια", "🧾 Ιστορικό", "🔐 Sudo", "🧩 Επεκτάσεις", "🔌 Διακοπές", "🧭 Ιστορικό αλλαγών", "🧠 Μοντέλα", "🏛️ Αρχιτεκτονική", "⌨️ Terminal", "🗂️ Γνώση", "📚 Tutorials"]
 # Tab persistence (F5 / shared link): st.tabs(key="tab", bind="query-params") in Streamlit 1.66 keeps the active
 # label in ?tab=... and restores it on load; ?path=... (file deep link) only picks the default when ?tab is absent.
 # The default is part of the tabs widget identity: it must stay the same on every rerun of the session, otherwise the first
@@ -1044,10 +1053,10 @@ if _side:  # tabs in the left column, the terminal in a right-hand column
         st.iframe(_term_url, height=700)
     with _left:
         (tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_prom, tab_grafana, tab_files, tab_paper, tab_venues,
-         tab_audit, tab_sudo, tab_ext, tab_outage, tab_changes, tab_models, tab_arch, tab_term, tab_know) = st.tabs(TAB_NAMES, default=_tab_default, key="tab", bind="query-params")
+         tab_audit, tab_sudo, tab_ext, tab_outage, tab_changes, tab_models, tab_arch, tab_term, tab_know, tab_tutorials) = st.tabs(TAB_NAMES, default=_tab_default, key="tab", bind="query-params")
 else:
     (tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_prom, tab_grafana, tab_files, tab_paper, tab_venues,
-     tab_audit, tab_sudo, tab_ext, tab_outage, tab_changes, tab_models, tab_arch, tab_term, tab_know) = st.tabs(TAB_NAMES, default=_tab_default, key="tab", bind="query-params")
+     tab_audit, tab_sudo, tab_ext, tab_outage, tab_changes, tab_models, tab_arch, tab_term, tab_know, tab_tutorials) = st.tabs(TAB_NAMES, default=_tab_default, key="tab", bind="query-params")
 
 # right-click / middle-click on a tab -> new browser tab with ?tab=<label> (left click unchanged)
 with st.sidebar:
@@ -1271,7 +1280,7 @@ if _tab_live(tab_agents):  # lazy: hidden tabs do no work (M-20261021-023)
         @st.fragment(run_every=refresh)
         def agents_view(hours, race_on=False):
             ev = read_events()
-            if ev.empty:
+            if ev.empty and not race_view.load_jobs(os.path.join(ROOT, ".lab", "dispatch.db")):
                 st.info("Δεν υπάρχει ακόμη δραστηριότητα πρακτόρων. Τα hooks του Claude Code γράφουν στο "
                         "`.lab/events.jsonl` μόλις ξεκινήσει ο συντονιστής.", icon="🤖")
                 return
@@ -1290,7 +1299,8 @@ if _tab_live(tab_agents):  # lazy: hidden tabs do no work (M-20261021-023)
             coord_m = agent_models.text(identity["model"], "event")
             if race_on:
                 ln = race_view.lanes(race_view.load_events(EVENTS), roles={k: (role_name(k), v[1]) for k, v in AGENTS.items()},
-                                     health=race_view.load_health(HEALTH), models=mtext, coord_model=coord_m)
+                                     health=race_view.load_health(HEALTH), models=mtext, coord_model=coord_m,
+                                     jobs=race_view.load_jobs(os.path.join(ROOT, ".lab", "dispatch.db")))
                 page, hgt = race_view.render(ln), race_view.height_for(len(ln))
                 try:  # st.components.v1.html is deprecated in newer Streamlit; st.iframe takes the same HTML string
                     components.html(page, height=hgt, scrolling=True)
@@ -3084,42 +3094,7 @@ if _tab_live(tab_ext):  # lazy: hidden tabs do no work
             for _col, _it in zip(st.columns(3), _inst[_i:_i + 3]):
                 _col.markdown(installed_view.card_html(_it), unsafe_allow_html=True)
         st.divider()
-        st.subheader("Εξοικονόμηση tokens — μετρημένα")
-        _me = token_savings.measured(ROOT)
-        st.caption("Μόνο αριθμοί που διαβάζονται από αρχεία. Tokens ≈ bytes/4 (**προσεγγιστικό**, όχι μέτρηση tokenizer).")
-        st.dataframe(pd.DataFrame([{"αρχείο": f["name"], "bytes πριν": f["before"], "bytes τώρα": f["now"],
-                                    "διαφορά bytes": f["saved_bytes"], "≈ tokens (προσεγγ.)": f["saved_tokens_approx"],
-                                    "πηγή": f["source"]} for f in _me["files"]]), hide_index=True, width="stretch")
-        st.dataframe(pd.DataFrame([{"μέγεθος": x["label"], "τιμή": x["value"], "πηγή": x["source"]} for x in _me["settings"]]),
-                     hide_index=True, width="stretch")
-        st.info("Ποσοστό συνολικής εξοικονόμησης **δεν μετριέται**: θα χρειαζόταν χρήση tokens ανά κλήση (πριν/μετά), που δεν "
-                "καταγράφεται. Το ποσοστό παρακάτω είναι μόνο εκτίμηση από παραδοχές.", icon="ℹ️")
-        st.divider()
-        st.subheader("Εξοικονόμηση tokens (τελευταίες 6 ώρες) — εκτίμηση")
-        st.caption("ΕΚΤΙΜΗΣΗ, όχι μέτρηση (το % δεν είναι βέβαιο: τα tokens ανά γεγονός είναι παραδοχές). Πραγματικά δεδομένα: πλήθος γεγονότων στο `.lab/events.jsonl` και στα sandbox ledgers. "
-                   "Τα tokens ανά γεγονός είναι **παραδοχές** (πίνακας από κάτω, αποθηκεύονται στο `dashboard/token_savings.json`). "
-                   "Μοντέλο: εξοικονόμηση = Σ γεγονότα × (χωρίς σύστημα − με σύστημα).")
-        _tsp = os.path.join(ROOT, "dashboard", "token_savings.json")
-        _ass = token_savings.load_assumptions(_tsp)
-        _cnt = token_savings.count_events(os.path.join(ROOT, ".lab", "events.jsonl"),
-                                          sandbox_view.ledger_paths(os.path.join(ROOT, ".lab", "sandbox")), time.time() - 6 * 3600)
-        _ts = token_savings.compute(_cnt, _ass)
-        _m = st.columns(3)
-        _m[0].metric("Με το σύστημα (εκτίμηση)", f"{_ts['with']:,}")
-        _m[1].metric("Χωρίς (εκτίμηση)", f"{_ts['without']:,}")
-        _m[2].metric("Εξοικονόμηση (εκτίμηση)", f"{_ts['saved']:,}", f"≈{_ts['pct']:.0f}%")
-        st.dataframe(pd.DataFrame([{"κατηγορία": r["label"], "γεγονότα 6ω": r["n"], "χωρίς (εκτ.)": r["without"],
-                                    "με (εκτ.)": r["with"], "εξοικ. (εκτ.)": r["saved"]} for r in _ts["rows"]]),
-                     hide_index=True, width="stretch")
-        with st.expander("Παραδοχές (tokens ανά γεγονός) — επεξεργάσιμες"):
-            _ed = st.data_editor(pd.DataFrame([{"key": k, "κατηγορία": a["label"], "χωρίς": a["without"], "με": a["with"], "αιτιολόγηση": a["why"]}
-                                               for k, a in _ass.items()]), hide_index=True, width="stretch",
-                                 disabled=["key", "κατηγορία", "αιτιολόγηση"], key="tok_assump")
-            if st.button("Αποθήκευση παραδοχών", key="tok_save"):
-                json.dump({r["key"]: {"without": int(r["χωρίς"]), "with": int(r["με"]), "why": r["αιτιολόγηση"]}
-                           for r in _ed.to_dict("records")}, open(_tsp, "w", encoding="utf-8"), indent=1, ensure_ascii=False)
-                st.rerun()
-        st.caption("Κλήσεις Codex μέσω wrapper (`codex:codex-rescue`) δεν προσμετρώνται διπλά.")
+        token_metrics.render(st, token_snapshot())
         st.divider()
         st.markdown("Προτάσεις skills/plugins/MCP **μόνο** από το αρχείο `.lab/extensions_catalog.json`, που το γεμίζει "
                     "ο συντονιστής μετά από αναζήτηση. Τίποτα δεν εγκαθίσταται από εδώ· το «Πρόσθεσε» στέλνει αίτημα έγκρισης.")
@@ -3199,3 +3174,8 @@ try:
         render_coordinator_panel()
 except Exception as _qrl_panel_error:  # the panel must never break the dashboard
     st.sidebar.warning(f"Πάνελ συντονιστή: {_qrl_panel_error}")
+
+
+if _tab_live(tab_tutorials):
+    with tab_tutorials:
+        tutorials_view.render(ROOT)
