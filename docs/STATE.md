@@ -19,9 +19,7 @@ Last update: 2026-10-29 · by: Codex (C57) · task: J51 commit escalation (M-202
   file the sandbox request when runs start. Plan: `docs/cycle2_plan.md`, expert pack `docs/expert/` (J12, d6cfa11).
 
 ## 2. In progress (what · id · owner · next check)
-- J53 DONE 29/10: Claude-branch wrapper commit cc83534 on dinos-poisson (`tuning/cycle2_entry.py` byte-identical to
-  Codex branch, 8 tests) + manifests on J51 contract `.lab/cycle2-claude/{smoke,screen}.json` (7+28; Codex r2 APPROVE,
-  key cycle2-claude-entry). Handed to J51; wrapper needs content pin in guard. "paper model" arm unmapped. No runs.
+- J53 DONE: Claude wrapper cc83534 (dinos-poisson) + manifests `.lab/cycle2-claude/` (Codex r2 APPROVE) → J51; pin wrapper. No runs.
 - C56 / J51 handoff: Codex smoke/screen configs + launcher-compatible wrapper validated without training
   (35 CLI commands; `.lab/cycle2-codex/{contract.md,validation.out,handoff-j51.md}`). Launcher gate ecca33d passed.
   Claude review hit usage limit (04:58 UTC); J53 agreement pending. ONE aggregate request NOT filed; no runs. Next coordinator: reconcile J53 artifacts, obtain independent concrete review including
@@ -68,7 +66,6 @@ Last update: 2026-10-29 · by: Codex (C57) · task: J51 commit escalation (M-202
   in `~/.codex/config.toml` or `peer_codex_model` is changed by the researcher (M-20261029-025).
 - R-20261029-003 approved: `.claude/settings.json` now allows `git push github …` headless; force/-f/origin denied (da5d4e5, J33). Joint Claude+Codex review before push still required (AGENTS.md).
 - Nothing is running (`python3 tools/launch_run.py list`); all sandboxes expired (latest R-20261023-001, 120.6/160 CPU-h).
-- Stale db row: run `20261019-092534-R-20261017-021-s93-a1` shows "starting" since 19/10 (no process). Harmless.
 
 ## 3. Waiting for the researcher
 - Codex model fix (above) — blocks every Codex review, incl. the push review and the cycle-2 plan review
