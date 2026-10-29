@@ -63,3 +63,10 @@ Dinos+Transfer V.2 > LSTM+transfer > Dinos > LSTM > paper model > DERP > HPA. Te
 Option 1 chosen: one sandbox approval of **160 CPU-h, valid 7 days**; Claude+Codex approve the cycle's child specs
 themselves within it (`launch_run.py sandbox-start`), per M-20261028-011 «κρινετε σεις τα specs του κυκλου».
 The sandbox request is filed only after «ξεκινα μπανάνες!»; until then nothing runs. Text: `labq.py request R-20261029-001`.
+
+## 2026-10-29 — R-20261029-002 (researcher): push to his GitHub repo
+Approved «Ναι / έγκριση». `git push` allowed only to KostasBitsakos/dinos_sofia_k8s_redis_scaling (remote `github`,
+deploy key `~/.config/qrl-deploy/id_ed25519`, private key never read/printed), only after a joint Claude+Codex
+review, never `--force`, never secrets/logs/`.lab/usage`/kube/IBM files. First upload is curated: code of
+dinos-tuning + dinos-tuning-astra, frozen specs, test10/11 result md + per-seed JSON, best checkpoints only (size told
+to him first; large → Releases/LFS), LESSONS.md. AGENTS.md:10 and `docs/rules/security.md:3` updated. Text: `labq.py request R-20261029-002`.

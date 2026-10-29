@@ -4,7 +4,7 @@
      (M-/R-/run id, path, URL). Update it at the end of every task that changed something. Older detail goes to
      docs/DECISIONS.md, docs/journal/ or a topic file listed in docs/INDEX.md. -->
 
-Last update: 2026-10-29 · by: claude (J6) · task: R-20261029-001 (cycle CPU-h budget 160/7d)
+Last update: 2026-10-29 · by: claude (J13) · task: R-20261029-002 (push approval: rule, deploy key, remote)
 
 ## 1. Goal now
 - PhD paper: hybrid quantum–classical extension of the DInos autoscaler; simulation first, then real cluster;
@@ -44,7 +44,12 @@ Last update: 2026-10-29 · by: claude (J6) · task: R-20261029-001 (cycle CPU-h 
   (c) parallel models: v0.4 `max_workers` default 2, max 4 (`tools/dispatcher.py:78,189`) — his `dispatcher.py set`.
 
 - M-20261029-017: cycle-1 numbers not wanted; keep lessons, upload to his repo
-  github.com/KostasBitsakos/dinos_sofia_k8s_redis_scaling, then Poisson cycle. Push approval asked: R-20261029-002.
+  github.com/KostasBitsakos/dinos_sofia_k8s_redis_scaling, then Poisson cycle. R-20261029-002 APPROVED 29/10 (J13):
+  AGENTS.md:10 rule changed, deploy key ~/.config/qrl-deploy/id_ed25519 (.pub sent), remote `github` + core.sshCommand
+  set; ls-remote denied until he adds the key (Deploy keys, write). Next: curated upload after joint Claude+Codex review.
+- 29/10 C9: cycle 2 TRIGGERED («go bananes», M-20261029-017). DRe-SCale chosen (Gwydion pending J12 check).
+  Workers: J10 md cleanup (codex), J11 Experiments-tab UX (codex), J12 cycle-2 expert pack + plan (claude,
+  docs/cycle2_plan.md, docs/expert/). Order: push (after R-20261029-002) → cleanup → cycle 2 implementation.
 
 ## 4. Next steps (in order)
 1. Done 28/10 (M-20261028-004): CLAUDE.md 5.7k→1.5k chars, AGENTS.md 3.2k→2.0k; moved text verbatim to
