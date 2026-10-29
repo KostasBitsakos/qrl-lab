@@ -4,73 +4,52 @@
      (M-/R-/run id, path, URL). Update it at the end of every task that changed something. Older detail goes to
      docs/DECISIONS.md, docs/journal/ or a topic file listed in docs/INDEX.md. -->
 
-Last update: 2026-10-29 · by: claude (J13) · task: R-20261029-002 (push approval: rule, deploy key, remote)
+Last update: 2026-10-29 · by: claude (J18) · task: md cleanup (M-20261029-017); pre-cleanup copy:
+`docs/archive/STATE_2026-10-29_before_cleanup.md`
 
 ## 1. Goal now
 - PhD paper: hybrid quantum–classical extension of the DInos autoscaler; simulation first, then real cluster;
   conference submission end of Nov 2026 (`docs/PLAN.md` §1, §11). Quantum work is PAUSED (`docs/rules/paused.md`).
-- Since 19/10 the work has been the classical **DInos tuning loop** in simulation: reproduce the DInos picture with a
-  fair protocol; goal stated by the researcher: Dinos+Transfer V.2 best, closest to his paper (R-20261021-009/010,
-  `docs/DECISIONS.md`). The loop window ended 24/10 21:59 UTC (`docs/handoffs/coordinator_2026-10-23.md`).
-- Now: R-20261028-001 ANSWERED 28/10: new cycle (all our models + replicated DRe-SCale-type paper model, new noisy
-  Poisson microservice workload + env with latency/CPU/mem, Claude and Codex on separate branches, full autonomy,
-  deadline 2/11, daily report). START ONLY when the researcher writes «ξεκινα μπανάνες!» → reply exactly
-  «ξεκινανω capteain cagarou». Target ordering he wants: V.2 > LSTM+transfer > Dinos > LSTM > paper model > DERP > HPA.
-  Pre-start proposals sent in M-20261019-009 (Gwydion yes/no, fairness/reporting caveat).
-  CPU-h budget decided (R-20261029-001): 160 CPU-h sandbox, valid 7 days; file the sandbox request on the trigger.
+- Cycle 1 (19-24/10): classical DInos tuning loop on spike300_d5; its numbers are NOT targets any more, only lessons
+  (M-20261029-017; results §5, `docs/tuning_experiments.md`).
+- **Cycle 2 TRIGGERED 29/10** (R-20261028-001, M-20261029-017/021): all our models + adapted DRe-SCale LSTM-PPO
+  baseline (Gwydion cited, not ported: `docs/cycle2_plan.md:41`), new noisy Poisson microservice workload + env with
+  latency/CPU/mem, Claude and Codex on separate branches, full autonomy, deadline 2/11, daily report. Wanted ordering:
+  V.2 > LSTM+transfer > Dinos > LSTM > paper model > DERP > HPA. Budget 160 CPU-h sandbox, 7 days (R-20261029-001);
+  file the sandbox request when runs start. Plan: `docs/cycle2_plan.md`, expert pack `docs/expert/` (J12, d6cfa11).
+- Order (C9): GitHub push → md cleanup → cycle-2 implementation.
 
 ## 2. In progress (what · id · owner · next check)
-- M-20261029-003 (29/10): J1 DONE: right-click tab fixed (88d4465, Streamlit 1.66 tabs are div[role=tab]) and headless
-  approvals now honoured once on retry (6563e65, perm_store.take_approval); both verified live (headless chromium via
-  playwright 1.40 in .venv, headless claude). Dashboard restart needed for the tab fix; J2 zoomable knowledge tree; J3 (codex)
-  `tools/vscode_asks.py` for the researcher's VS Code requests. v0.4 dispatcher + tools/work.py are the researcher's own.
-- Nothing is running (28/10: no launcher/driver/simulator processes; `python3 tools/launch_run.py list`). All
-  sandboxes expired (latest R-20261023-001, 120.6/160 CPU-h, expired 24/10 21:59 UTC).
-- v0.3 switch (dispatcher + systemd units) — researcher, after this install (`SETUP_v03.md` §2).
+- J17 (claude): curated first GitHub upload (code, best models, lessons) to
+  github.com/KostasBitsakos/dinos_sofia_k8s_redis_scaling; deploy key works (ssh -T OK, repo empty, C16); needs a
+  joint Claude+Codex review before push (R-20261029-002).
+- J18 (claude): md cleanup (this update); J19 (claude): Experiments-tab UX + cycle-1 report. J10/J11 (codex) FAILED:
+  «gpt-5.1-codex-max not supported with ChatGPT account» (M-20261029-019/020) — Codex peer calls fail until the model
+  in `~/.codex/config.toml` or `peer_codex_model` is changed by the researcher (M-20261029-025).
+- Nothing is running (`python3 tools/launch_run.py list`); all sandboxes expired (latest R-20261023-001, 120.6/160 CPU-h).
 - Stale db row: run `20261019-092534-R-20261017-021-s93-a1` shows "starting" since 19/10 (no process). Harmless.
 
 ## 3. Waiting for the researcher
-- Trigger phrase «ξεκινα μπανάνες!» for the R-20261028-001 cycle (§1); answer to pre-start proposals (M-20261019-009).
-- `python3 tools/labq.py pending` on 28/10: 25 open messages, oldest M-20261016-043; newest **M-20261026-001**
-  «ποιος είναι συντονιστής τώρα;» (status new, unanswered). Waiting_approval: M-20261020-019, M-20261021-086,
-  M-20261023-002, M-20261023-004. Most "in_progress" items are old and were never closed — triage them, do not redo.
-- Unanswered proposal: check-ins every 2 h instead of hourly (M-20261022-020 / M-20261023-027) — moot with v0.3.
+- Codex model fix (above) — blocks every Codex review, incl. the push review and the cycle-2 plan review
+  (`docs/expert/codex_brief_cycle2.md`, M-20261029-025).
+- M-20261029-009: (a) results-retention policy (keep per-seed JSON + result md + best ckpt; audit that every
+  test10/11 number traces to a file) — awaiting OK; (c) parallel workers: v0.4 `max_workers` default 2, max 4
+  (`tools/dispatcher.py:78,189`) — his `dispatcher.py set`.
+- `labq.py pending` on 28/10: 25 open messages, oldest M-20261016-043; waiting_approval: M-20261020-019,
+  M-20261021-086, M-20261023-002, M-20261023-004. Most old "in_progress" items were never closed — triage, do not redo.
 - Merge/delete of single-purpose branches dinos-tuning-c19/-c20/-c22/-c23 (worktrees `code-tuning-c19` …) needs a
-  joint Claude+Codex review and the researcher's OK (`docs/rules/handoff.md` rule 4; handoff 23/10 «Next steps» 3).
-
-- M-20261029-009 (29/10): (a) results-retention policy proposed (keep only per-seed JSON + result md + best ckpt;
-  audit that every test10/11 number traces to a file) — awaiting OK; (b) before the next cycle push final models+code
-  to git: needs rule change (AGENTS.md:10 forbids push) + remote + credentials from him; no remote set now (`git remote -v`);
-  (c) parallel models: v0.4 `max_workers` default 2, max 4 (`tools/dispatcher.py:78,189`) — his `dispatcher.py set`.
-
-- M-20261029-017: cycle-1 numbers not wanted; keep lessons, upload to his repo
-  github.com/KostasBitsakos/dinos_sofia_k8s_redis_scaling, then Poisson cycle. R-20261029-002 APPROVED 29/10 (J13):
-  AGENTS.md:10 rule changed, deploy key ~/.config/qrl-deploy/id_ed25519 (.pub sent), remote `github` + core.sshCommand
-  set; ls-remote denied until he adds the key (Deploy keys, write). Next: curated upload after joint Claude+Codex review.
-- 29/10 C9: cycle 2 TRIGGERED («go bananes», M-20261029-017). DRe-SCale chosen (Gwydion pending J12 check).
-  Workers: J10 md cleanup (codex), J11 Experiments-tab UX (codex), J12 cycle-2 expert pack + plan (claude,
-  docs/cycle2_plan.md, docs/expert/). Order: push (after R-20261029-002) → cleanup → cycle 2 implementation.
+  joint Claude+Codex review and his OK (`docs/rules/handoff.md` rule 4).
 
 ## 4. Next steps (in order)
-1. Done 28/10 (M-20261028-004): CLAUDE.md 5.7k→1.5k chars, AGENTS.md 3.2k→2.0k; moved text verbatim to
-   `docs/rules/interactive.md` (backups `.lab/CLAUDE.md.bak-20261028`, `.lab/AGENTS.md.bak-20261028`); connectors
-   off for this project only (`.claude/settings.local.json`, M-20261028-006; user scope reverted).
-   INDEX now covers `.lab/tuning`, `.lab/council`, `.lab/codex-handoff` (276 files). Dashboard items (R-20261028-002, approved
-   29/10) committed dd26185..1bfe9cc; researcher must restart dashboard + dispatcher; right-click JS and headless
-   approval retry not verified in a browser/live run → `docs/dashboard_requests_20261028.md` «Implemented». Still proposed: cheap model for Q&A, one
-   thread per topic → `docs/token_practices.md`.
-2. On the trigger: run pending council items first, decide retrain-vs-test, then the cycle (R-20261028-001).
-   Researcher pre-authorised all decisions in that cycle; runs still go through `tools/launch_run.py`.
-3. When the next round starts (memory, M-20261022-033): ask first «μόνο DRe-SCale ή και Gwydion;», then plan the
-   DRe-SCale LSTM-PPO port (IEEE TSC 2024, DOI 10.1109/TSC.2024.3387661, Apache-2.0) as an *adapted published
-   baseline* (not "SOTA") and a correct Poisson arrival process (exponential inter-arrivals; DRe-SCale's generator is
-   not a correct process, Codex r2). Fairness: equal tuning budgets, transfer pretraining cost charged, ≥10 seeds,
-   paired traces, tuned HPA + no-transfer DDQN, SLO/pod-time/churn metrics. Paper notes → `docs/paper_notes.md`.
-4. Branch cleanup (§3), flaky `tests/test_lab.py::test_sandbox` (handoff 23/10).
-5. Keep `docs/EXPERIMENTS.md` current for every batch.
-
-- Dashboard (29/10): sidebar coordinator state + name from the dispatcher (02ad310, `tools/coord_status.py`); Experiments
-  tab «Μεγάλος κύκλος … ημιτονοειδή είσοδο 1» (a61e337, `tools/cycle1_report.py`, figures on button → `.lab/figs/cycle1/`).
+1. Finish J17 push after the joint review; then implement cycle 2 per `docs/cycle2_plan.md` (skills
+   `poisson-workload`, `drl-tuning`, `rl-eval-protocol`). Researcher pre-authorised all cycle decisions; runs still
+   only via `tools/launch_run.py`. DRe-SCale (IEEE TSC 2024, DOI 10.1109/TSC.2024.3387661, Apache-2.0) = *adapted
+   published baseline*, not "SOTA"; its generator is not a correct Poisson process (Codex r2) → exponential
+   inter-arrivals. Fairness: equal tuning budgets, transfer pretraining cost charged, ≥10 seeds, paired traces,
+   tuned HPA + no-transfer DDQN, SLO/pod-time/churn metrics. Paper notes → `docs/paper_notes.md`.
+2. Branch cleanup (§3), flaky `tests/test_lab.py::test_sandbox` (handoff 23/10).
+3. Keep `docs/EXPERIMENTS.md` current for every batch.
+4. Still proposed, not decided: cheap model for Q&A, one thread per topic (`docs/token_practices.md`).
 
 ## 5. Key facts and numbers (each with a pointer)
 - **test11** (R-20261023-001, tag c24c, 46/46, seeds 80-84, single-use split): V.2 83,983 · Dinos 88,026 ·
@@ -92,6 +71,9 @@ Last update: 2026-10-29 · by: claude (J13) · task: R-20261029-002 (push approv
 - Real cluster: 1 Redis pod ≈116-118k ops/s at c=1, no saturation; stage-B sweep failed at 1→2 pods (fix 84367e1,
   never re-run); calibration paused → `.lab/outbox/calib-status.md`, `stageB-rerun-ask.md`, `docs/rules/paused.md`.
 - Every batch with status and pointers: `docs/EXPERIMENTS.md` (1532 launcher runs, 23 requests).
+- Dashboard (28-29/10): R-20261028-002 items dd26185..1bfe9cc; right-click tab fix 88d4465 + headless approval
+  retry 6563e65 verified live (M-20261029-003); sidebar coordinator state 02ad310; cycle-1 report a61e337
+  (`tools/cycle1_report.py`). CLAUDE.md/AGENTS.md slimmed 28/10 (M-20261028-004; text in `docs/rules/interactive.md`); connectors off for this project (`.claude/settings.local.json`, M-20261028-006).
 
 ## 6. Do not repeat (dead ends, rejected options, known pitfalls)
 - Dropped in the loop: sim_v2 as primary (c1), coupled env (c4), D=15/20 delays (c11a), noise15_multispike_d5 (c12a),
