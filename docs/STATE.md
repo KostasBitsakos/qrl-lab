@@ -20,6 +20,11 @@ Last update: 2026-10-29 · by: claude (J18) · task: md cleanup (M-20261029-017)
 - Order (C9): GitHub push → md cleanup → cycle-2 implementation.
 
 ## 2. In progress (what · id · owner · next check)
+- C29: J25 (Codex) prep done (.lab/cycle2-codex/preparation.md, GATES.md); J25 ends. RE-SPAWN a Codex branch job
+  (brief /tmp/c9/b6.md or .lab/cycle2-codex/preparation.md) when J24 reports env frozen or the sandbox is approved.
+- J25 Codex preparation (M-20261029-030): `.lab/cycle2-codex/preparation.md`, review checklist and gates;
+  no runs. Waiting for J24 reviewed env/tag + new worktree + frozen sandbox approval. R-20261029-001 is an
+  answered question with no spec/hash (`labq.py request`), not launcher authorization; coordinator/J24 notified.
 - J23 completed Experiments UX: cycle-1 summary/table/CI at top INSIDE tab, figures on demand, raw runs collapsed
   (`dashboard/app.py`, `tools/cycle1_report.py`); Claude review M-20261029-036, 10 tests passed
   (`tests/test_cycle1_report.py`, `tests/test_tab_links.py`); HTTP health OK, no service restart (M-20261029-030).
