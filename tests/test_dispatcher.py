@@ -465,9 +465,40 @@ def test_panel_and_installer():
     ok("installer: dry run, merge-only apply, idempotent; dashboard panel switches coordinator and pause")
 
 
+def test_edit_freeze():
+    d = fresh_dispatcher()
+    db = LabDB()
+    mid = db.researcher_send("Πρώτο κείμενο")
+    db.begin_edit(mid)
+    assert db.message(mid)["status"] == "editing"
+    assert d.once() is None and not calls("claude")  # skipped while editing
+    assert db.save_edit(mid, "Δεύτερο κείμενο") is True
+    assert db.message(mid)["status"] == "new"
+    queue("claude", {"mode": "ok", "text": "οκ"})
+    assert d.once() == "done"
+    p = prompt_of(calls("claude")[0])
+    assert LabDB.EDIT_NOTE in p and "Δεύτερο κείμενο" in p
+    # edit begun while the task runs: the reply is discarded and the message re-queued after the edit
+    m2 = db.researcher_send("Τρίτο")
+    real = d._run_provider
+
+    def run_and_edit(*a, **k):
+        db.begin_edit(m2)
+        return real(*a, **k)
+    d._run_provider = run_and_edit
+    queue("claude", {"mode": "ok", "text": "παλιά απάντηση"})
+    d.once()
+    d._run_provider = real
+    assert db.message(m2)["status"] == "editing"
+    assert not any("παλιά απάντηση" in b for b in thread_bodies(db, m2))
+    db.cancel_edit(m2)
+    assert db.message(m2)["status"] == "new"
+    ok("edit freeze: skipped while editing, note on save, running reply discarded")
+
+
 TESTS = [test_claude_reply_and_resume, test_failover_on_quota, test_both_exhausted_then_resume,
          test_choice_mention_status_and_errors, test_paid_credits_guard, test_decisions_and_run_events, test_peers,
-         test_md_index, test_parse_reset, test_panel_and_installer]
+         test_md_index, test_parse_reset, test_panel_and_installer, test_edit_freeze]
 
 if __name__ == "__main__":
     print(f"QRL-Lab v0.3 tests in {TMP}")

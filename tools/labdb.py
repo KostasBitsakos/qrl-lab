@@ -19,7 +19,7 @@ from contextlib import contextmanager
 
 SCHEMA_VERSION = 2
 
-MESSAGE_STATUSES = ("new", "delivered", "acknowledged", "in_progress", "waiting_approval", "done", "failed")
+MESSAGE_STATUSES = ("new", "delivered", "acknowledged", "in_progress", "waiting_approval", "done", "failed", "editing")
 CODEX_MODELS = ("gpt-6-luna", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-astra",
                 "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna")
 CODEX_EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
@@ -176,7 +176,8 @@ class LabDB:
         "messages": {"model": "TEXT", "req_model": "TEXT", "req_effort": "TEXT",
                      "req_writers": "TEXT", "req_reviewers": "TEXT",
                      "edited_at": "TEXT", "edit_count": "INTEGER NOT NULL DEFAULT 0",
-                     "edit_delivered": "INTEGER NOT NULL DEFAULT 0"},
+                     "edit_delivered": "INTEGER NOT NULL DEFAULT 0",
+                     "edit_prev_status": "TEXT", "edit_note": "INTEGER NOT NULL DEFAULT 0"},
         "requests": {"proposals": "TEXT", "recommended": "INTEGER"},
     }
 
@@ -477,6 +478,56 @@ class LabDB:
                           " delivered_count=delivered_count+1, updated_at=? WHERE id=?", (now(), mid))
             for rid in req_ids:
                 c.execute("UPDATE requests SET decision_delivered=1 WHERE id=?", (rid,))
+
+    # ---------- edit freeze (R-20261028-002 item 3) ----------
+    EDIT_NOTE = "[edited by the researcher: re-read the whole message and check your answer against it before replying]"
+
+    def begin_edit(self, mid):
+        """Freeze a researcher message while he edits it: status 'editing' (the dispatcher skips it; a task already
+        running on it has its reply discarded). The previous status is kept for cancel."""
+        with self.tx() as c:
+            m = c.execute("SELECT status FROM messages WHERE id=? AND author='researcher'", (mid,)).fetchone()
+            if not m:
+                raise LabError(f"{mid} is not a researcher message.")
+            if m["status"] == "editing":
+                return
+            c.execute("UPDATE messages SET edit_prev_status=?, status='editing', updated_at=? WHERE id=?",
+                      (m["status"], now(), mid))
+            self._audit(c, "researcher", "edit_begin", mid, None)
+
+    def cancel_edit(self, mid):
+        """Back to the status before editing; a message that was never answered goes back to the queue ('new')."""
+        with self.tx() as c:
+            m = c.execute("SELECT status, edit_prev_status FROM messages WHERE id=? AND author='researcher'",
+                          (mid,)).fetchone()
+            if not m or m["status"] != "editing":
+                return
+            prev = m["edit_prev_status"] or "new"
+            if prev not in ("done", "failed", "waiting_approval"):
+                prev = "new"
+            c.execute("UPDATE messages SET status=?, updated_at=? WHERE id=?", (prev, now(), mid))
+
+    def discard_running_edit(self, mid):
+        """The dispatcher threw away a reply for a message under edit: when the edit ends it must be re-queued."""
+        with self.tx() as c:
+            c.execute("UPDATE messages SET edit_prev_status='new' WHERE id=? AND status='editing'", (mid,))
+
+    def clear_edit_note(self, mids):
+        with self.tx() as c:
+            for mid in mids:
+                c.execute("UPDATE messages SET edit_note=0 WHERE id=?", (mid,))
+
+    def save_edit(self, mid, new_body):
+        """End of an edit: body updated, status 'new', the coordinator gets EDIT_NOTE in front of the message."""
+        new_body = (new_body or "").strip()
+        changed = self.edit_message(mid, new_body)
+        if not changed:
+            self.cancel_edit(mid)
+            return False
+        with self.tx() as c:
+            c.execute("UPDATE messages SET status='new', edit_note=1, edit_delivered=edit_count, updated_at=? WHERE id=?",
+                      (now(), mid))
+        return True
 
     # ---------- edits of the researcher's own messages ----------
     def edit_message(self, mid, new_body, actor="researcher"):

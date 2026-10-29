@@ -655,6 +655,8 @@ class Dispatcher:
                 if mm:
                     forced = mm.group(1).lower()
                     body = body[mm.end():]
+                if m.get("edit_note"):
+                    body = LabDB.EDIT_NOTE + "\n" + body
                 texts.append(f"{m['id']} ({m['kind']}): {body}")
             return {"kind": "message", "thread_id": tid, "msg_ids": [m["id"] for m in batch],
                     "reply_to": batch[-1]["id"], "forced": forced, "text": "\n\n".join(texts), "req_ids": []}
@@ -717,6 +719,8 @@ class Dispatcher:
     def _set_status(self, msg_ids, status):
         for mid in msg_ids:
             try:
+                if (self.lab.message(mid) or {}).get("status") == "editing":
+                    continue  # the researcher is editing it: the edit freeze wins over every dispatcher status
                 self.lab.set_status(mid, status, actor="dispatcher")
             except LabError:
                 pass
@@ -763,6 +767,7 @@ class Dispatcher:
                 except LabError:
                     pass
             self._set_status(item["msg_ids"], "in_progress")
+            self.lab.clear_edit_note(item["msg_ids"])
         notes = []
         if item.get("forced"):
             notes.append(f"The researcher asked for {LABEL[item['forced']]} for this message.")
@@ -845,6 +850,16 @@ class Dispatcher:
         return res
 
     def _finish_ok(self, provider, item, res):
+        # Edit freeze: a running task cannot be killed safely (the provider call is a blocking subprocess), so when the
+        # researcher began editing (or saved an edit) while it ran, its reply is discarded and the message is re-queued.
+        cur = {m: (self.lab.message(m) or {}).get("status") for m in item["msg_ids"]}
+        if any(st in ("editing", "new") for st in cur.values()):
+            for mid, st in cur.items():
+                if st == "editing":
+                    self.lab.discard_running_edit(mid)
+            self.dd.undefer(item["msg_ids"])
+            self._journal(f"- {time.strftime('%H:%M')} {item['reply_to']} [{provider}] reply discarded: message edited while running")
+            return
         text, status = split_status(res["text"])
         if res["denials"]:
             names = ", ".join(sorted({d.get("tool_name", "?") for d in res["denials"] if isinstance(d, dict)}))

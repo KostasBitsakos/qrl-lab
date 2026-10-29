@@ -109,6 +109,7 @@ MSG_STATUS = {
     "waiting_approval": ("✋", "περιμένει έγκρισή σου"),
     "done": ("✅", "ολοκληρώθηκε"),
     "failed": ("❌", "απέτυχε"),
+    "editing": ("✏️", "σε επεξεργασία — ο συντονιστής περιμένει"),
 }
 KIND_LABEL = {"message": "Μήνυμα", "proposal": "Πρόταση ιδέας", "code_question": "Ερώτηση για τον κώδικα",
               "reply": "απάντηση", "contribution": "συνεισφορά", "status": "ενημέρωση"}
@@ -847,10 +848,10 @@ def render_message(m, key="chat"):
             if m["body"].find("docs/uploads/") >= 0:
                 st.caption("Κράτα τις γραμμές με τις διαδρομές των συνημμένων στο κείμενο.")
             b1, b2, _b3 = st.columns([1, 1, 6])
-            if b1.button("Αποθήκευση", key=f"edit_save_{key}_{m['id']}", type="primary"):
+            if b1.button("Αποστολή", key=f"edit_save_{key}_{m['id']}", type="primary"):
                 try:
                     de = db()
-                    changed = de.edit_message(m["id"], new_txt)
+                    changed = de.save_edit(m["id"], new_txt)
                     de.close()
                     st.session_state[ekey] = False
                     st.toast("Αποθηκεύτηκε· ο συντονιστής ειδοποιείται" if changed else "Καμία αλλαγή",
@@ -859,6 +860,9 @@ def render_message(m, key="chat"):
                 except LabError as e:
                     st.error(str(e))
             if b2.button("Άκυρο", key=f"edit_cancel_{key}_{m['id']}"):
+                _dc = db()
+                _dc.cancel_edit(m["id"])
+                _dc.close()
                 st.session_state[ekey] = False
                 st.session_state.pop(f"edit_txt_{key}_{m['id']}", None)
                 st.rerun()
@@ -866,8 +870,11 @@ def render_message(m, key="chat"):
             shown = (replytext.readable(m["body"])[0] if m["author"] != "researcher"
                      else ext_catalog.strip_instruction(m["body"]))
             st.markdown(_linkify(shown))  # render-time only; stored text unchanged
-            if m["author"] == "researcher" and st.button("✏️", key=f"edit_btn_{key}_{m['id']}",
-                                                         help="Επεξεργασία του μηνύματος"):
+            if m["author"] == "researcher" and st.button("✏️ Επεξεργασία", key=f"edit_btn_{key}_{m['id']}",
+                                                         help="Παγώνει το μήνυμα ώσπου να πατήσεις «Αποστολή»"):
+                _db = db()
+                _db.begin_edit(m["id"])
+                _db.close()
                 st.session_state[ekey] = True
                 st.rerun()
         if m.get("edit_count"):
