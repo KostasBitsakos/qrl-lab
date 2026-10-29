@@ -2,7 +2,7 @@
 <!-- Read first by every coordinator (Claude or Codex). At most 150 lines. Facts only, each with a pointer
      (M-/R-/run id, path, URL). Update it at the end of every task that changed something. Older detail goes to
      docs/DECISIONS.md, docs/journal/ or a topic file listed in docs/INDEX.md. -->
-Last update: 2026-10-29 · by: Claude (C160) · task: commit J139 a2c9e0c
+Last update: 2026-10-29 · by: Claude (C163) · task: sidebar + debounce spec
 ## 1. Goal now
 - PhD paper: hybrid quantum–classical extension of the DInos autoscaler; simulation first, then real cluster;
   conference submission end of Nov 2026 (`docs/PLAN.md` §1, §11). Quantum work is PAUSED (`docs/rules/paused.md`).
@@ -10,8 +10,7 @@ Last update: 2026-10-29 · by: Claude (C160) · task: commit J139 a2c9e0c
   (M-20261029-017; results §5, `docs/tuning_experiments.md`).
 - **Cycle 2 TRIGGERED 29/10** (R-20261028-001, M-20261029-017/021): all our models + adapted DRe-SCale LSTM-PPO
   baseline (Gwydion cited, not ported: `docs/cycle2_plan.md:41`), new noisy Poisson microservice workload + env with
-  latency/CPU/mem, Claude and Codex on separate branches, full autonomy, deadline 2/11, daily report. Wanted ordering:
-  V.2 > LSTM+transfer > Dinos > LSTM > paper model > DERP > HPA. Budget 160 CPU-h sandbox, 7 days (R-20261029-001);
+  latency/CPU/mem, Claude and Codex on separate branches, full autonomy, deadline 2/11, daily report. Wanted ordering: V.2 > LSTM+transfer > Dinos > LSTM > paper model > DERP > HPA. Budget 160 CPU-h sandbox, 7 days (R-20261029-001);
   file the sandbox request when runs start. Plan: `docs/cycle2_plan.md`, expert pack `docs/expert/` (J12, d6cfa11).
 
 ## 2. In progress (what · id · owner · next check)
@@ -67,7 +66,8 @@ Last update: 2026-10-29 · by: Claude (C160) · task: commit J139 a2c9e0c
   (`tools/mobile_view.py`, `dashboard/static/`); `enableStaticServing` needs a dashboard restart (not done, J79).
 ## 3. Waiting for the researcher
 - R-20261029-010 APPROVED 15:20UTC (screen only)· ενεργοποιήθηκε· σε εξέλιξη (§2 J126).
-- R-20261029-011 (C151): restart qrl-dashboard.service (τρέχει από 29/10 01:20 με παλιό κώδικα) μετά J147 APPROVE + full AppTest· ενεργοποιεί και J136/J100/J103/J97.
+- R-20261029-011 APPROVED+DONE (J162): restart 19:42:14 UTC, PID 1677827 (ήταν 758554)· AppTest 49/52 + reruns PASS, μόνο προϋπάρχον coordinator-label FAIL· live: κύκλος2 πριν κύκλο1, DRe-SCale ορατό, 0 exceptions, λογότυπο πάνω από κάρτα tokens (`.lab/j162/{live.json,apptest*.log,desktop.png}`).
+- R-20261029-012 (C161, M-286 «leak tokens»): αιτία = αφυπνίσεις Opus από `work.py say coordinator` χωρίς debounce (15 σε 34', `tools/dispatcher.py:772-782`) + resumed context ως 120k· πρόταση debounce/resume 40k/κανόνας workers/max_workers 4/restart (`.lab/c161-ask.md`). M-288: sidebar λογότυπο πρώτο + κάρτα tokens (5e7daa2)· debounce/resume40k ανατέθηκαν στο J157· restart dispatcher/max_workers περιμένουν R-012.
 - R-20261029-005 ANSWERED 29/10 (J66): «paper model» = adapted DRe-SCale LSTM-PPO (arm `tuning.rppo`); criterion
   reviewer weight, then ease of replication; told him DRe-SCale is IEEE TSC 2024 (Gwydion is the 2025 one) — he may correct.
 - M-20261029-009: (a) results-retention policy (keep per-seed JSON + result md + best ckpt; audit that every
