@@ -89,3 +89,7 @@ to him first; large → Releases/LFS), LESSONS.md. AGENTS.md:10 and `docs/rules/
   most to reviewers, then ease of replication; of the two candidates (DRe-SCale, Gwydion JNCA 2025) DRe-SCale wins on both
   (`docs/expert/autoscaling_baselines.md`; his choice M-20261022-033). Year mismatch («25 or 26») reported to him; Gwydion
   stays cited, not ported. No new arm, no spec change.
+- (2026-10-29, M-20261029-142, C87) Competing Claude-vs-Codex branches ONLY for experiment cycles (to get the best
+  results); every other task is done by ONE agent chosen for the objective (`docs/agent_routing.json`, CLAUDE.md routing).
+  GitHub publishing of cycle results: versioned, automated after the joint review, without "Compare & pull" banners —
+  mechanism (tags vs branches) pending his approval (Αποφάσεις, filed by C87).
