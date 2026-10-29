@@ -518,9 +518,201 @@ def test_headless_permission_roundtrip():
     ok("headless permission denial -> pending entry -> answer delivered once with the next task")
 
 
+
+# ---------------------------------------------------------------- v0.4: parallel work
+
+WORK = f"{sys.executable} {os.path.join(LAB, 'tools', 'work.py')}"
+
+
+def wait_until(cond, timeout=20.0, what="condition"):
+    t_end = time.time() + timeout
+    while time.time() < t_end:
+        if cond():
+            return
+        time.sleep(0.1)
+    raise AssertionError(f"timeout waiting for {what}")
+
+
+def live(d):
+    """A dispatcher prepared for tick() (the non-blocking step of run_forever), without the infinite loop."""
+    d._busy, d._busy_lock = {}, threading.Lock()
+    return d
+
+
+def alive_lanes(d):
+    with d._busy_lock:
+        return sorted(lane for lane, t in d._busy.values() if t.is_alive())
+
+
+def drain(d, timeout=30.0):
+    t_end = time.time() + timeout
+    while time.time() < t_end:
+        d.tick()
+        if not alive_lanes(d) and d.find_work() is None:
+            return
+        time.sleep(0.1)
+    raise AssertionError("work did not drain")
+
+
+def test_work_board():
+    d = fresh_dispatcher()
+    w = d.work
+    a = w.create("worker", "spawn", "A: plots", "make figure 3", reply_to="M-x", status="running")
+    b = w.create("worker", "spawn", "B: text", "rewrite section 2", reply_to="M-x", status="running")
+    assert a.startswith("J") and b.startswith("J") and a != b
+    assert w.claim(a, ["paper/sec2.tex", "tools/"]) == []
+    conflicts = w.claim(b, ["paper/fig3.py", "paper/sec2.tex"])  # all or nothing
+    assert [c["job"] for c in conflicts] == [a] and not w.claims(b)
+    assert w.claim(b, ["tools/plot.py"])[0]["path"] == "tools"  # a directory claim covers its files
+    assert w.claim(b, ["paper/fig3.py"]) == []
+    try:
+        w.claim(b, ["../outside.txt"])
+        raise AssertionError("a path outside the lab was accepted")
+    except LabError:
+        pass
+    # negotiation: messages, read once; unread messages of a finished job go back to the sender
+    w.say(b, a, "I need sec2.tex lines 10-20")
+    assert [m["body"] for m in w.inbox(a)] == ["I need sec2.tex lines 10-20"] and w.inbox(a) == []
+    w.say(a, b, "ok after my commit")
+    w.set_status(b, "done")
+    w.finish(b)
+    assert not w.claims(b)
+    back = w.inbox(a)
+    assert back and back[0]["from_job"] == "dispatcher" and "without reading" in back[0]["body"]
+    # a finished job's claims never block: B's paths are free for A
+    assert w.claim(a, ["paper/fig3.py"]) == []
+    # the CLI: workers cannot spawn; the chat coordinator can; conflicts exit 2 and show the holder's goal
+    env = dict(os.environ, QRL_JOB=b)
+    out = subprocess.run(WORK.split() + ["spawn", "--title", "x", "--brief", "y"], capture_output=True, text=True,
+                         env=env)
+    assert out.returncode != 0 and "Only the chat coordinator" in out.stderr
+    c = w.create("chat", "message", "chat", reply_to="M-x", status="running")
+    assert c.startswith("C")
+    out = subprocess.run(WORK.split() + ["spawn", "--title", "Fig 4", "--brief", "plot fig 4", "--to", "codex"],
+                         capture_output=True, text=True, env=dict(os.environ, QRL_JOB=c))
+    assert out.returncode == 0, out.stderr
+    spawned = w.queued_spawns()
+    assert len(spawned) == 1 and spawned[0]["provider"] == "codex" and spawned[0]["reply_to"] == "M-x"
+    d2 = w.create("worker", "spawn", "D", "edit fig 3 colours", reply_to="M-x", status="running")
+    out = subprocess.run(WORK.split() + ["claim", "paper/fig3.py"], capture_output=True, text=True,
+                         env=dict(os.environ, QRL_JOB=d2))
+    assert out.returncode == 2 and "CONFLICT" in out.stdout and a in out.stdout and "make figure 3" in out.stdout
+    # commit: only the claimed files of this job, never the other job's uncommitted work
+    w.release(a, ["tools"])
+    subprocess.run(["git", "init", "-q"], cwd=LAB, check=True)
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "0"],
+                   cwd=LAB, check=True)
+    os.makedirs(os.path.join(LAB, "paper"), exist_ok=True)
+    for fn in ("fig3.py", "other.py"):
+        with open(os.path.join(LAB, "paper", fn), "w") as f:
+            f.write("x = 1\n")
+    out = subprocess.run(WORK.split() + ["commit", "-m", "fig 3 (J)"], capture_output=True, text=True,
+                         env=dict(os.environ, QRL_JOB=a, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
+                                  GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t"))
+    assert out.returncode == 0, out.stdout + out.stderr
+    files = subprocess.run(["git", "show", "--name-only", "--format=", "HEAD"], cwd=LAB, capture_output=True,
+                           text=True).stdout.split()
+    assert files == ["paper/fig3.py"], files
+    status = subprocess.run(["git", "status", "--porcelain", "paper"], cwd=LAB, capture_output=True, text=True).stdout
+    assert "other.py" in status
+    shutil.rmtree(os.path.join(LAB, ".git"))
+    shutil.rmtree(os.path.join(LAB, "paper"))
+    ok("work board: atomic claims, directory overlap, negotiation inbox, spawn rights, conflict exit 2, own-file commits")
+
+
+def test_parallel_lanes():
+    d = live(fresh_dispatcher())
+    db = LabDB()
+    d.dd.set("max_workers", "2")
+    root = db.researcher_send("Ξεκίνα το section 2")
+    queue("claude", {"mode": "ok", "text": "Το ξεκίνησα."})
+    d.once()  # the first chat reply (no parallel work yet)
+    rid = db.ask("approval", "long job", "σώμα", scope="research", thread_id=root)
+    db.decide(rid, "approve", "οκ")
+    # a long worker (the decision) claims a file, then runs for a while
+    queue("claude", {"mode": "ok", "match": rid, "sleep": 4, "text": "Section 2 έτοιμο.",
+                     "sh": f"{WORK} claim docs/sec2.md --note 'section 2'"})
+    d.tick()
+    wait_until(lambda: alive_lanes(d) == ["worker"], what="worker started")
+    wait_until(lambda: d.work.claims() != [], what="worker claim")
+    # the researcher keeps talking: the chat coordinator answers while the worker is still running
+    m2 = db.researcher_send("Τι κάνει τώρα ο worker;", thread_id=root)
+    queue("claude", {"mode": "ok", "match": "Τι κάνει τώρα", "text": "Δουλεύει στο section 2.",
+                     "sh": f"{WORK} spawn --title 'Figure 3' --brief 'make figure 3 for section 2'"})
+    t0 = time.time()
+    d.tick()
+    assert time.time() - t0 < 2, "tick must not block on running work"
+    wait_until(lambda: any(b.startswith("Δουλεύει στο section 2.") for b in thread_bodies(db, root)), what="chat reply")
+    assert any(j["lane"] == "worker" and j["status"] == "running" and j["origin"] == "decision"
+               for j in d.work.active()), "the worker should still be running while the chat answered"
+    chat_prompt = next(prompt_of(c) for c in calls("claude") if "Τι κάνει τώρα" in prompt_of(c))
+    assert "you are the chat coordinator" in chat_prompt and "## Parallel work now" in chat_prompt
+    assert "docs/sec2.md" in chat_prompt, "the chat coordinator must see what the workers hold"
+    assert db.message(m2)["status"] == "in_progress"  # its spawned job is still open
+    # the spawned job starts as the second worker; it negotiates for the held file and gets a conflict
+    queue("claude", {"mode": "ok", "match": "Figure 3", "text": "Figure 3 έτοιμο.", "sh": f"{WORK} claim docs/sec2.md"})
+    d.tick()
+    wait_until(lambda: alive_lanes(d).count("worker") == 2 or not d.work.queued_spawns(), what="second worker")
+    drain(d)
+    assert d.work.claims() == [], "claims are released when runs end"
+    jobs = {j["origin"]: j for j in [dict(r) for r in d.dd.conn.execute("SELECT * FROM jobs")]}
+    assert jobs["spawn"]["status"] == "done" and jobs["decision"]["status"] == "done"
+    fig = next(c for c in calls("claude") if "Figure 3" in prompt_of(c) and "parallel worker" in prompt_of(c))
+    assert "--resume" not in fig["argv"], "workers never resume the thread's session"
+    bodies = thread_bodies(db, root)
+    fig_reply = next(b for b in bodies if b.startswith("Figure 3 έτοιμο."))
+    assert "CONFLICT" in fig_reply and "J" in fig_reply.split("—")[-1], "the conflict is reported; footer names the job"
+    assert db.message(m2)["status"] == "done", "the last parallel job closes the researcher's request"
+    ok("two lanes: chat answers while workers run; spawned jobs; claims visible, released; request closed by last job")
+
+
+def test_max_workers_cancel_heartbeat():
+    d = live(fresh_dispatcher())
+    db = LabDB()
+    d.dd.set("max_workers", "2")
+    root = db.researcher_send("τρία πράγματα")
+    queue("claude", {"mode": "ok", "text": "οκ"})
+    d.once()
+    c = d.work.create("chat", "message", "chat", reply_to=root, thread_id=root, parent_msgs=[root], status="running")
+    for i in range(3):
+        subprocess.run(WORK.split() + ["spawn", "--title", f"job{i}", "--brief", f"task number {i}"], check=True,
+                       capture_output=True, env=dict(os.environ, QRL_JOB=c))
+    d.work.set_status(c, "done")
+    for i in range(3):
+        queue("claude", {"mode": "ok", "match": f"): job{i}\n", "sleep": 30 if i == 0 else 3, "text": f"done {i}"})
+    d.tick()
+    wait_until(lambda: sum(j["status"] == "running" for j in d.work.active()) == 2, what="two workers")
+    d.tick()
+    assert alive_lanes(d) == ["worker", "worker"], alive_lanes(d)
+    assert len(d.work.queued_spawns()) == 1, [(j["id"], j["status"]) for j in d.work.active()]
+    # cancel the long one: its process is stopped, the thread is told
+    j0 = next(j["id"] for j in d.work.active() if j["title"] == "job0")
+    subprocess.run(WORK.split() + ["cancel", j0], check=True, capture_output=True, env=dict(os.environ, QRL_JOB=c))
+    t0 = time.time()
+    drain(d, timeout=25)
+    assert time.time() - t0 < 20, "the cancelled run must stop at once"
+    assert d.work.job(j0)["status"] == "cancelled"
+    assert any("ακυρώθηκε" in b for b in thread_bodies(db, root))
+    assert {d.work.job(j["id"])["status"] for j in [dict(r) for r in d.dd.conn.execute(
+        "SELECT id FROM jobs WHERE title IN ('job1','job2')")]} == {"done"}
+    # heartbeat: written by its own thread, independent of runs
+    hb = os.path.join(LAB, ".lab", "bridge_heartbeat")
+    os.utime(hb, (time.time() - 3600, time.time() - 3600)) if os.path.exists(hb) else None
+    threading.Thread(target=d._heartbeat_loop, args=(0.2,), daemon=True).start()
+    wait_until(lambda: time.time() - os.path.getmtime(hb) < 2, what="heartbeat")
+    # restart: a spawned job that was running is queued again with a note; claims are cleared
+    j = d.work.create("worker", "spawn", "interrupted one", "do it", reply_to=root, thread_id=root, status="running")
+    d.work.claim(j, ["docs/x.md"])
+    d.recover()
+    assert d.work.job(j)["status"] == "queued" and not d.work.claims()
+    item = d.find_work("worker")
+    assert item["job_id"] == j and "interrupted" in item["text"]
+    ok("max_workers cap, cancel stops the run, heartbeat thread, restart re-queues spawned jobs")
+
 TESTS = [test_claude_reply_and_resume, test_failover_on_quota, test_both_exhausted_then_resume,
          test_choice_mention_status_and_errors, test_paid_credits_guard, test_decisions_and_run_events, test_peers,
-         test_md_index, test_parse_reset, test_panel_and_installer, test_edit_freeze, test_headless_permission_roundtrip]
+         test_md_index, test_parse_reset, test_panel_and_installer, test_edit_freeze, test_headless_permission_roundtrip,
+         test_work_board, test_parallel_lanes, test_max_workers_cancel_heartbeat]
 
 if __name__ == "__main__":
     print(f"QRL-Lab v0.3 tests in {TMP}")

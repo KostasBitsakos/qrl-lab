@@ -3,6 +3,7 @@
   "permissions": {
     "allow": [
       "Bash(python3 tools/ask_peer.py *)",
+      "Bash(python3 tools/work.py *)",
       "Bash(python3 tools/build_md_index.py*)",
       "Bash(python3 tools/dispatcher.py status)"
     ],

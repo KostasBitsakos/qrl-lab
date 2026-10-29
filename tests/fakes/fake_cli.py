@@ -4,21 +4,42 @@
 Called as  fake_cli.py claude <args...>  or  fake_cli.py codex <args...>  (through small wrappers).
 Each call pops the first JSON line of $FAKE_DIR/<cli>.queue, e.g. {"mode": "ok", "text": "...", "session": "s1"}.
 Modes: ok, quota, error, paid (Claude: ok but drawing on paid credits). argv is appended to $FAKE_DIR/<cli>.calls.
+Parallel tests (v0.4): "match": "<text>" takes the first queued step whose text occurs in the prompt (steps without
+"match" are taken in order by any call); "sh": "<command>" runs a shell command first (with this run's environment,
+e.g. $QRL_JOB) and appends its output to the step's text; "sleep": seconds simulates a long run.
 """
 import json
 import os
 import sys
 
 
-def pop(cli):
+def pop(cli, prompt=""):
+    import fcntl
     q = os.path.join(os.environ["FAKE_DIR"], f"{cli}.queue")
-    with open(q, encoding="utf-8") as f:
-        lines = [ln for ln in f if ln.strip()]
-    if not lines:
-        return {"mode": "error", "text": "fake queue empty"}
-    with open(q, "w", encoding="utf-8") as f:
-        f.writelines(lines[1:])
-    return json.loads(lines[0])
+    with open(q + ".lock", "w") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)  # parallel runs pop from the same queue
+        with open(q, encoding="utf-8") as f:
+            lines = [ln for ln in f if ln.strip()]
+        steps = [json.loads(ln) for ln in lines]
+        idx = next((i for i, st in enumerate(steps) if st.get("match") and st["match"] in prompt), None)
+        if idx is None:
+            idx = next((i for i, st in enumerate(steps) if not st.get("match")), None)
+        if idx is None:
+            return {"mode": "error", "text": "fake queue empty"}
+        with open(q, "w", encoding="utf-8") as f:
+            f.writelines(lines[:idx] + lines[idx + 1:])
+    return run_step(steps[idx])
+
+
+def run_step(step):
+    import subprocess
+    import time
+    if step.get("sh"):
+        p = subprocess.run(step["sh"], shell=True, capture_output=True, text=True)
+        step["text"] = step.get("text", "ok") + "\n" + (p.stdout + p.stderr).strip() + f"\n(exit {p.returncode})"
+    if step.get("sleep"):
+        time.sleep(float(step["sleep"]))
+    return step
 
 
 def log(cli, argv):
@@ -27,7 +48,7 @@ def log(cli, argv):
 
 
 def claude(argv):
-    step = pop("claude")
+    step = pop("claude", argv[argv.index("-p") + 1] if "-p" in argv else "")
     log("claude", argv)
     sid = step.get("session") or (argv[argv.index("--resume") + 1] if "--resume" in argv else "sess-new")
     usage = {"input_tokens": 10, "cache_creation_input_tokens": 30000, "cache_read_input_tokens": 5000,
@@ -62,7 +83,7 @@ def claude(argv):
 
 
 def codex(argv):
-    step = pop("codex")
+    step = pop("codex", argv[-1] if argv else "")
     log("codex", argv)
     tid = argv[argv.index("resume") + 1] if "resume" in argv else step.get("session", "thread-new")
     out_file = argv[argv.index("-o") + 1]

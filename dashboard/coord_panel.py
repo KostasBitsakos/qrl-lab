@@ -18,6 +18,7 @@ import streamlit as st
 ROOT = os.environ.get("QRL_LAB_DIR") or os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 from dispatcher import LABEL, PROVIDERS, DispatchDB, dispatch_db_path, fmt_ts, limits_text  # noqa: E402
+from work import Work  # noqa: E402
 
 LIGHT = {"ok": "🟢", "exhausted": "🔴"}
 
@@ -88,9 +89,13 @@ def _status(dd):
     age = time.time() - os.path.getmtime(hb) if os.path.exists(hb) else None
     if age is None or age > 30:
         st.caption("⚫ dispatcher εκτός λειτουργίας")
-    run = dd.running_task()
-    if run:
-        st.caption(f"⏳ τώρα: {LABEL.get(run['provider'], run['provider'])} · {run['kind']} · από {run['started'][11:16]}")
+    jobs = Work(dd.conn, ROOT).active()
+    for j in jobs:  # the chat coordinator (C) and the parallel workers (J)
+        icon = "💬" if j["lane"] == "chat" else ("⏳" if j["status"] == "running" else "🕒")
+        when = f"από {j['started'][11:16]}" if j["started"] else "στην ουρά"
+        st.caption(f"{icon} {j['id']} · {j['title'][:60]} · {when}")
+    if not jobs and dd.running_task() is None:
+        st.caption("💤 καμία εργασία τώρα")
     since = (dt.datetime.now().astimezone() - dt.timedelta(days=7)).isoformat(timespec="seconds")
     today = dt.datetime.now().astimezone().replace(hour=0, minute=0, second=0).isoformat(timespec="seconds")
     with st.expander("Κατανάλωση (εκτίμηση)"):

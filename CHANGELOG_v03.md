@@ -1,3 +1,17 @@
+# Changelog v0.4 — 2026-10-29: parallel work (researcher's request, M-thread of 29/10)
+- Two lanes in `tools/dispatcher.py`: the chat coordinator (job `C<n>`, one at a time) answers researcher messages
+  even while workers run; up to `max_workers` (default 2, researcher setting 1–4) parallel workers (`J<n>`) take
+  decisions, permission answers, run events and jobs the coordinator hands over (`tools/work.py spawn`).
+- `tools/work.py`: job board in `.lab/dispatch.db` — atomic file claims (directories cover their files), conflicts
+  show the holder's goal (exit 2), agent-to-agent messages (`say`/`inbox`), recorded agreements posted in the thread
+  (`agree`), escalation to the chat coordinator (`say coordinator`), own-files-only commits under a lock, `cancel`.
+- Heartbeat from its own thread: the dashboard no longer shows "offline" while a long task runs.
+- Workers never resume the thread's session; chat runs use `chat_budget_usd` (3), workers `max_budget_usd` (5).
+  A researcher request stays in_progress until its last spawned job reports. Restart: spawned jobs are queued
+  again with a note; all claims are cleared.
+- `prompts/coordinator.md`: "Parallel work" section (roles, claim → negotiate → agree, shared docs, commits).
+- Coordinator panel lists active jobs. Tests: 3 new in `tests/test_dispatcher.py` (fake CLI: match/sleep/sh steps).
+
 # Changelog v0.3.2 — 2026-10-28
 - `tools/upgrade_v03.sh` + `prompts/upgrade_v03.md`: one new Claude Code session on the VM runs the tests and fixes
   VM-specific failures (without weakening assertions), lists what must be stopped before the switch, builds

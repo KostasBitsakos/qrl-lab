@@ -13,7 +13,14 @@ Work items, in priority order:
   1. researcher messages from the dashboard (status new/delivered, or deferred earlier)
   2. researcher decisions on requests that the coordinator has not seen
   3. finished experiment batches (all runs of an approved request ended) -> one event, no polling by an LLM
+  4. jobs the chat coordinator handed to parallel workers (tools/work.py spawn)
 Peer requests (tools/ask_peer.py: "ask the other model") are served by a second thread, outside any sandbox.
+
+Parallel work (v0.4): two lanes. The chat lane runs ONE coordinator at a time for researcher messages (and agents'
+escalations), so the researcher can always talk to a coordinator. The worker lane runs up to `max_workers` jobs at
+once (decisions, permission answers, run events, spawned jobs). Runs in parallel share the working tree; they reserve
+files with tools/work.py claim and negotiate overlaps among themselves (tools/work.py say/agree). A heartbeat thread
+keeps the dashboard's "online" signal fresh while runs are busy.
 
 Coordinator choice: setting `coordinator` (claude|codex), changed by the researcher in the dashboard, or per message
 with a leading "@claude" / "@codex". Failover: when the chosen one reports a usage limit, the same task is re-run by
@@ -47,6 +54,7 @@ TOOLS = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, TOOLS)
 from labdb import LabDB, LabError  # noqa: E402
 import perm_store  # noqa: E402
+import work as W  # noqa: E402
 
 PROVIDERS = ("claude", "codex")
 OTHER = {"claude": "codex", "codex": "claude"}
@@ -67,7 +75,9 @@ DEFAULTS = {
     "peer_codex_model": "",           # when Claude asks Codex ("" = config default)
     "peer_codex_effort": "medium",
     "peer_codex_major_effort": "high",
-    "max_budget_usd": "5",            # per coordinator run (Claude --max-budget-usd; client-side estimate)
+    "max_workers": "2",               # parallel worker runs (the chat coordinator is extra: one at a time)
+    "chat_budget_usd": "3",           # per chat-coordinator run (it delegates longer work to workers)
+    "max_budget_usd": "5",            # per worker run (Claude --max-budget-usd; client-side estimate)
     "peer_budget_usd": "1.5",
     "task_timeout_min": "60",
     "peer_timeout_min": "15",
@@ -176,6 +186,8 @@ class DispatchDB:
             raise LabError("coordinator: claude ή codex.")
         if key in ("failover", "paused", "allow_paid_credits") and value not in ("0", "1"):
             raise LabError(f"{key}: 0 ή 1.")
+        if key == "max_workers" and value not in ("1", "2", "3", "4"):
+            raise LabError("max_workers: 1–4.")
         with self.tx() as c:
             c.execute("INSERT INTO settings(key, value, updated_at, updated_by) VALUES (?,?,?,?) ON CONFLICT(key) DO"
                       " UPDATE SET value=excluded.value, updated_at=excluded.updated_at, updated_by=excluded.updated_by",
@@ -387,6 +399,25 @@ def split_status(text):
     return text, "done"
 
 
+CHAT_KINDS = ("message", "escalation")
+
+
+def lane_of(item):
+    """'chat': the researcher's coordinator (one at a time); 'worker': everything that may run in parallel."""
+    return "chat" if item["kind"] in CHAT_KINDS else "worker"
+
+
+def item_key(item):
+    """Identity of a work item, so the same item is never processed twice at once."""
+    if item.get("job_id"):
+        return "job:" + item["job_id"]
+    if item.get("event_ref"):
+        return "run:" + item["event_ref"]
+    ids = item["msg_ids"] + item["req_ids"] + list(item.get("perm_ids") or []) + \
+        [str(i) for i in item.get("esc_ids") or []]
+    return item["kind"] + ":" + ",".join(ids)
+
+
 def which(name, configured=None):
     return configured or shutil.which(name) or name
 
@@ -399,8 +430,41 @@ def _empty_result():
             "paid_credit": None, "model": None, "limits": []}
 
 
+_PROCS = {}  # job id -> running provider process (so a cancel can stop it)
+_PROCS_LOCK = threading.Lock()
+
+
+def _exec(cmd, cwd, env, timeout_s, job=None):
+    """subprocess.run with the process registered under `job` while it runs."""
+    p = subprocess.Popen(cmd, cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                         text=True, env=env)
+    if job:
+        with _PROCS_LOCK:
+            _PROCS[job] = p
+    try:
+        out, err = p.communicate(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        p.communicate()
+        raise
+    finally:
+        if job:
+            with _PROCS_LOCK:
+                _PROCS.pop(job, None)
+    return subprocess.CompletedProcess(cmd, p.returncode, out, err)
+
+
+def stop_job(job):
+    with _PROCS_LOCK:
+        p = _PROCS.get(job)
+    if p and p.poll() is None:
+        p.terminate()
+        return True
+    return False
+
+
 def run_claude(prompt, cwd, model, effort=None, session_id=None, system_append=None, budget=None, timeout_s=3600,
-               peer=False, env=None):
+               peer=False, env=None, job=None):
     exe = which("claude", os.environ.get("QRL_CLAUDE_BIN"))
     # stream-json: besides the final result it carries rate_limit_event lines (window, utilization, reset time,
     # isUsingOverage = paid extra usage), which make failover exact instead of guessing from the error text.
@@ -422,8 +486,7 @@ def run_claude(prompt, cwd, model, effort=None, session_id=None, system_append=N
     res = _empty_result()
     res["model"] = model
     try:
-        p = subprocess.run(cmd, cwd=cwd, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout_s,
-                           env=env)
+        p = _exec(cmd, cwd, env, timeout_s, job)
     except subprocess.TimeoutExpired:
         res.update(error=f"timeout after {timeout_s}s", transient=False)
         return res
@@ -490,7 +553,7 @@ def _epoch(v):
 
 
 def run_codex(prompt, cwd, model=None, effort=None, session_id=None, sandbox="workspace-write", network=True,
-              timeout_s=3600, env=None, outdir=None):
+              timeout_s=3600, env=None, outdir=None, job=None):
     exe = which("codex", os.environ.get("QRL_CODEX_BIN"))
     outdir = outdir or os.path.join(cwd, ".lab", "tmp")
     os.makedirs(outdir, exist_ok=True)
@@ -510,8 +573,7 @@ def run_codex(prompt, cwd, model=None, effort=None, session_id=None, sandbox="wo
     res = _empty_result()
     res["model"] = model or "codex-default"
     try:
-        p = subprocess.run(cmd, cwd=cwd, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout_s,
-                           env=env)
+        p = _exec(cmd, cwd, env, timeout_s, job)
     except subprocess.TimeoutExpired:
         res["error"] = f"timeout after {timeout_s}s"
         return res
@@ -572,6 +634,7 @@ class Dispatcher:
         self.root = os.path.abspath(root or lab_root())
         self.lab = LabDB(os.path.join(self.root, ".lab", "lab.db"))
         self.dd = DispatchDB(dispatch_db_path(self.root))
+        self.work = W.Work(self.dd.conn, self.root)
         self.prompts = os.path.join(self.root, "prompts")
         self._last_index = 0.0
 
@@ -597,7 +660,9 @@ class Dispatcher:
     def build_prompt(self, provider, item, fresh, note_lines):
         s = self.dd.settings()
         reply_id = item["reply_to"]
-        head = (f"[QRL-Lab task · you are the coordinator ({LABEL[provider]}) · thread {item['thread_id']} · "
+        job = item.get("job_id")
+        role = "the chat coordinator" if lane_of(item) == "chat" else f"parallel worker {job}"
+        head = (f"[QRL-Lab task · you are {role} ({LABEL[provider]}) · job {job or '-'} · thread {item['thread_id']} · "
                 f"reply-to {reply_id} · author for your posts: coordinator · co-researcher: {OTHER[provider]}]")
         parts = [head]
         if provider == "codex":  # Codex has no system-prompt flag: the static part goes first (stable prefix)
@@ -616,6 +681,9 @@ class Dispatcher:
                 parts.append("## Thread so far (latest messages, clipped; full text: python3 tools/labq.py show <id>"
                              " --full)\n" + "\n".join(lines))
         parts.append("## New input\n" + item["text"])
+        others = self.work.summary_lines(exclude=job)
+        parts.append("## Parallel work now (python3 tools/work.py status)\n" +
+                     ("\n".join(others) if others else "No other job is running."))
         if note_lines:
             parts.append("## Notes from the dispatcher\n" + "\n".join(f"- {n}" for n in note_lines))
         return "\n\n".join(p for p in parts if p)
@@ -638,7 +706,15 @@ class Dispatcher:
             LabDB._audit(c, "dispatcher", "system_thread", mid)
         return mid
 
-    def find_work(self):
+    def find_work(self, lane=None, busy=()):
+        """The first work item (of `lane`, if given) whose key is not in `busy` (items already being processed)."""
+        for item in self._candidates():
+            if (lane is None or lane_of(item) == lane) and item_key(item) not in busy:
+                return item
+        return None
+
+    def _candidates(self):
+        """Every pending work item, in priority order (a generator: callers stop at the first one they can take)."""
         # 1. researcher messages
         deferred = set(self.dd.deferred_ids())
         rows = [dict(r) for r in self.lab.conn.execute(
@@ -659,19 +735,29 @@ class Dispatcher:
                 if m.get("edit_note"):
                     body = LabDB.EDIT_NOTE + "\n" + body
                 texts.append(f"{m['id']} ({m['kind']}): {body}")
-            return {"kind": "message", "thread_id": tid, "msg_ids": [m["id"] for m in batch],
-                    "reply_to": batch[-1]["id"], "forced": forced, "text": "\n\n".join(texts), "req_ids": []}
+            yield {"kind": "message", "thread_id": tid, "msg_ids": [m["id"] for m in batch],
+                   "reply_to": batch[-1]["id"], "forced": forced, "text": "\n\n".join(texts), "req_ids": []}
+        # 1b. agents' escalations to the chat coordinator (could not agree, or need the researcher)
+        esc = self.work.escalations()
+        if esc:
+            src = self.work.job(esc[0]["from_job"]) or {}
+            tid = src.get("thread_id") if src.get("thread_id") and self.lab.message(src["thread_id"]) \
+                else self._system_thread()
+            lines = [f"- from {m['from_job']}: {m['body']}" for m in esc]
+            yield {"kind": "escalation", "thread_id": tid, "msg_ids": [], "reply_to": src.get("reply_to") or tid,
+                   "forced": None, "req_ids": [], "esc_ids": [m["id"] for m in esc],
+                   "text": "Parallel jobs escalated to you (you may answer each with python3 tools/work.py say <job> "
+                           "\"...\"; ask the researcher only if it is the researcher's call):\n" + "\n".join(lines)}
         # 2. decisions
         _, decs = self.lab.undelivered()
-        if decs:
-            r = decs[0]
+        for r in decs:
             tid = r["thread_id"] if r["thread_id"] and self.lab.message(r["thread_id"]) else self._system_thread()
             note = f' Researcher note: "{r["decision_text"]}"' if r["decision_text"] else ""
             text = (f"Researcher decision on {r['id']} [{r['kind']}/{r['scope']}] \"{r['title']}\": {r['state']}."
                     f"{note}\nAct only within what this decision allows (python3 tools/labq.py request {r['id']}),"
                     f" then report in this thread.")
-            return {"kind": "decision", "thread_id": tid, "msg_ids": [], "reply_to": tid, "forced": None,
-                    "text": text, "req_ids": [r["id"]]}
+            yield {"kind": "decision", "thread_id": tid, "msg_ids": [], "reply_to": tid, "forced": None,
+                   "text": text, "req_ids": [r["id"]], "title": f"{r['id']}: {r['title']}"}
         # 2b. answers to blocked (headless) permission requests
         ans = perm_store.undelivered_answers(self.root)
         if ans:
@@ -680,7 +766,7 @@ class Dispatcher:
                      + (f" ({a['message']})" if a.get("message") else "") for a in ans]
             text = ("The researcher answered permission requests that were blocked in an earlier headless task:\n"
                     + "\n".join(lines) + "\nIf approved, retry that action once; if denied, do not retry it. Report in this thread.")
-            return {"kind": "perm_answer", "thread_id": tid, "msg_ids": [], "reply_to": tid, "forced": None,
+            yield {"kind": "perm_answer", "thread_id": tid, "msg_ids": [], "reply_to": tid, "forced": None,
                     "text": text, "req_ids": [], "perm_ids": [a["id"] for a in ans]}
         # 3. finished experiment batches
         groups = {}
@@ -705,12 +791,21 @@ class Dispatcher:
                     "\nCheck the outputs (summaries by script, not by reading whole logs), report the results with "
                     "pointers, update docs/EXPERIMENTS.md and docs/STATE.md, and propose the next step. Do not start new "
                     "runs without an approval.")
-            return {"kind": "run_event", "thread_id": tid, "msg_ids": [], "reply_to": tid, "forced": None,
+            yield {"kind": "run_event", "thread_id": tid, "msg_ids": [], "reply_to": tid, "forced": None,
                     "text": text, "req_ids": [], "event_ref": ref}
         if not initialized:
             self.dd.conn.execute("INSERT OR REPLACE INTO settings(key, value, updated_at, updated_by)"
                                  " VALUES ('events_initialized','1',?,'dispatcher')", (now_iso(),))
-        return None
+        # 4. jobs handed to workers by the chat coordinator
+        for j in self.work.queued_spawns():
+            tid = j["thread_id"] if j["thread_id"] and self.lab.message(j["thread_id"]) else self._system_thread()
+            text = f"Job {j['id']} from the chat coordinator ({j['created_by']}): {j['title']}\n\n{j['brief']}"
+            if j["result"] == "interrupted":
+                text += ("\n\n(An earlier attempt of this job was interrupted by a dispatcher restart: check "
+                         "`git status` and the files it may have touched before you continue.)")
+            yield {"kind": "job", "thread_id": tid, "msg_ids": [], "reply_to": j["reply_to"] or tid,
+                   "forced": j["provider"], "text": text, "req_ids": [], "job_id": j["id"], "title": j["title"],
+                   "parent_msgs": json.loads(j["parent_msgs"] or "[]")}
 
     # ---- one task
     def provider_order(self, item):
@@ -747,6 +842,8 @@ class Dispatcher:
             f.write(line.rstrip() + "\n")
 
     def _session_for(self, item, provider):
+        if lane_of(item) != "chat":
+            return None  # parallel workers never share (or resume) the thread's session
         s = self.dd.settings()
         sess = self.dd.session(item["thread_id"], provider)
         if not sess:
@@ -760,16 +857,59 @@ class Dispatcher:
         s = self.dd.settings()
         timeout_s = int(float(s["task_timeout_min"]) * 60)
         prompt = self.build_prompt(provider, item, fresh=session_id is None, note_lines=list(notes))
-        env = dict(os.environ, QRL_COORDINATOR=provider, QRL_LAB_DIR=self.root)
+        job = item.get("job_id")
+        env = dict(os.environ, QRL_COORDINATOR=provider, QRL_LAB_DIR=self.root, QRL_JOB=job or "",
+                   QRL_REPLY_TO=item["reply_to"] or "")
+        budget = s["chat_budget_usd"] if lane_of(item) == "chat" else s["max_budget_usd"]
         if provider == "claude":
             model = s["events_model"] if item["kind"] == "run_event" and s["events_model"] else s["claude_model"]
             return run_claude(prompt, self.root, model, s["claude_effort"], session_id=session_id,
-                              system_append=self.static_prompt(), budget=s["max_budget_usd"], timeout_s=timeout_s,
-                              env=env)
+                              system_append=self.static_prompt(), budget=budget, timeout_s=timeout_s,
+                              env=env, job=job)
         return run_codex(prompt, self.root, s["codex_model"] or None, s["codex_effort"] or None,
-                         session_id=session_id, timeout_s=timeout_s, env=env)
+                         session_id=session_id, timeout_s=timeout_s, env=env, job=job)
+
+    def _cancelled(self, item):
+        return bool(item.get("job_id") and (self.work.job(item["job_id"]) or {}).get("cancel"))
+
+    def _active_children(self, msg_ids, exclude=None):
+        """Active worker jobs spawned while answering these researcher messages."""
+        out = []
+        for j in self.work.active("worker"):
+            if j["id"] != exclude and set(json.loads(j["parent_msgs"] or "[]")) & set(msg_ids):
+                out.append(j)
+        return out
 
     def process(self, item):
+        """One work item as one job (C<n> in the chat lane, J<n> for workers): claims are released at the end."""
+        lane = lane_of(item)
+        jid = item.get("job_id")
+        if jid:
+            self.work.set_status(jid, "running")
+        else:
+            lines = (item["text"] or "").strip().splitlines()
+            first = item.get("title") or (lines[0] if lines else item["kind"])
+            jid = self.work.create(lane, item["kind"], clip(first, 120), thread_id=item["thread_id"],
+                                   reply_to=item["reply_to"], parent_msgs=item["msg_ids"], status="running")
+            self.work.set_status(jid, "running")
+            item["job_id"] = jid
+        result = "failed"
+        try:
+            result = self._process(item)
+        finally:
+            if item["kind"] == "job" and result == "deferred":
+                self.dd.conn.execute("UPDATE jobs SET status='queued', started=NULL WHERE id=?", (jid,))
+            else:
+                self.work.set_status(jid, result if result in ("done", "failed", "deferred", "cancelled") else "failed")
+            self.work.finish(jid)
+            parents = item.get("parent_msgs") or []
+            if lane == "worker" and parents and result != "deferred" and not self._active_children(parents):
+                for mid in parents:  # the last parallel job of a request is done: so is the request
+                    if (self.lab.message(mid) or {}).get("status") == "in_progress":
+                        self._set_status([mid], "done")
+        return result
+
+    def _process(self, item):
         available, wanted = self.provider_order(item)
         if item["msg_ids"]:
             for mid in item["msg_ids"]:
@@ -780,7 +920,9 @@ class Dispatcher:
             self._set_status(item["msg_ids"], "in_progress")
             self.lab.clear_edit_note(item["msg_ids"])
         notes = []
-        if item.get("forced"):
+        if item.get("forced") and item["kind"] == "job":
+            notes.append(f"The chat coordinator assigned this job to {LABEL[item['forced']]}.")
+        elif item.get("forced"):
             notes.append(f"The researcher asked for {LABEL[item['forced']]} for this message.")
         tried = []
         for provider in available:
@@ -790,6 +932,12 @@ class Dispatcher:
                              f" check the thread, `git status` and docs/STATE.md before continuing.")
             session_id = self._session_for(item, provider)
             res = self._attempt(provider, item, notes, session_id)
+            if self._cancelled(item):
+                self._post(item["reply_to"], f"⏹ Η εργασία {item['job_id']} σταμάτησε: ακυρώθηκε.")
+                self._set_status(item["msg_ids"], "done")
+                self._consume(item)
+                self._journal(f"- {time.strftime('%H:%M')} {item['reply_to']} [{provider}] {item['job_id']} cancelled")
+                return "cancelled"
             if res["ok"] and not self._paid_credit_stop(provider, res):
                 self._finish_ok(provider, item, res)
                 return "done"
@@ -834,6 +982,8 @@ class Dispatcher:
             self.lab.mark_delivered(req_ids=item["req_ids"])
         if item.get("event_ref"):
             self.dd.mark_notified("runs", item["event_ref"])
+        if item.get("esc_ids"):
+            self.work.mark_read(item["esc_ids"])
 
     def _paid_credit_stop(self, provider, res):
         return provider == "claude" and bool(res.get("paid_credit")) and self.dd.get("allow_paid_credits") != "1"
@@ -841,18 +991,18 @@ class Dispatcher:
     def _attempt(self, provider, item, notes, session_id):
         model = None
         t0 = time.time()
-        task_id = self.dd.task_start(item["kind"], item["thread_id"], item["msg_ids"] + item["req_ids"], provider,
-                                     model, session_id, bool(session_id))
+        refs = item["msg_ids"] + item["req_ids"] + ([item["job_id"]] if item.get("job_id") else [])
+        task_id = self.dd.task_start(item["kind"], item["thread_id"], refs, provider, model, session_id,
+                                     bool(session_id))
         res = self._run_provider(provider, item, notes, session_id)
-        if not res["ok"] and session_id and not res["quota"]:
+        if not res["ok"] and session_id and not res["quota"] and not self._cancelled(item):
             # a stale or broken session: retry once from the context pack
             self.dd.drop_session(item["thread_id"], provider)
             self.dd.task_end(task_id, "retry_fresh", res, time.time() - t0, res["error"])
             t0 = time.time()
-            task_id = self.dd.task_start(item["kind"], item["thread_id"], item["msg_ids"] + item["req_ids"],
-                                         provider, model, None, False)
+            task_id = self.dd.task_start(item["kind"], item["thread_id"], refs, provider, model, None, False)
             res = self._run_provider(provider, item, notes, None)
-        if not res["ok"] and res["transient"]:
+        if not res["ok"] and res["transient"] and not self._cancelled(item):
             time.sleep(float(os.environ.get("QRL_TRANSIENT_WAIT", "60")))
             res = self._run_provider(provider, item, notes, None)
         status = "done" if res["ok"] else ("quota" if res["quota"] else "failed")
@@ -885,11 +1035,15 @@ class Dispatcher:
             names = ", ".join(sorted({d.get("tool_name", "?") for d in res["denials"] if isinstance(d, dict)}))
             text += f"\n\n🔐 Μπλοκαρίστηκαν ενέργειες που χρειάζονταν άδεια ({names}). Εμφανίστηκαν στο dashboard (Sudo) για έγκριση· θα ενημερωθείς στην επόμενη εργασία."
         cost = f" · ≈${res['cost']:.2f} (εκτίμηση)" if isinstance(res.get("cost"), (int, float)) else ""
-        footer = f"\n\n— {LABEL[provider]} · {res.get('model') or ''} · {int(res.get('duration_s', 0) // 60)}′{cost}"
+        who = f" · {item['job_id']}" if lane_of(item) == "worker" and item.get("job_id") else ""
+        footer = (f"\n\n— {LABEL[provider]} · {res.get('model') or ''}{who} · {int(res.get('duration_s', 0) // 60)}′"
+                  f"{cost}")
         self._post(item["reply_to"], (text or "(χωρίς κείμενο)") + footer, kind="reply")
         if item["msg_ids"]:
             current = {m: (self.lab.message(m) or {}).get("status") for m in item["msg_ids"]}
             final = status if status != "done" else None
+            if final is None and self._active_children(item["msg_ids"]):
+                final = "in_progress"  # parallel workers are still on it; the last one closes the request
             for mid, st in current.items():
                 if final:
                     self._set_status([mid], final)
@@ -897,8 +1051,9 @@ class Dispatcher:
                     self._set_status([mid], "done")
             self.dd.undefer(item["msg_ids"])
         self._consume(item)
-        ttl = res["ttl_s"] if res["ttl_s"] else float(self.dd.get("codex_resume_window_s"))
-        self.dd.save_session(item["thread_id"], provider, res["session_id"], ttl, res["context_tokens"])
+        if lane_of(item) == "chat":
+            ttl = res["ttl_s"] if res["ttl_s"] else float(self.dd.get("codex_resume_window_s"))
+            self.dd.save_session(item["thread_id"], provider, res["session_id"], ttl, res["context_tokens"])
         first = (text or "").strip().splitlines()[0] if (text or "").strip() else ""
         self._journal(f"- {time.strftime('%H:%M')} {item['reply_to']} [{provider}/{res.get('model')}] {status}"
                       f"{cost} — {clip(first, 140)}")
@@ -922,11 +1077,18 @@ class Dispatcher:
             print(f"dispatcher: index: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
 
     def recover(self):
-        """After a crash: tasks left 'running' and their messages are retried."""
+        """After a crash: tasks left 'running' and their messages are retried; spawned jobs are queued again."""
         for t in [dict(r) for r in self.dd.conn.execute("SELECT * FROM tasks WHERE status='running'")]:
             self.dd.conn.execute("UPDATE tasks SET status='interrupted', ended=? WHERE id=?", (now_iso(), t["id"]))
             ids = [i for i in json.loads(t["refs"] or "[]") if i.startswith("M-")]
             self.dd.defer(ids)
+        for j in self.work.active():
+            if j["origin"] == "spawn" and not j["cancel"]:
+                self.dd.conn.execute("UPDATE jobs SET status='queued', started=NULL, result='interrupted' WHERE id=?",
+                                     (j["id"],))
+            elif j["status"] == "running" or j["origin"] != "spawn":
+                self.work.set_status(j["id"], "interrupted")  # its source item (message, decision...) is found again
+        self.dd.conn.execute("DELETE FROM claims")  # nothing runs at start-up: every file is free
 
     def once(self):
         self.heartbeat()
@@ -944,17 +1106,74 @@ class Dispatcher:
 
     def run_forever(self, poll=2.0):
         self.recover()
-        peer = threading.Thread(target=peer_worker, args=(self.root,), daemon=True)
-        peer.start()
+        threading.Thread(target=peer_worker, args=(self.root,), daemon=True).start()
+        threading.Thread(target=self._heartbeat_loop, daemon=True).start()
         print(f"QRL dispatcher online in {self.root}", flush=True)
+        self._busy = {}  # item key -> (lane, thread)
+        self._busy_lock = threading.Lock()
         while True:
             try:
                 self.maybe_index()
-                if self.once() is None:
-                    time.sleep(poll)
+                self.tick()
+                time.sleep(poll)
             except Exception as e:
                 print(f"dispatcher warning: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
                 time.sleep(poll * 5)
+
+    def _heartbeat_loop(self, every=5.0):
+        """The 'online' signal must not depend on runs ending: it is written by its own thread."""
+        while True:
+            self.heartbeat()
+            time.sleep(every)
+
+    def tick(self):
+        """Start what may start now: one chat run if none is running, workers up to max_workers. Never blocks."""
+        for jid in self.work.cancel_requested():
+            stop_job(jid)
+        if self.dd.get("paused") == "1":
+            return
+        with self._busy_lock:
+            for k in [k for k, (_, t) in self._busy.items() if not t.is_alive()]:
+                del self._busy[k]
+            busy = set(self._busy)
+            lanes = [lane for lane, _ in self._busy.values()]
+        if "chat" not in lanes:
+            item = self.find_work("chat", busy)
+            if item is not None and self._startable(item):
+                self._spawn_thread("chat", item)
+                busy.add(item_key(item))
+        free = max(1, int(self.dd.get("max_workers") or 1)) - lanes.count("worker")
+        while free > 0:
+            item = self.find_work("worker", busy)
+            if item is None or not self._startable(item):
+                break
+            self._spawn_thread("worker", item)
+            busy.add(item_key(item))
+            free -= 1
+
+    def _startable(self, item):
+        available, _ = self.provider_order(item)
+        if available:
+            return True
+        deferred = set(self.dd.deferred_ids())
+        if not item["msg_ids"] or all(m in deferred for m in item["msg_ids"]):
+            return False  # waiting for a reset; nothing new to say (decisions and events stay queued)
+        return True  # process() posts the "nobody available" notice once and defers the messages
+
+    def _spawn_thread(self, lane, item):
+        def run():
+            d = Dispatcher(self.root)  # own database connections: sqlite connections are not shared across threads
+            try:
+                d.process(item)
+            except Exception as e:
+                print(f"dispatcher warning ({lane} {item_key(item)}): {type(e).__name__}: {e}", file=sys.stderr,
+                      flush=True)
+            finally:
+                d.close()
+        t = threading.Thread(target=run, daemon=True, name=f"{lane}:{item_key(item)}")
+        with self._busy_lock:
+            self._busy[item_key(item)] = (lane, t)
+        t.start()
 
 
 # ---------------------------------------------------------------- peers (ask the other model)
@@ -1061,6 +1280,9 @@ def print_status(root):
     hb = os.path.join(root, ".lab", "bridge_heartbeat")
     if os.path.exists(hb):
         print(f"heartbeat: {int(time.time() - os.path.getmtime(hb))} s ago")
+    print(f"max_workers={s['max_workers']}  active jobs:")
+    for line in W.Work(dd.conn, root).summary_lines() or ["  (none)"]:
+        print("  " + line)
     for t in dd.recent_tasks(10):
         cost = f"${t['cost_usd']:.2f}" if t["cost_usd"] is not None else "-"
         print(f"  #{t['id']} {t['started']} {t['kind']} {t['provider']}/{t['model']} {t['status']} {cost}"
