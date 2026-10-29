@@ -46,8 +46,13 @@ def split_coordinator(model):
     return m[len(COORD_PREFIX):] if m.startswith(COORD_PREFIX) else model
 
 
-def coordinator_label(identity=None):
-    """Dynamic default option label showing which model the coordinator currently is (pure, from coordinator_identity)."""
+def coordinator_label(identity=None, dispatcher=None):
+    """Dynamic default option label. `dispatcher` = (provider, model, effort) from tools/coord_status.coordinator_now
+    (dispatcher settings / running task); it wins. Without it, fall back to the session-derived identity."""
+    if dispatcher:
+        from coord_status import pretty  # local import: same tools/ directory
+        prov, mdl, eff = dispatcher
+        return f"Πάρις · συντονιστής (τώρα: {pretty(prov, mdl)}" + (f" · {eff})" if eff else ")")
     identity = identity or {}
     mdl = identity.get("model") or ""
     if not mdl:
@@ -58,9 +63,9 @@ def coordinator_label(identity=None):
     return f"Πάρις · συντονιστής (τώρα: {pretty})"
 
 
-def model_choices(identity=None):
+def model_choices(identity=None, dispatcher=None):
     """MODEL_CHOICES with the dynamic default label."""
-    return {**MODEL_CHOICES, None: coordinator_label(identity)}
+    return {**MODEL_CHOICES, None: coordinator_label(identity, dispatcher)}
 
 
 def effort_choices(model):

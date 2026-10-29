@@ -64,6 +64,7 @@ import paper_plots  # noqa: E402
 import paper_build  # noqa: E402
 import exp_view  # noqa: E402
 import agent_models  # noqa: E402
+import coord_status  # noqa: E402
 import usage_limits  # noqa: E402
 import extra_credits  # noqa: E402
 import exp_figs  # noqa: E402
@@ -574,13 +575,10 @@ st.html("<style>[data-testid=stTabs] [role=tablist]{flex-wrap:wrap!important;ove
 @st.fragment(run_every=refresh)
 def sidebar_status():
     d = db()
-    age = bridge_age()
-    online = age is not None and age < 20
-    if online:
-        st.success("Συντονιστής online", icon="🟢")
-    else:
-        st.error(f"Συντονιστής offline (τελευταίο σήμα: {ago(age)} πριν). Τα μηνύματα μένουν στην ουρά "
-                 "και παραδίδονται όταν ξαναξεκινήσει.", icon="🔴")
+    _cs = coord_status.read_state(ROOT)
+    _kind, _icon, _head, _why = coord_status.classify(_cs, coord_status.service_active())
+    {"idle": st.success, "working": st.warning, "paused": st.info, "limit": st.info, "down": st.error}[_kind](
+        f"**{_head}**\n\n{_why}", icon=_icon)
     open_reqs = d.requests(state="open")
     blocking = sum(1 for r in open_reqs if r["blocking"])
     waiting_msgs = d.researcher_open()
@@ -1148,7 +1146,7 @@ with tab_chat:
             _dd = db()
             _cm = [m for t in _dd.threads(8) for m in _dd.thread(t["thread_id"])[-6:] if m["author"] == "codex"]
             _dd.close()
-            _c = (time.time(), agent_models.model_choices(agent_models.coordinator_identity(_ev, read_health(), messages=_cm)))
+            _c = (time.time(), agent_models.model_choices(agent_models.coordinator_identity(_ev, read_health(), messages=_cm), coord_status.coordinator_now(coord_status.read_state(ROOT))))
         except Exception as _e:
             st.caption(f"⚠️ μοντέλο συντονιστή: {type(_e).__name__}: {_e}")
             _c = (time.time(), agent_models.model_choices(None))
