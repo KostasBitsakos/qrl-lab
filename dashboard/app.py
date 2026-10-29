@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 import modreload  # noqa: E402
 import importlib  # noqa: E402
 _LOCAL_MODS = ["labdb", "file_view", "replytext", "k8s_view", "prom_view", "web_terminal", "sudo_ui", "race_view", "brain_view",
-               "perm_store", "ext_catalog", "summarize_runs", "agent_models", "paper_plots", "paper_build", "uploads", "installed_view", "access", "outage", "models_view", "banners", "sandbox_view", "topology_view", "topology_ui", "exp_view", "exp_figs", "usage_limits", "event_tail", "msg_structure", "notif_format", "extra_credits", "knowledge_view"]
+               "perm_store", "ext_catalog", "summarize_runs", "agent_models", "paper_plots", "paper_build", "uploads", "installed_view", "access", "outage", "models_view", "banners", "sandbox_view", "topology_view", "topology_ui", "exp_view", "exp_figs", "usage_limits", "event_tail", "msg_structure", "notif_format", "extra_credits", "knowledge_view", "tab_links"]
 for _n in _LOCAL_MODS:  # first import so they are in sys.modules, then reload those whose file changed
     importlib.import_module(_n)
 modreload.reload_changed(_LOCAL_MODS)
@@ -56,6 +56,7 @@ import res_view  # noqa: E402
 import token_savings  # noqa: E402
 import topology_ui  # noqa: E402
 import knowledge_view  # noqa: E402
+import tab_links  # noqa: E402
 import changes_view  # noqa: E402
 import models_view  # noqa: E402
 import summarize_runs  # noqa: E402
@@ -1043,6 +1044,10 @@ if _side:  # tabs in the left column, the terminal in a right-hand column
 else:
     (tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_prom, tab_grafana, tab_files, tab_paper, tab_venues,
      tab_audit, tab_sudo, tab_ext, tab_outage, tab_changes, tab_models, tab_arch, tab_term, tab_know) = st.tabs(TAB_NAMES, default=_tab_default, key="tab", bind="query-params")
+
+# right-click / middle-click on a tab -> new browser tab with ?tab=<label> (left click unchanged)
+with st.sidebar:
+    components.html(tab_links.SCRIPT, height=0)
 
 # ================================================================ conversation
 with tab_chat:
