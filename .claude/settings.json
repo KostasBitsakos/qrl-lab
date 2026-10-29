@@ -41,10 +41,11 @@
       "Bash(git -C code commit *)",
       "Bash(python3 tools/ask_peer.py *)",
       "Bash(python3 tools/build_md_index.py*)",
-      "Bash(python3 tools/dispatcher.py status)"
+      "Bash(python3 tools/dispatcher.py status)",
+      "Bash(git push github *)",
+      "Bash(git -C * push github *)"
     ],
     "ask": [
-      "Bash(git push *)",
       "Bash(git worktree *)",
       "Bash(kubectl config use-context *)",
       "Bash(sudo *)",
@@ -104,7 +105,10 @@
       "Edit(.lab/dispatch.db)",
       "Write(.lab/dispatch.db)",
       "Edit(tools/install_v03.py)",
-      "Write(tools/install_v03.py)"
+      "Write(tools/install_v03.py)",
+      "Bash(git push * --force*)",
+      "Bash(git push * -f *)",
+      "Bash(git push origin *)"
     ]
   },
   "hooks": {
