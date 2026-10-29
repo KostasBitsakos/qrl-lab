@@ -19,7 +19,17 @@ from labdb import LabError, lab_dir, lab_root
 # repo name in the sandbox block -> worktree directory (relative to the lab root)
 # (C-20261021-03: a second, parallel tuning worktree for the Codex branch; each sandbox names its repo and branch, and
 # the worktree's checked-out branch must equal the sandbox branch)
-WORKTREES = {"code": "code-tuning", "code-astra": "code-tuning-astra"}
+WORKTREES = {"code": "code-tuning", "code-astra": "code-tuning-astra",
+             "code-poisson": "code-poisson", "code-poisson-astra": "code-poisson-astra"}
+CYCLE2_BRANCHES = {"code-poisson": "dinos-poisson", "code-poisson-astra": "dinos-poisson-astra"}
+# Peeled reviewed cycle2-env-v1 commit, never a movable tag/branch.
+CYCLE2_ENV_COMMIT = "238003f58a7ae547c9ff03b05f5484ea5a1c342b"
+# Peeled reviewed cycle2-harness-v1 commit (J40, Codex APPROVE r3) and the shared harness files pinned to it.
+CYCLE2_HARNESS_COMMIT = "b609b939085ee3e07c334b94d2cd79929938df9b"
+CYCLE2_HARNESS_FILES = ("tuning/pms_adapter.py", "tuning/rppo.py", "tuning/pms_reference.py",
+                        "tuning/legacy/c5_protocol.py", "tuning/legacy/orig_variants.py",
+                        # shared evaluation helpers (greedy_fn, summarize) and the transfer source env (Codex J48 r1)
+                        "tuning/legacy/run_legacy.py", "tuning/legacy/env_orig.py")
 FORBIDDEN_WORDS = ("kubectl", "qiskit_ibm", "ibm_quantum", "ibmq", "qiskit-ibm", "helm", "kube")
 FORBIDDEN_KEYS = {"real", "qpu", "kube_context", "backend_name", "ibm"}
 # Files whose bytes on the tuning worktree must equal those on REFERENCE_BRANCH (qrl-dev) before any launch:
@@ -111,6 +121,72 @@ def verify_protected(wt, ref=REFERENCE_BRANCH, files=PROTECTED_FILES):
             bad.append(rel)
     if bad:
         raise LabError(f"Protected file(s) differ from {ref} (or are missing): {', '.join(bad)}. Nothing was started.")
+
+
+def select_worktree(sb, child):
+    """Select a branch from ONE parent. All limits remain on the parent/request id."""
+    pairs = sb.get("worktrees")
+    if pairs is None:
+        if child.get("repo", sb.get("repo")) != sb.get("repo"):
+            raise LabError("Child repo differs from the sandbox repo.")
+        selected = sb
+    else:
+        if "repo" in sb or "branch" in sb or not isinstance(pairs, list) or not pairs:
+            raise LabError("Aggregate sandbox needs worktrees only, without top-level repo/branch.")
+        check_finite(sb)
+        budget = sb.get("cpu_hours_budget")
+        if isinstance(budget, bool) or not isinstance(budget, (int, float)) or not 0 < budget <= 160:
+            raise LabError("Aggregate sandbox cpu_hours_budget must be in (0, 160].")
+        seen = set()
+        for pair in pairs:
+            if not isinstance(pair, dict) or set(pair) != {"repo", "branch"}:
+                raise LabError("Each sandbox worktree needs exactly repo and branch.")
+            repo = pair["repo"]
+            if not isinstance(repo, str) or repo in seen or repo not in CYCLE2_BRANCHES:
+                raise LabError("Unknown or duplicate aggregate worktree repo.")
+            if pair["branch"] != CYCLE2_BRANCHES[repo]:
+                raise LabError("Cycle2 worktree branch binding differs from the reviewed mapping.")
+            seen.add(repo)
+        matches = [p for p in pairs if p["repo"] == child.get("repo")]
+        if len(matches) != 1:
+            raise LabError("Child repo must select one authorized sandbox worktree.")
+        selected = dict(sb, **matches[0])
+    if selected.get("repo") in CYCLE2_BRANCHES:
+        if pairs is None:
+            raise LabError("Cycle2 requires one aggregate sandbox worktrees list.")
+        if sb.get("frozen_env_commit") != CYCLE2_ENV_COMMIT:
+            raise LabError("Cycle2 frozen_env_commit must equal the reviewed environment commit.")
+        if sb.get("frozen_harness_commit") != CYCLE2_HARNESS_COMMIT:
+            raise LabError("Cycle2 frozen_harness_commit must equal the reviewed harness commit.")
+    return selected
+
+
+def verify_sandbox_protected(sb, root=None):
+    wt = worktree_path(sb, root)
+    if sb.get("repo") in CYCLE2_BRANCHES:
+        if worktree_branch(wt) != sb["branch"]:
+            raise LabError(f"Worktree {wt} is not on branch {sb['branch']}.")
+        dirs = ("sim_v2", "experiments/dinos_simv2")
+        out = subprocess.run(["git", "-C", wt, "ls-tree", "-rz", "--name-only", CYCLE2_ENV_COMMIT,
+                              "--", *dirs], capture_output=True, timeout=30)
+        tracked = set(os.fsdecode(p) for p in out.stdout.split(b"\0") if p)
+        if out.returncode or not set(PROTECTED_FILES) <= tracked:
+            raise LabError("Protected file tree missing from reviewed environment commit.")
+        verify_protected(wt, CYCLE2_ENV_COMMIT, tuple(sorted(tracked)) + ("tuning/poisson_ms.py",))
+        verify_protected(wt, CYCLE2_HARNESS_COMMIT, CYCLE2_HARNESS_FILES)
+        # Reject extra importable sources even if gitignored. Bytecode caches are generated normally.
+        for directory in dirs:
+            for base, subdirs, names in os.walk(os.path.join(wt, directory)):
+                subdirs[:] = [d for d in subdirs if d != "__pycache__"]
+                for name in names:
+                    rel = os.path.relpath(os.path.join(base, name), wt)
+                    if name.endswith(".py") and rel not in tracked:
+                        raise LabError(f"Unreviewed protected Python source {rel}; refused.")
+        for name in ("sitecustomize.py", "usercustomize.py"):
+            if os.path.lexists(os.path.join(wt, name)):
+                raise LabError(f"Unreviewed Python startup source {name}; refused.")
+    else:
+        verify_protected(wt)
 
 
 def seed_env(sb):
@@ -275,6 +351,8 @@ def check_child(child, parent, root=None, now=None):
     sb = parent.get("sandbox")
     if parent.get("kind") != "sandbox" or not isinstance(sb, dict):
         raise LabError("The request is not a sandbox approval (spec kind != 'sandbox').")
+    if parent.get("scope") != "sim":
+        raise LabError("Sandbox parent scope must be 'sim'.")
     now = now or dt.datetime.now(dt.timezone.utc)
     if now >= parse_ts(sb["expires"]):
         raise LabError(f"The sandbox expired at {sb['expires']}.")
@@ -298,7 +376,8 @@ def check_child(child, parent, root=None, now=None):
             raise LabError(f"cpu_affinity must stay inside {sb['cpu_affinity']}.")
     check_env(child.get("env"), "child")
     check_env(child.get("env_threads"), "child")
-    cwd = resolve_cwd(child["cwd"], sb, root)
+    selected = select_worktree(sb, child)
+    cwd = resolve_cwd(child["cwd"], selected, root)
     cap = float(sb["per_run_wall_clock_hours"])
     default_h = (child.get("limits") or {}).get("wall_clock_hours", cap)
     left_h = (parse_ts(sb["expires"]) - now).total_seconds() / 3600
@@ -313,7 +392,7 @@ def check_child(child, parent, root=None, now=None):
         for tok in e["cmd"]:
             if any(w in tok.lower() for w in FORBIDDEN_WORDS):
                 raise LabError(f"Entry {i} mentions {tok!r}: kubectl/IBM/cluster commands are not allowed.")
-        check_cmd(e["cmd"], cwd, root, worktree_path(sb, root))
+        check_cmd(e["cmd"], cwd, root, worktree_path(selected, root))
         seeds = entry_seeds(e)
         for lo, hi in seeds:
             if not seed_ok(lo, hi, sb["seed_ranges_allowed"], sb["seed_ranges_forbidden"]):
@@ -338,7 +417,7 @@ def sandbox_dir(root=None):
     return os.path.join(lab_dir(root), "sandbox")
 
 
-def used_cpu_hours(db, rid, now=None):
+def used_cpu_hours(db, rid, now=None, strict=False):
     """Actual CPU-hours of finished runs + reserved worst case of runs still starting/running (parent rid)."""
     total = 0.0
     for r in db.runs(limit=100000):
@@ -348,12 +427,23 @@ def used_cpu_hours(db, rid, now=None):
             with open(os.path.join(r["run_dir"], "spec_entry.json"), encoding="utf-8") as f:
                 sbm = json.load(f).get("sandbox") or {}
         except (OSError, ValueError):
+            if strict:
+                raise LabError(f"Missing or invalid sandbox accounting for {r['run_id']}; refused.")
             sbm = {}
         cpus, reserved = sbm.get("cpus", 1), sbm.get("reserve_cpu_h", 0.0)
+        if strict and (not isinstance(cpus, int) or isinstance(cpus, bool) or cpus < 1 or
+                       isinstance(reserved, bool) or not isinstance(reserved, (int, float)) or
+                       not math.isfinite(reserved) or reserved <= 0):
+            raise LabError(f"Invalid sandbox accounting for {r['run_id']}; refused.")
         if r["status"] in ("starting", "running"):
             total += reserved
         elif r["started"] and r["ended"]:
-            total += (parse_ts(r["ended"]) - parse_ts(r["started"])).total_seconds() / 3600 * cpus
+            elapsed = (parse_ts(r["ended"]) - parse_ts(r["started"])).total_seconds() / 3600 * cpus
+            if strict and elapsed < 0:
+                raise LabError(f"Negative sandbox accounting for {r['run_id']}; refused.")
+            total += elapsed
+        elif strict:
+            total += reserved  # failed before timestamps: do not silently refund unknown usage
     return total
 
 

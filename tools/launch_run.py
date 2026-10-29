@@ -122,6 +122,8 @@ def load_approved_spec(db, rid):
 
 def start_entry(db, rid, entry):
     r, spec = load_approved_spec(db, rid)
+    if spec.get("kind") == "sandbox":
+        raise LabError("Sandbox approvals require sandbox-start with a verified child spec.")
     if entry < 0 or entry >= len(spec["entries"]):
         raise LabError(f"Entry {entry} does not exist (spec has {len(spec['entries'])}).")
     if spec["scope"] == "real":
@@ -176,8 +178,9 @@ def start_sandbox(db, rid, child):
     r, parent = load_sandbox(db, rid)
     sb = parent["sandbox"]
     cwd, plan = G.check_child(child, parent)
+    selected = G.select_worktree(sb, child)
     root = lab_root()
-    G.verify_protected(G.worktree_path(sb, root))
+    G.verify_sandbox_protected(selected, root)
     avail = os.sched_getaffinity(0) if hasattr(os, "sched_getaffinity") else set()
     pool = sorted(set(parse_cpus(child.get("cpu_affinity") or sb["cpu_affinity"])) & set(avail))
     seeds_env = G.seed_env(sb)
@@ -193,7 +196,7 @@ def start_sandbox(db, rid, child):
             raise LabError(f"{active} running + {len(plan)} new > max_parallel {sb['max_parallel']}. Nothing was started.")
         busy = sandbox_busy_cores(c)
         cores = G.assign_cores(pool, busy, [p["cpus"] for p in plan])
-        used = G.used_cpu_hours(db, rid)
+        used = G.used_cpu_hours(db, rid, strict="worktrees" in sb)
         if used + need > float(sb["cpu_hours_budget"]):
             raise LabError(f"Budget: {used:.2f} used + {need:.2f} worst case > {sb['cpu_hours_budget']} CPU-h. "
                            "Nothing was started.")
@@ -216,7 +219,7 @@ def start_sandbox(db, rid, child):
                            "real": None, "cpu_affinity": child.get("cpu_affinity") or sb["cpu_affinity"], "env_threads": dict(env_threads, **G.check_env(e.get("env_threads"), "entry")),
                            "code_sha": sha, "cwd": cwd,
                            "sandbox": {"cpus": p["cpus"], "reserve_cpu_h": p["reserve_cpu_h"], "seeds": p["seeds"],
-                                       "branch": sb["branch"], "cores": pcores, "seed_env": seeds_env,
+                                       "repo": selected["repo"], "branch": selected["branch"], "cores": pcores, "seed_env": seeds_env,
                                        "expires": sb["expires"], "request_id": rid}}, f, indent=2, ensure_ascii=False)
             G.log_ledger(rid, {"ts": now(), "run_id": run_id, "name": child["name"], "seeds": p["seeds"],
                                "reserve_cpu_h": p["reserve_cpu_h"], "cpus": p["cpus"], "cores": pcores,
@@ -246,11 +249,11 @@ def sandbox_status(db, rid):
     import sandbox_guard as G
     _, parent = load_sandbox(db, rid)
     sb = parent["sandbox"]
-    used = G.used_cpu_hours(db, rid)
+    used = G.used_cpu_hours(db, rid, strict="worktrees" in sb)
     budget = float(sb["cpu_hours_budget"])
     exp = G.parse_ts(sb["expires"])
     left_h = (exp - dt.datetime.now(dt.timezone.utc)).total_seconds() / 3600
-    return {"request": rid, "branch": sb["branch"], "cpu_hours_used": round(used, 3),
+    return {"request": rid, "branch": sb.get("branch") or ",".join(p["branch"] for p in sb["worktrees"]), "cpu_hours_used": round(used, 3),
             "cpu_hours_left": round(budget - used, 3), "budget": budget,
             "running": G.active_runs(db, rid), "max_parallel": sb["max_parallel"],
             "expires": sb["expires"], "expired": left_h <= 0, "hours_to_expiry": round(left_h, 2)}
@@ -284,10 +287,17 @@ def supervise(run_id):
         log.write(f"[launcher] cpu affinity {cores[0]}-{cores[-1]} ({len(cores)} cores), threads={upd.get('OMP_NUM_THREADS')}\n".encode())
     t0 = time.time()
     try:
+        if sbm and sbm.get("repo") in ("code-poisson", "code-poisson-astra"):
+            import sandbox_guard as G
+            _, parent = load_sandbox(db, meta["request_id"])
+            selected = G.select_worktree(parent["sandbox"], {"repo": sbm["repo"]})
+            G.verify_sandbox_protected(selected)
+            if time.time() >= parse_ts_epoch(parent["sandbox"]["expires"]):
+                raise LabError("Sandbox expired before process spawn.")
         proc = subprocess.Popen(json.loads(run["cmd"]), cwd=run["cwd"], env=env, stdout=log,
                                 stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True,
                                 preexec_fn=(lambda: os.sched_setaffinity(0, cores)) if cores else None)
-    except (OSError, subprocess.SubprocessError) as e:
+    except (OSError, subprocess.SubprocessError, LabError) as e:
         with db.tx() as c:
             c.execute("UPDATE runs SET status='failed', ended=?, exit_code=-1 WHERE run_id=?", (now(), run_id))
         log.write(f"\n[launcher] could not start: {e}\n".encode())
