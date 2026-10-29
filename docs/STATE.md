@@ -4,7 +4,7 @@
      (M-/R-/run id, path, URL). Update it at the end of every task that changed something. Older detail goes to
      docs/DECISIONS.md, docs/journal/ or a topic file listed in docs/INDEX.md. -->
 
-Last update: 2026-10-29 · by: Codex (C57) · task: J51 commit escalation (M-20261029-030); pre-cleanup copy:
+Last update: 2026-10-29 · by: Claude (J64) · task: concrete review + filed R-20261029-006; pre-cleanup copy:
 `docs/archive/STATE_2026-10-29_before_cleanup.md`
 
 ## 1. Goal now
@@ -19,13 +19,21 @@ Last update: 2026-10-29 · by: Codex (C57) · task: J51 commit escalation (M-202
   file the sandbox request when runs start. Plan: `docs/cycle2_plan.md`, expert pack `docs/expert/` (J12, d6cfa11).
 
 ## 2. In progress (what · id · owner · next check)
-- J53 DONE: Claude wrapper cc83534 (dinos-poisson) + manifests `.lab/cycle2-claude/` (Codex r2 APPROVE) → J51; pin wrapper. No runs.
-- C56 / J51 handoff: Codex smoke/screen configs + launcher-compatible wrapper validated without training
-  (35 CLI commands; `.lab/cycle2-codex/{contract.md,validation.out,handoff-j51.md}`). Launcher gate ecca33d passed.
-  Claude review hit usage limit (04:58 UTC); J53 agreement pending. ONE aggregate request NOT filed; no runs. Next coordinator: reconcile J53 artifacts, obtain independent concrete review including
-  aggregate draft, finalize expiry, check pending duplicates, then file one approval; never submit current DRAFT
-  (`.lab/cycle2-codex/handoff-j51.md`). C57 queued J58: scoped worktree commits; root index read-only per J51.
-  Wrappers uncommitted; J51/J53 notified; brief `.lab/c57/worktree-commit.md`.
+- J64 DONE 29/10: Claude review M-20261029-110 (guard + work.py --worktree APPROVE; schedule AGREE, cond. A: val
+  selection → claims only from test12 after freeze; B: smoke-first is policy, not launcher-enforced); Codex final
+  M-20261029-111 APPROVE. Commits 7d55754 (root), 182af33 (astra wrapper). **Filed R-20261029-006** (sandbox 160 CPU-h,
+  expires 05/11 05:10 UTC, spec `.lab/j64/final.json`, hash 1764ff9b…4052). Next on approval: ONLY 14 smoke via
+  `launch_run.py sandbox-start` with branch smoke.json children; then cost gate. Root .git writable in Claude runs.
+- C62 → J60: prepare smoke-only package; downstream execution gated on cost, full arm coverage and peer review.
+  Original HPA requires adapter (not HPA-demand); paper-model mapping UNKNOWN, asked R-20261029-005
+  (`docs/cycle2_plan.md` §3; `.lab/j60/reconciliation.md`). No final coverage/feasibility claim.
+- J60 handoff: both actual manifests embedded in `.lab/j60/aggregate.json` (REVIEW CANDIDATE, NOT filed), exact
+  duplicated incumbent schedule and timing/reference limits in `reconciliation.md`; digest list `review-sha256.txt`.
+  Separate wrapper SHA256 guard diff + mutation/supervisor tests:27 pass; CLI35/branch, real trees/audit pass;
+  J58 tooling tests13 pass. Claude concrete review FAILED usage limit until05:06, no verdict (`review.answer.txt`).
+  Guard/workflow unapproved/uncommitted; Codex wrapper uncommitted, Claude cc83534 verified identical. Next owner
+  coordinator: `.lab/j60/handoff.md`, obtain concrete review, scoped commits without Git bypass, renew filing-time
+  expiry, duplicate check then ONE request. No runs. Original-HPA adapter required; paper mapping R-20261029-005.
 - J40 DONE 30/10: shared harness tag `cycle2-harness-v1` = b609b93 (code-poisson; dinos-poisson-astra ff to it), Codex
   APPROVE r3 key cycle2-harness. pms:<v> via c5 (`--env-family orig --orig-variant pms:poisson_ms`), native RecurrentPPO
   DRe-SCale `python -m tuning.rppo` (sb3_contrib not installable headless), references `python -m tuning.pms_reference`;
@@ -35,13 +43,8 @@ Last update: 2026-10-29 · by: Codex (C57) · task: J51 commit escalation (M-202
   Codex key cycle2-launcher-j48 r1 CHANGE → r2 APPROVE. Parent spec needs `worktrees`, `frozen_env_commit` 238003f,
   `frozen_harness_commit` b609b93 (7 harness files pinned; `docs/cycle2_launcher.md`). 19 focused + legacy test_sandbox
   pass; real worktrees verified. Handoff `.lab/cycle2-launcher/handoff.md`. Next: J51 files ONE aggregate request.
-- C44 (M-20261029-066): researcher applied the ceiling change; `dispatcher.py status` verified `max_workers=16`.
-  C43 automatic-approval obstacle resolved by researcher action (R-20261029-004). J40/J41 remain queued
-  (`work.py status`); schedule useful independent work by dependencies, resources and budget (M-20261029-055/058).
-- C38: J24 finished shared env `cycle2-env-v1` = 238003f, Codex APPROVE r3; worktree
-  `code-poisson-astra` exists (`.lab/cycle2-claude/status.md`). J40 (Claude) queued: shared harness + adapted
-  DRe-SCale; J41 (Codex) queued: launcher protection + shared budget ledger + ONE frozen sandbox request.
-  Briefs `.lab/c38/{harness,launcher}.md`; both notified to coordinate interfaces. No runs authorized by this handoff.
+- C44: researcher set `max_workers=16` (M-20261029-066, R-20261029-004); resource/dependency-aware scheduling
+  requested (M-20261029-055/058). C38 shared env/harness briefs: `.lab/c38/{harness,launcher}.md`.
 - 29/10 J24 (claude): cycle-2 shared env FROZEN, tag `cycle2-env-v1` = 238003f (dinos-poisson, worktree code-poisson;
   `tuning/poisson_ms.py`, 10 tests; Codex APPROVE r3, key cycle2-env). Worktree code-poisson-astra created for Codex.
   Still to do before any run: harness adapter, DRe-SCale arm (sb3_contrib missing), sandbox_guard for the new
@@ -61,15 +64,11 @@ Last update: 2026-10-29 · by: Codex (C57) · task: J51 commit escalation (M-202
   NOT done (headless permission denied `git push`). Exact approved refs: export-main 901fe54→main, cycle1-claude
   afc4ea7, cycle1-codex ad283e4 (log-free snapshots of dinos-tuning 5eae972 / -astra 16d9bf4; worktree `export/`).
   Push = `git push github 901fe54:refs/heads/main afc4ea7:refs/heads/cycle1-claude ad283e4:refs/heads/cycle1-codex`.
-- J18 (claude): md cleanup (this update); J19 (claude): Experiments-tab UX + cycle-1 report. J10/J11 (codex) FAILED:
-  «gpt-5.1-codex-max not supported with ChatGPT account» (M-20261029-019/020) — Codex peer calls fail until the model
-  in `~/.codex/config.toml` or `peer_codex_model` is changed by the researcher (M-20261029-025).
 - R-20261029-003 approved: `.claude/settings.json` now allows `git push github …` headless; force/-f/origin denied (da5d4e5, J33). Joint Claude+Codex review before push still required (AGENTS.md).
 - Nothing is running (`python3 tools/launch_run.py list`); all sandboxes expired (latest R-20261023-001, 120.6/160 CPU-h).
 
 ## 3. Waiting for the researcher
-- Codex model fix (above) — blocks every Codex review, incl. the push review and the cycle-2 plan review
-  (`docs/expert/codex_brief_cycle2.md`, M-20261029-025).
+- R-20261029-005: identify «paper model» in desired ordering; preparation continues, full comparison freeze gated.
 - M-20261029-009: (a) results-retention policy (keep per-seed JSON + result md + best ckpt; audit that every
   test10/11 number traces to a file) — awaiting OK. Worker-count clarification resolved by M-20261029-055 (§2).
 - `labq.py pending` on 28/10: 25 open messages, oldest M-20261016-043; waiting_approval: M-20261020-019,
