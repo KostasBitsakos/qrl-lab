@@ -17,7 +17,6 @@ Last update: 2026-10-30 · by: claude (J40) · task: md cleanup (M-20261029-017)
   latency/CPU/mem, Claude and Codex on separate branches, full autonomy, deadline 2/11, daily report. Wanted ordering:
   V.2 > LSTM+transfer > Dinos > LSTM > paper model > DERP > HPA. Budget 160 CPU-h sandbox, 7 days (R-20261029-001);
   file the sandbox request when runs start. Plan: `docs/cycle2_plan.md`, expert pack `docs/expert/` (J12, d6cfa11).
-- Order (C9): GitHub push → md cleanup → cycle-2 implementation.
 
 ## 2. In progress (what · id · owner · next check)
 - J40 DONE 30/10: shared harness tag `cycle2-harness-v1` = b609b93 (code-poisson; dinos-poisson-astra ff to it), Codex
