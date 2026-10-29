@@ -4,7 +4,7 @@
      (M-/R-/run id, path, URL). Update it at the end of every task that changed something. Older detail goes to
      docs/DECISIONS.md, docs/journal/ or a topic file listed in docs/INDEX.md. -->
 
-Last update: 2026-10-29 · by: Claude (J88) · task: R-20261029-008 tags for GitHub releases
+Last update: 2026-10-29 · by: Claude (J90) · task: duplicate end-notice R-20261021-007 s16-s80; STATE condensed
 
 ## 1. Goal now
 - PhD paper: hybrid quantum–classical extension of the DInos autoscaler; simulation first, then real cluster;
@@ -27,16 +27,9 @@ Last update: 2026-10-29 · by: Claude (J88) · task: R-20261029-008 tags for Git
   M-20261029-111 APPROVE. Commits 7d55754 (root), 182af33 (astra wrapper). **Filed R-20261029-006** (sandbox 160 CPU-h,
   expires 05/11 05:10 UTC, spec `.lab/j64/final.json`, hash 1764ff9b…4052). Next on approval: ONLY 14 smoke via
   `launch_run.py sandbox-start` with branch smoke.json children; then cost gate. Root .git writable in Claude runs.
-- C62 → J60: prepare smoke-only package; downstream execution gated on cost, full arm coverage and peer review.
-  Original HPA requires adapter (not HPA-demand); paper model = adapted DRe-SCale (R-20261029-005 answered, J66)
-  (`docs/cycle2_plan.md` §3; `.lab/j60/reconciliation.md`). No final coverage/feasibility claim.
-- J60 handoff: both actual manifests embedded in `.lab/j60/aggregate.json` (REVIEW CANDIDATE, NOT filed), exact
-  duplicated incumbent schedule and timing/reference limits in `reconciliation.md`; digest list `review-sha256.txt`.
-  Separate wrapper SHA256 guard diff + mutation/supervisor tests:27 pass; CLI35/branch, real trees/audit pass;
-  J58 tooling tests13 pass. Claude concrete review FAILED usage limit until05:06, no verdict (`review.answer.txt`).
-  Guard/workflow unapproved/uncommitted; Codex wrapper uncommitted, Claude cc83534 verified identical. Next owner
-  coordinator: `.lab/j60/handoff.md`, obtain concrete review, scoped commits without Git bypass, renew filing-time
-  expiry, duplicate check then ONE request. No runs. Original-HPA adapter required; paper model = DRe-SCale (R-20261029-005).
+- C62/J60 (superseded by J64 filing R-20261029-006): smoke-only package, review digests and handoff in `.lab/j60/`
+  (`aggregate.json`, `reconciliation.md`, `handoff.md`). Original HPA needs an adapter (not HPA-demand); paper model =
+  adapted DRe-SCale (R-20261029-005, J66).
 - J40 DONE 30/10: shared harness tag `cycle2-harness-v1` = b609b93 (code-poisson; dinos-poisson-astra ff to it), Codex
   APPROVE r3 key cycle2-harness. pms:<v> via c5 (`--env-family orig --orig-variant pms:poisson_ms`), native RecurrentPPO
   DRe-SCale `python -m tuning.rppo` (sb3_contrib not installable headless), references `python -m tuning.pms_reference`;
@@ -110,7 +103,8 @@ Last update: 2026-10-29 · by: Claude (J88) · task: R-20261029-008 tags for Git
   DERP, `derp_hist10` = enhanced DERP; each model tested at its best val checkpoint. Always write «Dinos+Transfer V.2», never bare «V.2» (M-20261029-121).
 - Real cluster: 1 Redis pod ≈116-118k ops/s at c=1, no saturation; stage-B sweep failed at 1→2 pods (fix 84367e1,
   never re-run); calibration paused → `.lab/outbox/calib-status.md`, `stageB-rerun-ask.md`, `docs/rules/paused.md`.
-- Every batch with status and pointers: `docs/EXPERIMENTS.md` (1532 launcher runs, 23 requests).
+- Every batch with status and pointers: `docs/EXPERIMENTS.md` (1532 launcher runs, 23 requests). R-20261021-007
+  end-notices are stale cycle-1 duplicates (J83, J90: all exit 0 with JSON) — just acknowledge.
 - Dashboard (28-29/10): R-20261028-002 items dd26185..1bfe9cc; right-click tab fix 88d4465 + headless approval
   retry 6563e65 verified live (M-20261029-003); sidebar coordinator state 02ad310; cycle-1 report a61e337
   (`tools/cycle1_report.py`). CLAUDE.md/AGENTS.md slimmed 28/10 (M-20261028-004; text in `docs/rules/interactive.md`); connectors off for this project (`.claude/settings.local.json`, M-20261028-006).
