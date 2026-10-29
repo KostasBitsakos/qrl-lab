@@ -34,3 +34,7 @@ Approvals, launcher and seeds policy: see AGENTS.md «Rules» and PLAN §6, §8.
   branches/repos, one Claude (`<topic>`) and one Codex (`<topic>-astra`). Periodically (at least at every daily report) each side
   lists the changes that helped, with evidence (run ids, val numbers), and offers them to the other; adoption is each side's
   choice and logged. Final comparison under the same frozen protocol. (2026-10-29, M-20261029-028)
+- GitHub publishing (2026-10-29, M-20261029-050): after each cycle, the code Claude and Codex agree on (joint review of both competing
+  branches) is pushed by the Claude side directly to `main` of remote `github` (fast-forward, never --force), with
+  results/LESSONS updated. Competing working branches stay local; no new side branches are pushed, so no PR/«Compare &
+  pull request» step is needed by the researcher.

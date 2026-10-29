@@ -74,3 +74,5 @@ to him first; large → Releases/LFS), LESSONS.md. AGENTS.md:10 and `docs/rules/
   review after (docs/rules/handoff.md 5); (2) every experiment cycle runs on competing Claude/Codex branches with periodic
   exchange of helpful changes (docs/rules/experiments.md); (3) coordinator picks the best model per task across vendors by
   quality/speed/cost and usage left (docs/rules/models.md).
+- (2026-10-29, M-20261029-050) Agreed post-competition code goes straight to `github` main (no side branches, no PRs); rule in
+  docs/rules/experiments.md. Push permission in .claude/settings.json applied (R-20261029-003).
