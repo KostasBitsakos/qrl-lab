@@ -4,7 +4,7 @@
      (M-/R-/run id, path, URL). Update it at the end of every task that changed something. Older detail goes to
      docs/DECISIONS.md, docs/journal/ or a topic file listed in docs/INDEX.md. -->
 
-Last update: 2026-10-30 · by: claude (J40) · task: md cleanup (M-20261029-017); pre-cleanup copy:
+Last update: 2026-10-29 · by: claude (J48) · task: md cleanup (M-20261029-017); pre-cleanup copy:
 `docs/archive/STATE_2026-10-29_before_cleanup.md`
 
 ## 1. Goal now
@@ -19,18 +19,19 @@ Last update: 2026-10-30 · by: claude (J40) · task: md cleanup (M-20261029-017)
   file the sandbox request when runs start. Plan: `docs/cycle2_plan.md`, expert pack `docs/expert/` (J12, d6cfa11).
 
 ## 2. In progress (what · id · owner · next check)
+- C50: J40 reports reviewed `cycle2-harness-v1` = b609b93 on both Poisson branches (Codex APPROVE r3;
+  `.lab/cycle2-claude/status.md`). J51 (Codex, queued) owns competing-branch configs and ONE concrete aggregate
+  sandbox request after J48 launcher review/commit; brief `.lab/c50/codex-continuation.md`. J40/J48 notified;
+  reviewed harness protection and measured-cost gate required. No runs authorized by this handoff.
 - J40 DONE 30/10: shared harness tag `cycle2-harness-v1` = b609b93 (code-poisson; dinos-poisson-astra ff to it), Codex
   APPROVE r3 key cycle2-harness. pms:<v> via c5 (`--env-family orig --orig-variant pms:poisson_ms`), native RecurrentPPO
   DRe-SCale `python -m tuning.rppo` (sb3_contrib not installable headless), references `python -m tuning.pms_reference`;
   splits val 13000-13019 / test12 14000-14019 (locked). CLI, costs, limitations: `.lab/cycle2-claude/status.md` (J40).
   Next: J41 files ONE sandbox request; re-spawn Codex branch job. No runs.
-- C49: J41 handoff verified; J48 (Claude, queued) owns final independent launcher review + scoped commit if writable.
-  J40 notified to supply reviewed harness tag/CLI/seven-arm manifest; then ONE frozen aggregate request, no runs
-  before approval (`.lab/cycle2-launcher/handoff.md`; `work.py say J48/J40`, C49).
-- J41: aggregate cycle2 launcher guard implemented; 12 focused tests + legacy sandbox regression pass (cores 4-7).
-  Guard rechecks full frozen trees/branch before spawn; `docs/cycle2_launcher.md`, `.lab/cycle2-launcher/handoff.md`.
-  UNCOMMITTED (.git read-only); Claude r1 CHANGE fixed, r2 blocked by usage until 03:29; final review needed.
-  No approval request/runs: J40 reviewed harness CLI/tag/manifest required; next worker files ONE aggregate request.
+- J48 DONE 29/10: cycle2 launcher COMMITTED ecca33d (J41 guard + J48 harness pin): Claude APPROVE (M-20261029-087),
+  Codex key cycle2-launcher-j48 r1 CHANGE → r2 APPROVE. Parent spec needs `worktrees`, `frozen_env_commit` 238003f,
+  `frozen_harness_commit` b609b93 (7 harness files pinned; `docs/cycle2_launcher.md`). 19 focused + legacy test_sandbox
+  pass; real worktrees verified. Handoff `.lab/cycle2-launcher/handoff.md`. Next: J51 files ONE aggregate request.
 - C44 (M-20261029-066): researcher applied the ceiling change; `dispatcher.py status` verified `max_workers=16`.
   C43 automatic-approval obstacle resolved by researcher action (R-20261029-004). J40/J41 remain queued
   (`work.py status`); schedule useful independent work by dependencies, resources and budget (M-20261029-055/058).
@@ -42,9 +43,6 @@ Last update: 2026-10-30 · by: claude (J40) · task: md cleanup (M-20261029-017)
   `tuning/poisson_ms.py`, 10 tests; Codex APPROVE r3, key cycle2-env). Worktree code-poisson-astra created for Codex.
   Still to do before any run: harness adapter, DRe-SCale arm (sb3_contrib missing), sandbox_guard for the new
   worktrees, ONE sandbox request → `.lab/cycle2-claude/status.md`. No runs (M-20261029-057).
-- C37 scheduling clarification: use as many workers as useful for assigned tasks, respecting dependencies,
-  CPU/budget and model routing; no repeated worker-count question (M-20261029-055). `dispatcher.py status`
-  verified `max_workers=4`; J24 notified to signal shared-env readiness for the Codex branch.
 - C29: J25 (Codex) prep done (.lab/cycle2-codex/preparation.md, GATES.md); J25 ends. RE-SPAWN a Codex branch job
   (brief /tmp/c9/b6.md or .lab/cycle2-codex/preparation.md) after J40 reviewed shared harness readiness.
 - J25 Codex preparation (M-20261029-030): `.lab/cycle2-codex/preparation.md`, review checklist and gates;
