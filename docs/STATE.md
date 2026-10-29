@@ -67,7 +67,7 @@ Last update: 2026-10-29 · by: Claude (C163) · task: sidebar + debounce spec
 ## 3. Waiting for the researcher
 - R-20261029-010 APPROVED 15:20UTC (screen only)· ενεργοποιήθηκε· σε εξέλιξη (§2 J126).
 - R-20261029-011 APPROVED+DONE (J162): restart 19:42:14 UTC, PID 1677827 (ήταν 758554)· AppTest 49/52 + reruns PASS, μόνο προϋπάρχον coordinator-label FAIL· live: κύκλος2 πριν κύκλο1, DRe-SCale ορατό, 0 exceptions, λογότυπο πάνω από κάρτα tokens (`.lab/j162/{live.json,apptest*.log,desktop.png}`).
-- R-20261029-012 (C161, M-286 «leak tokens»): αιτία = αφυπνίσεις Opus από `work.py say coordinator` χωρίς debounce (15 σε 34', `tools/dispatcher.py:772-782`) + resumed context ως 120k· πρόταση debounce/resume 40k/κανόνας workers/max_workers 4/restart (`.lab/c161-ask.md`). M-288: sidebar λογότυπο πρώτο + κάρτα tokens (5e7daa2)· debounce/resume40k ανατέθηκαν στο J157· restart dispatcher/max_workers περιμένουν R-012.
+- R-20261029-012 APPROVED (Πρόταση 2: (1)+(3)+(5)). J165: (1) debounce αφυπνίσεων από workers, max 1/20' (`escalation_debounce_s`=1200), άμεσα μόνο `work.py say --urgent`/job που έληξε· (3) κανόνας workers στο `prompts/coordinator.md`· commit f1a1e8c, 33 tests PASS (`.lab/j165/tests.log`). (5) restart `qrl-dispatcher` ΔΕΝ έγινε: system unit, χωρίς headless έγκριση, και σκοτώνει τρέχοντα jobs· να γίνει όταν είναι idle (ενεργοποιεί και F1/J143).
 - R-20261029-005 ANSWERED 29/10 (J66): «paper model» = adapted DRe-SCale LSTM-PPO (arm `tuning.rppo`); criterion
   reviewer weight, then ease of replication; told him DRe-SCale is IEEE TSC 2024 (Gwydion is the 2025 one) — he may correct.
 - M-20261029-009: (a) results-retention policy (keep per-seed JSON + result md + best ckpt; audit that every
