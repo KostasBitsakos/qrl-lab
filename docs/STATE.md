@@ -66,9 +66,7 @@ Last update: 2026-10-29 · by: Claude (J66) · task: R-20261029-005 answered (pa
   afc4ea7, cycle1-codex ad283e4 (log-free snapshots of dinos-tuning 5eae972 / -astra 16d9bf4; worktree `export/`).
   Push = `git push github 901fe54:refs/heads/main afc4ea7:refs/heads/cycle1-claude ad283e4:refs/heads/cycle1-codex`.
 - R-20261029-003 approved: `.claude/settings.json` now allows `git push github …` headless; force/-f/origin denied (da5d4e5, J33). Joint Claude+Codex review before push still required (AGENTS.md).
-
-- J71 29/10: Γνώση tab = mobile zoomable thematic tree (`tools/knowledge_tree.py`, `knowledge_view.tree_data`, 11 themes;
-  tap/pinch/search, ?tab=Αρχεία&path= link; c. HEAD J71). Codex r1/r2 CHANGE fixed (`.lab/j71/`); iPhone check pending.
+- J71 29/10: Γνώση = mobile zoomable thematic tree (`tools/knowledge_tree.py`); Codex r1/r2 fixed (`.lab/j71/`).
 
 ## 3. Waiting for the researcher
 - R-20261029-005 ANSWERED 29/10 (J66): «paper model» = adapted DRe-SCale LSTM-PPO (arm `tuning.rppo`); criterion
