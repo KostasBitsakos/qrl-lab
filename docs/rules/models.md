@@ -3,7 +3,7 @@ description: Active rules for model routing, Codex roles and model/effort table,
 ---
 # Models and agents — active rules
 
-Routing defaults and the Codex call procedure: see CLAUDE.md «Routing» and «Codex»; researcher overrides in
+Routing defaults and the Codex call procedure: see docs/rules/interactive.md «Routing» and «Codex» (moved from CLAUDE.md 2026-10-28); researcher overrides in
 `docs/agent_routing.json` win (CLAUDE.md).
 
 - Every task uses the cheapest model that does it well. (2026-10-16, R-20261016-016)
@@ -28,3 +28,8 @@ Routing defaults and the Codex call procedure: see CLAUDE.md «Routing» and «C
 - When Codex is limited, Codex roles fall back to Claude agents (reviewer → Claude Sonnet); full mapping in CLAUDE.md. (2026-10-17, M-20261017-005/006/007)
 - Opus engineer scope (2026-10-21, researcher, clarifies M-20261020-013/027): `model: opus` is only for the tuning-loop experiment implementation (the main objective). Everything else — dashboard, tools, docs — goes to the cheapest adequate agent, Claude (Haiku/Sonnet) or Codex (luna/sol, implementation mode), chosen after a short Claude-Codex discussion. Weekly Claude usage is the binding constraint: prefer Codex for implementation when it is adequate.
 - Fallback for the most important scope (2026-10-21, researcher): experiments, models, their coordination, architecture/implementation discussion and numbers get the best models; if Claude Opus runs short of usage, engineering for this scope goes to Codex `gpt-6-astra` (high) — whichever is better and has enough resources. All other tasks: be frugal until the experiments end.
+- Per-task model choice across vendors (2026-10-29, M-20261029-028): for every new task the coordinator picks the best model from Claude
+  (Haiku/Sonnet/Opus/Fable) or Codex (gpt-6-luna/6-sol/6.1-sol/6-astra) by quality for the task, speed and cost; when one
+  vendor is near or at its usage limit (dispatcher `limits` table, journal) it routes to the other. `work.py spawn --to`
+  selects the vendor; the dispatcher's failover re-runs on the other on a limit. Codex CLI default model must be one the
+  ChatGPT account supports (29/10: `gpt-5.1-codex-max` in ~/.codex/config.toml failed; gpt-6-sol and gpt-6.1-sol tested OK).

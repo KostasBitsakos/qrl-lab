@@ -70,3 +70,7 @@ deploy key `~/.config/qrl-deploy/id_ed25519`, private key never read/printed), o
 review, never `--force`, never secrets/logs/`.lab/usage`/kube/IBM files. First upload is curated: code of
 dinos-tuning + dinos-tuning-astra, frozen specs, test10/11 result md + per-seed JSON, best checkpoints only (size told
 to him first; large → Releases/LFS), LESSONS.md. AGENTS.md:10 and `docs/rules/security.md:3` updated. Text: `labq.py request R-20261029-002`.
+- (2026-10-29, M-20261029-028) Standing: (1) Codex coordinates with the same rules/information when Claude is limited, keeps solo notes, joint
+  review after (docs/rules/handoff.md 5); (2) every experiment cycle runs on competing Claude/Codex branches with periodic
+  exchange of helpful changes (docs/rules/experiments.md); (3) coordinator picks the best model per task across vendors by
+  quality/speed/cost and usage left (docs/rules/models.md).

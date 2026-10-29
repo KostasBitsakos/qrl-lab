@@ -1,6 +1,6 @@
 # Experiments — active rules
 
-Approvals, launcher and seeds policy: see CLAUDE.md golden rule 5, AGENTS.md and PLAN §6, §8. Paused items
+Approvals, launcher and seeds policy: see AGENTS.md «Rules» and PLAN §6, §8. Paused items
 (quantum, IBM, real-cluster calibration, stage-B SLO): see paused.md.
 
 ## Priority and workloads
@@ -30,3 +30,7 @@ Approvals, launcher and seeds policy: see CLAUDE.md golden rule 5, AGENTS.md and
 - Sandbox runs go through a one-time "sandbox" approval in launch_run (branch, scope sim, seed ranges, CPU-hour budget). (2026-10-17, M-20261017-137)
 - Absolute numbers of the old simulator (F1) are not a target; the target is the same qualitative ranking and curves. (2026-10-17, M-20261017-137) **Resolved (2026-10-20, M-20261020-025): C5: closeness % is a progress indicator for the researcher, not a paper result**
 - After every tuning cycle report one closeness % to the paper sim picture (`code-tuning/tuning/closeness.py`: mean of DERP magnitude, DInos magnitude and DInos/DERP ratio vs 2.2e5 / 3.8e6 / 17.3x, log scale, 5-episode sums), with a sanity note (failed requests, latency) flagging degenerate policies; then start the next cycle immediately. (2026-10-19, M-20261019-029) **Resolved (2026-10-20, M-20261020-025): C5: closeness % is a progress indicator for the researcher, not a paper result**
+- Standing (replaces «only for the tuning loop», 21/10): every experiment cycle of the PhD work runs on two competing
+  branches/repos, one Claude (`<topic>`) and one Codex (`<topic>-astra`). Periodically (at least at every daily report) each side
+  lists the changes that helped, with evidence (run ids, val numbers), and offers them to the other; adoption is each side's
+  choice and logged. Final comparison under the same frozen protocol. (2026-10-29, M-20261029-028)

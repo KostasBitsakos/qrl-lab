@@ -15,3 +15,6 @@ limit and cannot work until its reset.
    did and verified; they agree what to keep in the original branches (merge all, some, or none); then they delete the single-purpose
    branches (and their worktrees) created during the solo period.
 The deputy request (tools/deputy.py BODY) states these rules; the sleeping side hands off before stopping (queue + handoff note).
+5. Same rules for both: when Codex coordinates it works under exactly the same rules and information as Claude
+   (AGENTS.md, prompts/coordinator.md, docs/STATE.md, docs/rules/*, docs/DECISIONS.md, skills in .claude/skills) and in every
+   role Claude takes. Every solo action goes to the notes of rule 2; on Claude's return both review them and agree what stays. (2026-10-29, M-20261029-028)
