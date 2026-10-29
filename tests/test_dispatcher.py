@@ -18,6 +18,7 @@ import tempfile
 import threading
 import time
 import traceback
+from unittest.mock import patch
 
 KIT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 TMP = tempfile.mkdtemp(prefix="qrl-v03-test-")
@@ -183,7 +184,8 @@ def test_claude_reply_and_resume():
     assert c["env_coord"] == "claude"
     assert "G-42" in p and "## docs/STATE.md" in p and mid in p and p.startswith("[QRL-Lab task")
     bodies = thread_bodies(db, mid)
-    assert bodies[-1].startswith("Όλα καλά.") and "— Claude · opus" in bodies[-1] and "STATUS:" not in bodies[-1]
+    assert bodies[-1].startswith("Κώστα,\n\nΌλα καλά.") and "— Claude · opus" in bodies[-1] and "STATUS:" not in bodies[-1]
+    assert bodies[-1].count("— Πάρις") == 1
     assert db.message(mid)["status"] == "done"
     t = d.dd.recent_tasks(1)[0]
     assert t["status"] == "done" and abs(t["cost_usd"] - 0.42) < 1e-9 and t["provider"] == "claude"
@@ -222,7 +224,7 @@ def test_failover_on_quota():
     assert st["state"] == "exhausted" and 7000 < st["until_ts"] - time.time() < 7300  # resetsAt from the event
     bodies = thread_bodies(db, mid)
     assert any("⚠️ Ο Claude έφτασε το όριο" in b and "Αναλαμβάνει ο Codex" in b for b in bodies)
-    assert bodies[-1].startswith("Ανάλυση από Codex.") and "— Codex" in bodies[-1]
+    assert bodies[-1].startswith("Κώστα,\n\nΑνάλυση από Codex.") and "— Codex" in bodies[-1]
     assert db.message(mid)["status"] == "done"
     assert d.dd.session(mid, "codex")["session_id"] == "th-9"
     # while Claude is exhausted, new work goes straight to Codex
@@ -293,7 +295,8 @@ def test_paid_credits_guard():
     queue("claude", {"mode": "paid", "text": "Απάντηση (με credits)"})
     assert d.once() == "done"
     bodies = thread_bodies(db, mid)
-    assert bodies[-2].startswith("Απάντηση (με credits)") and bodies[-1].startswith("ℹ️") and "Codex" in bodies[-1]
+    assert bodies[-2].startswith("Κώστα,\n\nΑπάντηση (με credits)") and bodies[-1].startswith("Κώστα,\n\nℹ️") and "Codex" in bodies[-1]
+    assert "όχι γνωστό reset" in bodies[-1] and bodies[-1].count("— Πάρις") == 1
     assert d.dd.provider("claude")["state"] == "exhausted"
     d.dd.clear("claude")
     d.dd.set("allow_paid_credits", "1")
@@ -303,9 +306,9 @@ def test_paid_credits_guard():
     # without rate-limit events the error text alone still triggers failover (older CLI versions)
     d.dd.set("allow_paid_credits", "0")
     m3 = db.researcher_send("Τρίτη")
-    queue("claude", {"mode": "quota", "no_limits": True, "text": "You've hit your weekly limit · resets Oct 29, 9am (UTC)"})
+    queue("claude", {"mode": "quota", "no_limits": True, "text": "You've hit your weekly limit. Try again in 2 hours 5 minutes."})
     queue("codex", {"mode": "ok", "text": "από Codex"})
-    assert d.once() == "done" and thread_bodies(db, m3)[-1].startswith("από Codex")
+    assert d.once() == "done" and thread_bodies(db, m3)[-1].startswith("Κώστα,\n\nαπό Codex")
     assert d.dd.provider("claude")["until_ts"] - time.time() > 3600
     ok("paid credits (isUsingOverage) -> later work goes to Codex unless allowed; text-only limit errors detected")
 
@@ -340,7 +343,7 @@ def test_decisions_and_run_events():
     p = prompt_of(calls("claude")[-1])
     assert "new-1" in p and "old-1" not in p and "have ended" in p
     assert d.once() is None
-    assert thread_bodies(db, root)[-1].startswith("Τα αποτελέσματα")
+    assert thread_bodies(db, root)[-1].startswith("Κώστα,\n\nΤα αποτελέσματα")
     ok("decisions and finished experiment batches wake the coordinator once each (no LLM polling)")
 
 
@@ -642,7 +645,7 @@ def test_parallel_lanes():
     t0 = time.time()
     d.tick()
     assert time.time() - t0 < 2, "tick must not block on running work"
-    wait_until(lambda: any(b.startswith("Δουλεύει στο section 2.") for b in thread_bodies(db, root)), what="chat reply")
+    wait_until(lambda: any(b.startswith("Κώστα,\n\nΔουλεύει στο section 2.") for b in thread_bodies(db, root)), what="chat reply")
     assert any(j["lane"] == "worker" and j["status"] == "running" and j["origin"] == "decision"
                for j in d.work.active()), "the worker should still be running while the chat answered"
     chat_prompt = next(prompt_of(c) for c in calls("claude") if "Τι κάνει τώρα" in prompt_of(c))
@@ -660,7 +663,7 @@ def test_parallel_lanes():
     fig = next(c for c in calls("claude") if "Figure 3" in prompt_of(c) and "parallel worker" in prompt_of(c))
     assert "--resume" not in fig["argv"], "workers never resume the thread's session"
     bodies = thread_bodies(db, root)
-    fig_reply = next(b for b in bodies if b.startswith("Figure 3 έτοιμο."))
+    fig_reply = next(b for b in bodies if b.startswith("Κώστα,\n\nFigure 3 έτοιμο."))
     assert "CONFLICT" in fig_reply and "J" in fig_reply.split("—")[-1], "the conflict is reported; footer names the job"
     assert db.message(m2)["status"] == "done", "the last parallel job closes the researcher's request"
     ok("two lanes: chat answers while workers run; spawned jobs; claims visible, released; request closed by last job")
@@ -709,7 +712,145 @@ def test_max_workers_cancel_heartbeat():
     assert item["job_id"] == j and "interrupted" in item["text"]
     ok("max_workers cap, cancel stops the run, heartbeat thread, restart re-queues spawned jobs")
 
-TESTS = [test_claude_reply_and_resume, test_failover_on_quota, test_both_exhausted_then_resume,
+
+def test_run_events_full_request_set():
+    d = fresh_dispatcher()
+    # This window fixture must own its run set, independent of earlier test batches.
+    d.lab.close()
+    d.lab = LabDB(os.path.join(LAB, ".lab", f"rolling-{time.time_ns()}.db"))
+    d.dd.conn.execute("INSERT OR REPLACE INTO settings(key,value) VALUES ('events_initialized','1')")
+    rid = "R-rolling-regression"
+
+    def add(ident, request, created, status="done"):
+        d.lab.conn.execute(
+            "INSERT INTO runs(run_id,request_id,spec_hash,entry,attempt,scope,cmd,cwd,run_dir,status,created)"
+            " VALUES (?,?, 'h',0,1,'sim','[]','.','fixture',?,?)", (ident, request, status, created))
+
+    def events():
+        return [x for x in d._candidates() if x.get("event_ref", "").startswith(rid + ":")]
+
+    add("rolling-a", rid, "0000", "running")
+    add("rolling-b", rid, "0001")
+    for n in range(499):
+        add(f"rolling-noise-{n}", "R-noise", f"1000-{n:04}")
+    assert "rolling-a" not in {r["run_id"] for r in d.lab.runs(limit=500)}
+    assert not events(), "active run outside the window still blocks completion"
+    d.lab.conn.execute("UPDATE runs SET status='done' WHERE run_id='rolling-a'")
+    found = events()
+    assert len(found) == 1, (d.dd.get("events_initialized"),
+        [dict(r) for r in d.dd.conn.execute("SELECT * FROM notified")],
+        [dict(r) for r in d.lab.conn.execute("SELECT run_id,status FROM runs WHERE request_id=?", (rid,))])
+    first, = found
+    assert first["event_ref"] == rid + ":rolling-a,rolling-b"
+    d._consume(first)
+    assert not events(), "identical set dedups"
+    add("rolling-new-noise", "R-noise", "2000")
+    assert not events(), "eviction of rolling-b must not change the batch identity"
+    add("rolling-c", rid, "3000", "running")
+    assert not events()
+    d.lab.conn.execute("UPDATE runs SET status='done' WHERE run_id='rolling-c'")
+    second, = events()
+    assert second["event_ref"] == rid + ":rolling-a,rolling-b,rolling-c"
+    d._consume(second)
+    assert not events()
+    # Legacy truncated refs backfill only genuinely old sets, never new waves.
+    legacy_rid = "R-legacy-regression"
+    add("legacy-a", legacy_rid, "2020-01-01T00:00:00+00:00")
+    add("legacy-b", legacy_rid, "2020-01-02T00:00:00+00:00")
+    d.dd.mark_notified("runs", legacy_rid + ":legacy-b")
+    assert not [x for x in d._candidates() if x.get("event_ref", "").startswith(legacy_rid + ":")]
+    assert d.dd.is_notified("runs", legacy_rid + ":legacy-a,legacy-b")
+    add("legacy-c", legacy_rid, D.now_iso())
+    fresh = [x for x in d._candidates() if x.get("event_ref", "").startswith(legacy_rid + ":")]
+    assert len(fresh) == 1 and fresh[0]["event_ref"].endswith("legacy-a,legacy-b,legacy-c")
+    # Same-second creation is ambiguous: deliver rather than suppress a new wave.
+    d._consume(fresh[0])
+    add("legacy-d", legacy_rid, D.now_iso())
+    assert len([x for x in d._candidates() if x.get("event_ref", "").startswith(legacy_rid + ":")]) == 1
+    ok("F1 rolling window and legacy refs dedup; active old runs and genuine new waves preserved")
+
+
+def test_retry_attempt_accounting_and_resume_policy():
+    d = fresh_dispatcher()
+    item = {"kind": "message", "thread_id": "retry-fixture", "msg_ids": [], "req_ids": []}
+    first = dict(D._empty_result(), transient=True, error="temporary", model="first-model",
+                 usage={"input": 17, "output": 2, "cached": 3, "cache_write": 4}, cost=0.1)
+    second = dict(D._empty_result(), ok=True, model="second-model",
+                  usage={"input": 23, "output": 5, "cached": 6, "cache_write": 7}, cost=0.2)
+    with patch.object(d, "_run_provider", side_effect=[first, second]) as run:
+        result = d._attempt("codex", item, [], None)
+    rows = [dict(r) for r in d.dd.conn.execute("SELECT * FROM tasks ORDER BY id")]
+    assert result["ok"] and run.call_count == 2
+    assert [r["status"] for r in rows] == ["retry_transient", "done"]
+    assert sum(r["input_tokens"] for r in rows) == 40
+    assert sum(r["output_tokens"] for r in rows) == 7
+    assert sum(r["cached_tokens"] for r in rows) == 9
+    assert sum(r["cache_write_tokens"] for r in rows) == 11
+    assert abs(sum(r["cost_usd"] for r in rows) - 0.3) < 1e-9
+    assert [r["model"] for r in rows] == ["first-model", "second-model"]
+    assert all(r["ended"] and not r["resumed"] for r in rows)
+    # Unknown, quota, and transient resumed failures must never replay fresh.
+    for failed in (dict(D._empty_result(), error="sandbox failed"),
+                   dict(first), dict(D._empty_result(), quota=True, error="limit")):
+        with patch.object(d, "_run_provider", return_value=failed) as run:
+            assert not d._attempt("codex", item, [], "old-session")["ok"]
+            assert run.call_count == 1
+    rejected = dict(D._empty_result(), error="session id old not found", resume_rejected=True)
+    with patch.object(d, "_run_provider", side_effect=[rejected, second]) as run:
+        assert d._attempt("codex", item, [], "old-session")["ok"]
+        assert [c.args[-1] for c in run.call_args_list] == ["old-session", None]
+    rows = [dict(r) for r in d.dd.conn.execute("SELECT * FROM tasks ORDER BY id")]
+    assert [r["status"] for r in rows[-2:]] == ["retry_fresh", "done"]
+    assert [r["resumed"] for r in rows[-2:]] == [1, 0]
+    ok("F2 every attempt preserves usage/cost (17+23=40); F3 only rejected resume replays")
+
+
+def test_resume_rejection_before_work_only():
+    for provider in ("claude", "codex"):
+        run = D.run_claude if provider == "claude" else D.run_codex
+        error = "No conversation found with session ID: old" if provider == "claude" else "thread id old not found"
+        event = {"type": "assistant"} if provider == "claude" else {"type": "turn.started"}
+        kwargs = {"session_id": "old"}
+        args = ("fixture", LAB, "fake", "medium")
+        for started in (False, True):
+            stdout = json.dumps(event) + "\n" if started else ""
+            proc = subprocess.CompletedProcess([], 1, stdout=stdout, stderr=error)
+            with patch.object(D, "_exec", return_value=proc):
+                result = run(*args, **kwargs)
+            assert result.get("resume_rejected") is (not started), (provider, result)
+        proc = subprocess.CompletedProcess([], 1, stdout="", stderr="sandbox failed")
+        with patch.object(D, "_exec", return_value=proc):
+            assert not run(*args, **kwargs).get("resume_rejected")
+    assert not D._resume_rejected("session id old not found", True)
+    assert not D._resume_rejected("your session has expired", False)
+    assert not D._resume_rejected("invalid session cookie", False)
+    assert D._event_time("invalid") is None
+    assert D._event_time(None) is None
+    assert D._event_time("2020-01-01T00:00:00") is None
+    ok("F3 provider parsers distinguish explicit pre-work resume rejection from started/unknown failures")
+
+
+def test_peer_context_and_ttl_limits():
+    d = fresh_dispatcher()
+    d.dd.set("resume_max_tokens", "1000")
+    d.dd.set("codex_resume_window_s", "900")
+    for provider in ("claude", "codex"):
+        key = "peer-limit-" + provider
+        for context, age, expected in ((1000, 0, "warm"), (1001, 0, None), (1000, 901, None)):
+            d.dd.save_session("peer:" + key, provider, "warm", 900, context)
+            d.dd.conn.execute("UPDATE sessions SET last_used=? WHERE thread_id=? AND provider=?",
+                              (time.time() - age, "peer:" + key, provider))
+            pid = d.dd.peer_submit(provider, "fixture", key=key)
+            req = d.dd.peer_claim()
+            assert req["id"] == pid
+            result = dict(D._empty_result(), ok=True, session_id="next", context_tokens=1)
+            with patch.object(D, "run_" + provider, return_value=result) as run:
+                D._serve_peer(LAB, req, d.dd)
+            assert run.call_args.kwargs["session_id"] == expected
+    ok("F4 peer resumes obey the context ceiling and provider TTL, including boundary")
+
+TESTS = [test_run_events_full_request_set, test_retry_attempt_accounting_and_resume_policy,
+         test_resume_rejection_before_work_only, test_peer_context_and_ttl_limits, test_claude_reply_and_resume, test_failover_on_quota, test_both_exhausted_then_resume,
          test_choice_mention_status_and_errors, test_paid_credits_guard, test_decisions_and_run_events, test_peers,
          test_md_index, test_parse_reset, test_panel_and_installer, test_edit_freeze, test_headless_permission_roundtrip,
          test_work_board, test_parallel_lanes, test_max_workers_cancel_heartbeat]

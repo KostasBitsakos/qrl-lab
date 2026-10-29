@@ -2,8 +2,9 @@
 """Usage-limit state of Claude and Codex from LOCAL logs only (sidebar rings, M-20261021-016). Never estimates.
 
 Sources (read-only; credential files are never opened):
-  claude  PRIMARY (M-20261021-021): .lab/usage/claude.json, written by tools/claude_statusline.py from the official
-          statusLine stdin (rate_limits.five_hour / seven_day: used_percentage, resets_at). Fallback below.
+  claude  statusLine snapshot (M-20261021-021): .lab/usage/claude.json, written by tools/claude_statusline.py from the official
+          statusLine stdin (rate_limits.five_hour / seven_day: used_percentage, resets_at).
+          Merge per window with newer .lab/dispatch.db limits; show observation time and stale snapshots.
   codex   ~/.codex/sessions/**/rollout-*.jsonl, records {"type": "event_msg", "payload": {"type": "token_count",
           "rate_limits": {"primary"|"secondary": {used_percent, window_minutes, resets_at}, "plan_type"}}} written by
           the Codex CLI after each turn. The latest record gives used % per window AS OF its timestamp.
@@ -15,10 +16,12 @@ Entry: {provider, window, used_percent, window_minutes, resets_at, source, as_of
 already past is reported as reset (value no longer known), not as 0 %.
 """
 import datetime as dt
+from contextlib import closing
 import glob
 import json
 import math
 import os
+import sqlite3
 import time
 
 HOME = os.path.expanduser("~")
@@ -204,38 +207,106 @@ CLAUDE_STATUS = os.path.join(ROOT, ".lab", "usage", "claude.json")   # written b
 AMBER, RED = "#f59e0b", "#dc2626"
 
 
+def load_dispatcher_usage(path=None):
+    """Read only Claude usage/provider state; never create or migrate the dispatcher DB."""
+    path = path or os.environ.get("QRL_DISPATCH_DB") or os.path.join(ROOT, ".lab", "dispatch.db")
+    try:
+        with closing(sqlite3.connect("file:" + os.path.abspath(path) + "?mode=ro", uri=True, timeout=1)) as db:
+            db.row_factory = sqlite3.Row
+            limits = [dict(r) for r in db.execute("SELECT * FROM limits WHERE provider='claude'")]
+            row = db.execute("SELECT * FROM providers WHERE name='claude'").fetchone()
+            return {"limits": limits, "provider": dict(row) if row else {}}
+    except sqlite3.Error:
+        return {}
+
+
 def load_claude_status(path=None):
-    """Official Claude source (statusLine stdin, saved by tools/claude_statusline.py); None if missing/malformed."""
+    """Load statusLine snapshot plus local dispatcher events (default path only)."""
+    explicit = path is not None
     path = path or os.environ.get("QRL_CLAUDE_USAGE_FILE") or CLAUDE_STATUS
     try:
         with open(path, encoding="utf-8") as f:
             d = json.load(f)
     except (OSError, ValueError):
-        return None
-    return d if isinstance(d, dict) else None
+        d = None
+    d = d if isinstance(d, dict) else None
+    if not explicit:
+        events = load_dispatcher_usage()
+        if events:
+            d = dict(d or {}, _dispatcher=events)
+    return d
 
 
 def _win(label, pct, resets_at, now, source=""):
-    """One window for the popover: pct None (shown «—») when its resets_at has passed (value no longer known)."""
+    """A past reset makes the percentage unknown, never zero."""
     stale = resets_at is not None and resets_at <= now
     return {"label": label, "pct": None if stale else pct, "resets_at": resets_at, "stale": stale, "source": source}
 
 
+def _measurement_time(value):
+    return float(value) if isinstance(value, (int, float)) else _ts(value)
+
+
 def claude_windows(status, rejection, now):
-    """Claude windows: statusLine file first (five_hour, seven_day); else an active log rejection (100 %); else []."""
+    """Merge per window by observation time. Old snapshots describe history, not availability.
+
+    One hour is a UI freshness policy, not a provider/API guarantee. A newer event in
+    another window also invalidates older availability claims until refreshed.
+    """
+    status = status if isinstance(status, dict) else {}
+    events = status.get("_dispatcher") or {}
+    candidates = {}
+    observed = _measurement_time(status.get("as_of"))
+    for key in ("five_hour", "seven_day"):
+        w = status.get(key)
+        if isinstance(w, dict) and isinstance(w.get("used_percentage"), (int, float)):
+            candidates[key] = dict(pct=float(w["used_percentage"]),
+                                   reset=_measurement_time(w.get("resets_at")), as_of=observed, source="statusline")
+    rows = list(events.get("limits") or [])
+    if rejection:
+        rows.append(dict(window=rejection.get("slot") or {"5h": "five_hour", "7d": "seven_day"}.get(rejection.get("window")),
+                         status="rejected", utilization=1.0, resets_at=rejection.get("resets_at"),
+                         updated_at=rejection.get("as_of"), source="log"))
+    for row in rows:
+        key = row.get("window")
+        if key not in ("five_hour", "seven_day"):
+            continue
+        ts = _measurement_time(row.get("updated_at"))
+        previous = candidates.get(key)
+        if previous and (previous["as_of"] or 0) > (ts or 0):
+            continue
+        util = row.get("utilization")
+        pct = float(util) * 100 if isinstance(util, (int, float)) else None
+        candidates[key] = dict(pct=pct, reset=_measurement_time(row.get("resets_at")),
+                               as_of=ts, source=row.get("source", "dispatcher"),
+                               rejected=row.get("status") == "rejected", overage=bool(row.get("overage")))
+    newest = max((w["as_of"] or 0 for w in candidates.values()), default=0)
     out = []
-    if isinstance(status, dict):
-        for key in ("five_hour", "seven_day"):
-            w = status.get(key)
-            if isinstance(w, dict) and isinstance(w.get("used_percentage"), (int, float)):
-                r = w.get("resets_at")
-                out.append(_win(LABELS[key], float(w["used_percentage"]),
-                                float(r) if isinstance(r, (int, float)) else None, now, "statusline"))
-    if out:
-        return out
-    if rejection and rejection.get("resets_at") and rejection["resets_at"] > now:
-        return [_win(LABELS.get(rejection["window"], rejection["window"]), 100.0, rejection["resets_at"], now, "log")]
-    return []
+    for key in ("five_hour", "seven_day"):
+        if key not in candidates:
+            continue
+        c = candidates[key]
+        w = _win(LABELS[key], c["pct"], c["reset"], now, c["source"])
+        ts = c["as_of"]
+        details = [f"μέτρηση {_utc(ts)}" if ts else "χρόνος μέτρησης άγνωστος", c["source"]]
+        # An active rejection remains binding until its recorded reset, even after an hour.
+        binding = c.get("rejected") and c["reset"] is not None and c["reset"] > now
+        if not w["stale"] and not binding and (ts is None or now - ts > 3600 or ts < newest):
+            w["pct"] = None
+            details.append(f"παλιά ένδειξη {c['pct']:.0f}%" if c["pct"] is not None else "ποσοστό άγνωστο")
+            details.append("τρέχουσα χρήση άγνωστη")
+        if c.get("rejected"):
+            details.append("καταγράφηκε απόρριψη λόγω ορίου")
+        if c.get("overage"):
+            details.append("αναφέρθηκε χρήση πληρωμένων credits")
+        w["details"] = " · ".join(details)
+        out.append(w)
+    p = events.get("provider") or {}
+    if p.get("state") == "exhausted" and (p.get("until_ts") or 0) > now and "paid credits" in (p.get("note") or ""):
+        out.append(dict(label="Εναλλαγή", pct=None, resets_at=None, stale=False, source="dispatcher",
+                        notice="Προσωρινή εναλλαγή λόγω πληρωμένων credits μέχρι " + _utc(p["until_ts"]) +
+                               " · χρόνος επανελέγχου, όχι γνωστό reset ορίου"))
+    return out
 
 
 def codex_windows(entries, now):
@@ -259,12 +330,15 @@ def left_text(resets_at, now, step=None):
 def win_line(w, now, step=None):
     """Popover text of one window: «<P>% χρησιμοποιημένο · reset σε <Hω Mλ>», or «—» + RESET_TIP after a reset.
     With step: «reset σε ≤Hω Mλ (dd/mm HH:MM UTC)» (countdown rounded up to step seconds, plus the exact reset time)."""
+    if w.get("notice"):
+        return w["notice"]
+    details = (" · " + w["details"]) if w.get("details") else ""
     if w["pct"] is None:
-        return "— · " + RESET_TIP
+        return "— · " + (RESET_TIP if w.get("stale") else "τρέχουσα χρήση άγνωστη") + details
     line = f"{w['pct']:.0f}% χρησιμοποιημένο · reset σε {left_text(w['resets_at'], now, step)}"
     if step and w.get("resets_at") is not None:
         line += f" ({_utc(w['resets_at'])})"
-    return line
+    return line + details
 
 
 def headline(wins):
@@ -288,7 +362,7 @@ RING_CSS = ("<style>.qrl-ring{position:relative;display:inline-block}"
             "padding:6px 8px;border-radius:8px;font-size:.72rem;line-height:1.35;background:var(--background-color,#fff);"
             "color:inherit;border:1px solid rgba(137,135,129,.45);box-shadow:0 4px 14px rgba(0,0,0,.18)}"
             ".qrl-pop b{display:block;font-size:.7rem;opacity:.75;margin-bottom:2px}"
-            ".qrl-pop div{white-space:nowrap}</style>")
+            ".qrl-pop div{white-space:normal;overflow-wrap:anywhere}</style>")
 
 
 def ring_html(name, wins, color, now, empty_tip=NO_SOURCE, step=None):
@@ -304,7 +378,7 @@ def ring_html(name, wins, color, now, empty_tip=NO_SOURCE, step=None):
     arc = (f'<circle cx="14" cy="14" r="{r}" fill="none" stroke="{col}" stroke-width="3" stroke-linecap="round" '
            f'stroke-dasharray="{c * frac:.2f} {c:.2f}" transform="rotate(-90 14 14)"/>') if pct else ""
     if wins:
-        lines = "".join(f'<div title="{html.escape(RESET_TIP) if w["pct"] is None else ""}">'
+        lines = "".join(f'<div title="{html.escape(win_line(w, now, step))}">'
                         f'{html.escape(w["label"])}: {html.escape(win_line(w, now, step))}</div>' for w in wins)
         tip = " | ".join(f'{w["label"]}: {win_line(w, now, step)}' for w in wins)
     else:

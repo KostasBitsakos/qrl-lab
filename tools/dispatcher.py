@@ -55,6 +55,7 @@ sys.path.insert(0, TOOLS)
 from labdb import LabDB, LabError  # noqa: E402
 import perm_store  # noqa: E402
 import work as W  # noqa: E402
+from researcher_text import researcher_text  # noqa: E402
 
 PROVIDERS = ("claude", "codex")
 OTHER = {"claude": "codex", "codex": "claude"}
@@ -430,6 +431,26 @@ def _empty_result():
             "paid_credit": None, "model": None, "limits": []}
 
 
+def _resume_rejected(error, started):
+    """Allow a fresh attempt only for explicit session lookup/validation failures.
+
+    Unknown errors and failures after any observed work are deliberately not replayed.
+    """
+    return not started and bool(re.search(
+        r"(?:no conversation found with session id|"
+        r"(?:session|thread) id[^\n]{0,100}(?:not found|does not exist|invalid|expired)|"
+        r"(?:invalid|expired) (?:session|thread) id)", error, re.I))
+
+
+def _event_time(value):
+    """Strict timestamp for legacy-event reconciliation; unknown never means now."""
+    try:
+        stamp = dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return stamp.timestamp() if stamp.tzinfo is not None else None
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 _PROCS = {}  # job id -> running provider process (so a cancel can stop it)
 _PROCS_LOCK = threading.Lock()
 
@@ -493,7 +514,7 @@ def run_claude(prompt, cwd, model, effort=None, session_id=None, system_append=N
     except OSError as e:
         res.update(error=f"cannot start claude: {e}")
         return res
-    data, limits = None, []
+    data, limits, started = None, [], False
     for line in (p.stdout or "").splitlines():
         line = line.strip()
         if not line.startswith("{"):
@@ -502,6 +523,8 @@ def run_claude(prompt, cwd, model, effort=None, session_id=None, system_append=N
             ev = json.loads(line)
         except ValueError:
             continue
+        if ev.get("type") in ("assistant", "user", "tool_use", "tool_result"):
+            started = True
         if ev.get("type") == "rate_limit_event" and isinstance(ev.get("rate_limit_info"), dict):
             limits.append(ev["rate_limit_info"])
         elif ev.get("type") == "result" or ("result" in ev and "session_id" in ev):
@@ -513,6 +536,7 @@ def run_claude(prompt, cwd, model, effort=None, session_id=None, system_append=N
         res["error"] = clip((p.stderr or p.stdout or f"exit {p.returncode}"), 800)
         res["quota"] = bool(QUOTA_RE.search(res["error"]))
         res["transient"] = not res["quota"] and bool(TRANSIENT_RE.search(res["error"]))
+        res["resume_rejected"] = bool(session_id) and _resume_rejected(res["error"], started)
         return res
     text = data.get("result") or ""
     usage = data.get("usage") or {}
@@ -532,6 +556,8 @@ def run_claude(prompt, cwd, model, effort=None, session_id=None, system_append=N
         rejected = [li for li in limits if li.get("status") == "rejected"]
         res["quota"] = bool(rejected) or bool(QUOTA_RE.search(res["error"]))
         res["transient"] = not res["quota"] and bool(TRANSIENT_RE.search(res["error"]))
+        res["resume_rejected"] = bool(session_id) and _resume_rejected(
+            res["error"], started or any(v for v in res["usage"].values()))
         if res["quota"]:
             resets = [_epoch(li.get("resetsAt")) for li in rejected if li.get("resetsAt")]
             res["reset_until"] = max(resets) if resets else parse_reset(res["error"])
@@ -581,12 +607,15 @@ def run_codex(prompt, cwd, model=None, effort=None, session_id=None, sandbox="wo
         res["error"] = f"cannot start codex: {e}"
         return res
     thread_id, errors, failed_msg, usage, last_agent = None, [], None, {}, ""
+    started = False
     for line in (p.stdout or "").splitlines():
         try:
             ev = json.loads(line)
         except ValueError:
             continue
         t = ev.get("type")
+        if t == "turn.started" or (t or "").startswith("item."):
+            started = True
         if t == "thread.started":
             thread_id = ev.get("thread_id")
         elif t == "turn.completed":
@@ -620,6 +649,8 @@ def run_codex(prompt, cwd, model=None, effort=None, session_id=None, sandbox="wo
                             p.stderr or f"exit {p.returncode}", 800)
         res["quota"] = bool(QUOTA_RE.search(res["error"]))
         res["transient"] = not res["quota"] and bool(TRANSIENT_RE.search(res["error"]))
+        res["resume_rejected"] = bool(session_id) and _resume_rejected(
+            res["error"], started or bool(usage) or bool(text))
         if res["quota"]:
             res["reset_until"] = parse_reset(res["error"])
     else:
@@ -772,12 +803,30 @@ class Dispatcher:
         groups = {}
         for run in self.lab.runs(limit=500):
             groups.setdefault(run["request_id"], []).append(run)
+        # The recent window discovers candidates, never the identity/completeness of a batch.
+        # Otherwise each evicted old run changes event_ref and wakes the coordinator again.
+        for rid in groups:
+            groups[rid] = [dict(r) for r in self.lab.conn.execute(
+                "SELECT * FROM runs WHERE request_id=?", (rid,))]
         initialized = self.dd.get("events_initialized") == "1"
         for rid, runs in sorted(groups.items(), key=lambda kv: max(r["created"] for r in kv[1])):
             if any(r["status"] in ("starting", "running") for r in runs):
                 continue
             ref = rid + ":" + ",".join(sorted(r["run_id"] for r in runs))
             if self.dd.is_notified("runs", ref):
+                continue
+            # Repair legacy rolling-window refs only when all current runs predate
+            # a recorded notice. A subset alone cannot distinguish a genuine new wave.
+            prefix = rid + ":"
+            run_ids = {r["run_id"] for r in runs}
+            created = [_event_time(r["created"]) for r in runs]
+            legacy = self.dd.conn.execute(
+                "SELECT ref,ts FROM notified WHERE kind='runs' AND substr(ref,1,?)=?",
+                (len(prefix), prefix))
+            if all(created) and any(
+                    set(n["ref"][len(prefix):].split(",")).issubset(run_ids)
+                    and max(created) < (_event_time(n["ts"]) or 0) for n in legacy):
+                self.dd.mark_notified("runs", ref)
                 continue
             if not initialized:
                 self.dd.mark_notified("runs", ref)
@@ -818,7 +867,7 @@ class Dispatcher:
 
     def _post(self, reply_to, body, kind="status", author="coordinator"):
         try:
-            self.lab.post(author, body, reply_to, kind=kind)
+            self.lab.post(author, researcher_text(body), reply_to, kind=kind)
         except LabError as e:
             print(f"dispatcher: cannot post to {reply_to}: {e}", file=sys.stderr, flush=True)
 
@@ -947,8 +996,10 @@ class Dispatcher:
                 self.dd.mark_exhausted(provider, until, "paid credits in use (allow_paid_credits=0)")
                 self._finish_ok(provider, item, res)
                 self._post(item["reply_to"], f"ℹ️ Ο {LABEL[provider]} απάντησε με πληρωμένα credits. Οι επόμενες "
-                                             f"εργασίες πάνε στον {LABEL[OTHER[provider]]} ως {fmt_ts(until)} "
-                                             f"(αλλάζει στο πάνελ «Συντονιστής»).")
+                                             f"εργασίες πάνε στον {LABEL[OTHER[provider]]} ως "
+                                             f"{dt.datetime.fromtimestamp(until, dt.timezone.utc):%d/%m %H:%M} "
+                                             f"UTC (προσωρινή παύση μίας ώρας, όχι γνωστό reset ορίου· "
+                                             f"η επιλογή συντονιστή δεν άλλαξε).")
                 return "done"
             if res["quota"]:
                 until = res["reset_until"] or time.time() + 3600
@@ -995,15 +1046,24 @@ class Dispatcher:
         task_id = self.dd.task_start(item["kind"], item["thread_id"], refs, provider, model, session_id,
                                      bool(session_id))
         res = self._run_provider(provider, item, notes, session_id)
-        if not res["ok"] and session_id and not res["quota"] and not self._cancelled(item):
-            # a stale or broken session: retry once from the context pack
+        if (not res["ok"] and session_id and res.get("resume_rejected")
+                and not res["quota"] and not self._cancelled(item)):
+            # Explicit pre-work resume rejection: retry once from the context pack.
             self.dd.drop_session(item["thread_id"], provider)
+            self.dd.conn.execute("UPDATE tasks SET model=? WHERE id=?", (res.get("model"), task_id))
             self.dd.task_end(task_id, "retry_fresh", res, time.time() - t0, res["error"])
+            self.dd.save_limits(provider, res.get("limits"))
             t0 = time.time()
             task_id = self.dd.task_start(item["kind"], item["thread_id"], refs, provider, model, None, False)
+            session_id = None
             res = self._run_provider(provider, item, notes, None)
-        if not res["ok"] and res["transient"] and not self._cancelled(item):
+        if not res["ok"] and res["transient"] and not session_id and not self._cancelled(item):
+            self.dd.conn.execute("UPDATE tasks SET model=? WHERE id=?", (res.get("model"), task_id))
+            self.dd.task_end(task_id, "retry_transient", res, time.time() - t0, res["error"])
+            self.dd.save_limits(provider, res.get("limits"))
             time.sleep(float(os.environ.get("QRL_TRANSIENT_WAIT", "60")))
+            t0 = time.time()
+            task_id = self.dd.task_start(item["kind"], item["thread_id"], refs, provider, model, None, False)
             res = self._run_provider(provider, item, notes, None)
         status = "done" if res["ok"] else ("quota" if res["quota"] else "failed")
         self.dd.conn.execute("UPDATE tasks SET model=? WHERE id=?", (res.get("model"), task_id))
@@ -1038,7 +1098,7 @@ class Dispatcher:
         who = f" · {item['job_id']}" if lane_of(item) == "worker" and item.get("job_id") else ""
         footer = (f"\n\n— {LABEL[provider]} · {res.get('model') or ''}{who} · {int(res.get('duration_s', 0) // 60)}′"
                   f"{cost}")
-        self._post(item["reply_to"], (text or "(χωρίς κείμενο)") + footer, kind="reply")
+        self._post(item["reply_to"], researcher_text(text or "(χωρίς κείμενο)", provider) + footer, kind="reply")
         if item["msg_ids"]:
             current = {m: (self.lab.message(m) or {}).get("status") for m in item["msg_ids"]}
             final = status if status != "done" else None
@@ -1188,7 +1248,9 @@ def _serve_peer(root, req, dd):
     to = req["to_provider"]
     key = req["key"]
     sess = dd.session("peer:" + key, to) if key else None
-    session_id = sess["session_id"] if sess and time.time() - sess["last_used"] < 0.9 * sess["ttl_s"] else None
+    ttl = (sess["ttl_s"] if to == "claude" else float(s["codex_resume_window_s"])) if sess else 0
+    session_id = sess["session_id"] if (sess and time.time() - sess["last_used"] < 0.9 * ttl
+                                      and (sess["context_tokens"] or 0) <= int(s["resume_max_tokens"])) else None
     timeout_s = int(float(s["peer_timeout_min"]) * 60)
     with open(os.path.join(root, "prompts", "peer.md"), encoding="utf-8") as f:
         peer_rules = f.read()

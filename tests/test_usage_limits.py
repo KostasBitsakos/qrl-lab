@@ -78,8 +78,8 @@ def test_windows_and_ring_html():
           "seven_day": {"used_percentage": 41, "resets_at": NOW + 5 * 86400}, "as_of": NOW - 30}
     w = ul.claude_windows(st, None, NOW)
     assert [x["label"] for x in w] == ["5ω", "7ημ"] and w[0]["pct"] == 23.4
-    assert ul.win_line(w[0], NOW) == "23% χρησιμοποιημένο · reset σε 2ω 14λ"
-    assert ul.win_line(w[1], NOW) == "41% χρησιμοποιημένο · reset σε 120ω 0λ"
+    assert ul.win_line(w[0], NOW).startswith("23% χρησιμοποιημένο · reset σε 2ω 14λ")
+    assert ul.win_line(w[1], NOW).startswith("41% χρησιμοποιημένο · reset σε 120ω 0λ")
     assert ul.headline(w) == 41
     h = ul.ring_html("Claude", w, "#d97757", NOW)
     assert "<details" in h and "<summary" in h and "stroke-dasharray" in h and "#d97757" in h
@@ -89,7 +89,7 @@ def test_windows_and_ring_html():
     # 5h window already reset -> «—» with the reset hint; headline falls back to the valid window
     st["five_hour"]["resets_at"] = NOW - 1
     w = ul.claude_windows(st, None, NOW)
-    assert w[0]["pct"] is None and ul.win_line(w[0], NOW) == "— · " + ul.RESET_TIP and ul.headline(w) == 41
+    assert w[0]["pct"] is None and ul.win_line(w[0], NOW).startswith("— · " + ul.RESET_TIP) and ul.headline(w) == 41
     st["seven_day"]["resets_at"] = NOW - 1
     w = ul.claude_windows(st, None, NOW)
     h = ul.ring_html("Claude", w, "#d97757", NOW)
@@ -143,12 +143,57 @@ def test_ring_html_stable_between_refreshes():
     st = {"five_hour": {"used_percentage": 23.4, "resets_at": resets}, "as_of": NOW - 30}
     w = ul.claude_windows(st, None, NOW)
     line = ul.win_line(w[0], NOW, step=600)
-    assert line.startswith("23% χρησιμοποιημένο · reset σε ≤2ω 20λ (") and line.endswith(" UTC)"), line
+    assert line.startswith("23% χρησιμοποιημένο · reset σε ≤2ω 20λ (") and " UTC)" in line, line
     hs = {ul.ring_html("Claude", ul.claude_windows(st, None, NOW + d), "#d97757", NOW + d, step=600) for d in (0, 60, 120, 240)}
     assert len(hs) == 1, "HTML changed inside one 10-minute step"
     later = NOW + 300  # crosses the 2ω20λ -> 2ω10λ boundary
     assert ul.ring_html("Claude", ul.claude_windows(st, None, later), "#d97757", later, step=600) not in hs
     assert ul.left_text(resets, resets - 1, step=600) == "≤0ω 10λ" and ul.left_text(None, NOW, step=600) == "άγνωστο"
+
+
+def test_dispatcher_windows_override_old_snapshot():
+    st = {"as_of": NOW - 36000, "seven_day": {"used_percentage": 21, "resets_at": NOW + 86400},
+          "_dispatcher": {"limits": [{"window": "five_hour", "utilization": .99, "status": "rejected",
+              "overage": 1, "resets_at": NOW + 7200, "updated_at": NOW - 60}],
+              "provider": {"state": "exhausted", "until_ts": NOW + 3600, "note": "paid credits in use"}}}
+    w = ul.claude_windows(st, None, NOW)
+    assert [x["label"] for x in w] == ["5ω", "7ημ", "Εναλλαγή"]
+    assert w[0]["pct"] == 99 and w[1]["pct"] is None and ul.headline(w) == 99
+    assert "παλιά ένδειξη 21%" in ul.win_line(w[1], NOW)
+    assert "πληρωμένων credits" in ul.win_line(w[2], NOW) and "όχι γνωστό reset" in ul.win_line(w[2], NOW)
+    # A later statusLine measurement of the SAME window supersedes the dispatcher event.
+    st["as_of"] = NOW - 10
+    st["five_hour"] = {"used_percentage": 12, "resets_at": NOW + 1000}
+    assert ul.claude_windows(st, None, NOW)[0]["pct"] == 12
+    # After reset the old rejection does not imply either zero usage or an active limit.
+    st["as_of"] = NOW - 36000
+    st.pop("five_hour")
+    st["_dispatcher"]["limits"][0]["resets_at"] = NOW - 1
+    assert ul.claude_windows(st, None, NOW)[0]["pct"] is None
+    assert ul.claude_windows(st, None, NOW + 4000)[-1]["label"] == "7ημ"
+
+
+def test_freshness_and_missing_measurement_time():
+    st = {"five_hour": {"used_percentage": 10, "resets_at": NOW + 10000}}
+    assert ul.claude_windows(st, None, NOW)[0]["pct"] is None
+    st["as_of"] = NOW - 3601
+    assert ul.claude_windows(st, None, NOW)[0]["pct"] is None
+    st["as_of"] = NOW - 30
+    assert ul.claude_windows(st, None, NOW)[0]["pct"] == 10
+
+
+def test_dispatcher_loader_readonly(tmp_path=None):
+    import sqlite3
+    from pathlib import Path
+    p = Path(tmp_path or tempfile.mkdtemp()) / "dispatch.db"
+    assert ul.load_dispatcher_usage(str(p)) == {} and not p.exists()
+    with sqlite3.connect(p) as db:
+        db.execute("CREATE TABLE limits(provider, window, utilization, updated_at)")
+        db.execute("CREATE TABLE providers(name, state, note, until_ts)")
+        db.execute("INSERT INTO limits VALUES ('claude','five_hour',.99,'2026-10-29T14:16:25+00:00')")
+    before = p.read_bytes()
+    d = ul.load_dispatcher_usage(str(p))
+    assert d["limits"][0]["utilization"] == .99 and p.read_bytes() == before
 
 
 if __name__ == "__main__":
