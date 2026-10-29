@@ -94,8 +94,16 @@ def test_experiments_report_renders_inside_tab_and_figures_are_on_demand(tmp_pat
         dest = tmp_path / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text((root / rel).read_text())
+    # Keep the full dashboard/schema while avoiding filesystem fsync in this render test.
+    # This test does not assert persistence between separate dashboard connections.
+    import sqlite3
+    real_connect = sqlite3.connect
+    temporary_dbs = {str(tmp_path / '.lab/lab.db'), str(tmp_path / '.lab/dispatch.db')}
+    def render_connect(path, *args, **kwargs):
+        return real_connect(':memory:' if str(path) in temporary_dbs else path, *args, **kwargs)
+    monkeypatch.setattr(sqlite3, 'connect', render_connect)
     monkeypatch.setenv('QRL_LAB_DIR', str(tmp_path))
-    monkeypatch.setenv('QRL_EAGER_TABS', '0')
+    monkeypatch.delenv('QRL_EAGER_TABS', raising=False)
     monkeypatch.setenv('QRL_PROM_URL', 'http://127.0.0.1:9')
     calls = []
     monkeypatch.setattr(c, 'make_figures', lambda *args: calls.append(args) or [])
@@ -106,11 +114,13 @@ def test_experiments_report_renders_inside_tab_and_figures_are_on_demand(tmp_pat
     report_tab = next(t for t in at.tabs if 'Πειράματα' in t.label)
     assert any(x.value == 'Κύκλος 1 · Ολοκληρώθηκε' for x in report_tab.subheader)
     assert not any('Κύκλος 1 · Ολοκληρώθηκε' in x.value for t in at.tabs if t != report_tab for x in t.subheader)
-    table = report_tab.dataframe[0]
+    assert report_tab.subheader[0].value == 'Κύκλος 2 · Νέο φορτίο Poisson'
+    assert any('DRe-SCale LSTM-PPO' in x.value for x in report_tab.markdown)
+    table = next(t for t in report_tab.dataframe if list(t.value.columns) == ['Μοντέλο', 'Μέση επίδοση', 'Ρόλος'])
     assert list(table.value.columns) == ['Μοντέλο', 'Μέση επίδοση', 'Ρόλος']
     config = json.loads(table.proto.columns)
     assert all(config[col].get('help') for col in table.value.columns)
-    assert report_tab.expander[0].label.startswith('Κύκλος 1 · Πρωτόκολλο')
+    assert any(e.label.startswith('Κύκλος 1 · Πρωτόκολλο') for e in report_tab.expander)
     raw = next(e for e in report_tab.expander if e.label.startswith('Εκτελέσεις, ζωντανή'))
     assert not raw.proto.expanded
     assert sum(x.value == 'Κύκλος 1 · Ολοκληρώθηκε' for x in at.subheader) == 1

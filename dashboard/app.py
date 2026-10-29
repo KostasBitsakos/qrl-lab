@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 import modreload  # noqa: E402
 import importlib  # noqa: E402
 _LOCAL_MODS = ["labdb", "file_view", "replytext", "k8s_view", "prom_view", "web_terminal", "sudo_ui", "race_view", "brain_view",
-               "perm_store", "ext_catalog", "summarize_runs", "agent_models", "paper_plots", "paper_build", "uploads", "installed_view", "access", "outage", "models_view", "banners", "sandbox_view", "topology_view", "topology_ui", "exp_view", "exp_figs", "usage_limits", "event_tail", "msg_structure", "notif_format", "extra_credits", "knowledge_view", "knowledge_tree", "tab_links"]
+               "perm_store", "ext_catalog", "summarize_runs", "agent_models", "paper_plots", "paper_build", "uploads", "installed_view", "access", "outage", "models_view", "banners", "sandbox_view", "topology_view", "topology_ui", "exp_view", "exp_figs", "usage_limits", "event_tail", "msg_structure", "notif_format", "extra_credits", "knowledge_view", "knowledge_tree", "tab_links", "cycle2_report"]
 for _n in _LOCAL_MODS:  # first import so they are in sys.modules, then reload those whose file changed
     importlib.import_module(_n)
 modreload.reload_changed(_LOCAL_MODS)
@@ -65,6 +65,7 @@ import summarize_runs  # noqa: E402
 import paper_plots  # noqa: E402
 import paper_build  # noqa: E402
 import exp_view  # noqa: E402
+import cycle2_report  # noqa: E402
 import agent_models  # noqa: E402
 import coord_status  # noqa: E402
 import usage_limits  # noqa: E402
@@ -1857,12 +1858,17 @@ def _cycle1_view():
 # ================================================================ runs
 if _tab_live(tab_runs):  # lazy: hidden tabs do no work
     with tab_runs:
+        @st.cache_data(ttl=30, max_entries=2, show_spinner=False)
+        def cycle2_snapshot(root):
+            return cycle2_report.snapshot(root)
+
+        @st.fragment(run_every=30)
+        def cycle2_view():
+            cycle2_report.render(st, cycle2_snapshot(ROOT))
+
+        cycle2_view()
         _cycle1_summary()
         _cycle1_view()
-        with st.container(border=True):
-            st.markdown("**Κύκλος 2 · Νέο φορτίο Poisson**")
-            st.caption("Τα αποτελέσματα θα εμφανιστούν όταν υπάρχουν ολοκληρωμένες εκτελέσεις και ελεγμένη ανάλυση. "
-                       "Το πλάνο είναι στο docs/cycle2_plan.md· οι εκτελέσεις φαίνονται παρακάτω.")
     with tab_runs, st.expander("Εκτελέσεις, ζωντανή παρακολούθηση και τεχνικές λεπτομέρειες", expanded=False):
         st.fragment(run_every=30)(_exp_overview)()
         @st.fragment(run_every=refresh)

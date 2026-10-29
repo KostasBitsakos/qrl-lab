@@ -14,6 +14,7 @@ import datetime as dt
 import hashlib
 import json
 import os
+import re
 import sqlite3
 from contextlib import contextmanager
 
@@ -164,12 +165,34 @@ class LabDB:
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
         self.conn = sqlite3.connect(self.path, timeout=10, isolation_level=None)
         self.conn.row_factory = sqlite3.Row
-        self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA busy_timeout=10000")
         self.conn.execute("PRAGMA foreign_keys=ON")
-        self.conn.executescript(SCHEMA)
-        self._migrate()
-        self.conn.execute("INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
+        if self.conn.execute("PRAGMA journal_mode").fetchone()[0].lower() != "wal":
+            self.conn.execute("PRAGMA journal_mode=WAL")
+        if not self._schema_current():
+            self.conn.executescript(SCHEMA)
+            self._migrate()
+            self.conn.execute("INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
+
+    def _schema_current(self):
+        """Read-only fast path: opening an initialized DB must not need a writer lock."""
+        try:
+            version = self.conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+            if not version or version[0] != str(SCHEMA_VERSION):
+                return False
+            expected = {(kind.lower(), name) for kind, name in
+                        re.findall(r"CREATE (TABLE|INDEX) IF NOT EXISTS (\w+)", SCHEMA)}
+            existing = {tuple(row) for row in self.conn.execute(
+                "SELECT type, name FROM sqlite_master WHERE type IN ('table', 'index')")}
+            if not expected <= existing:
+                return False
+            for table, wanted in self.MIGRATIONS.items():
+                columns = {row[1] for row in self.conn.execute(f"PRAGMA table_info({table})")}
+                if not wanted.keys() <= columns:
+                    return False
+            return True
+        except sqlite3.Error:
+            return False
 
     # column -> type, per table; added idempotently to databases created by older versions
     MIGRATIONS = {
