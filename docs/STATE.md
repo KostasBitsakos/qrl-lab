@@ -20,7 +20,9 @@ Last update: 2026-10-29 · by: claude (J6) · task: R-20261029-001 (cycle CPU-h 
   CPU-h budget decided (R-20261029-001): 160 CPU-h sandbox, valid 7 days; file the sandbox request on the trigger.
 
 ## 2. In progress (what · id · owner · next check)
-- M-20261029-003 (29/10): J1 right-click tabs + headless approvals verified; J2 zoomable knowledge tree; J3 (codex)
+- M-20261029-003 (29/10): J1 DONE: right-click tab fixed (88d4465, Streamlit 1.66 tabs are div[role=tab]) and headless
+  approvals now honoured once on retry (6563e65, perm_store.take_approval); both verified live (headless chromium via
+  playwright 1.40 in .venv, headless claude). Dashboard restart needed for the tab fix; J2 zoomable knowledge tree; J3 (codex)
   `tools/vscode_asks.py` for the researcher's VS Code requests. v0.4 dispatcher + tools/work.py are the researcher's own.
 - Nothing is running (28/10: no launcher/driver/simulator processes; `python3 tools/launch_run.py list`). All
   sandboxes expired (latest R-20261023-001, 120.6/160 CPU-h, expired 24/10 21:59 UTC).
@@ -40,6 +42,9 @@ Last update: 2026-10-29 · by: claude (J6) · task: R-20261029-001 (cycle CPU-h 
   audit that every test10/11 number traces to a file) — awaiting OK; (b) before the next cycle push final models+code
   to git: needs rule change (AGENTS.md:10 forbids push) + remote + credentials from him; no remote set now (`git remote -v`);
   (c) parallel models: v0.4 `max_workers` default 2, max 4 (`tools/dispatcher.py:78,189`) — his `dispatcher.py set`.
+
+- M-20261029-017: cycle-1 numbers not wanted; keep lessons, upload to his repo
+  github.com/KostasBitsakos/dinos_sofia_k8s_redis_scaling, then Poisson cycle. Push approval asked: R-20261029-002.
 
 ## 4. Next steps (in order)
 1. Done 28/10 (M-20261028-004): CLAUDE.md 5.7k→1.5k chars, AGENTS.md 3.2k→2.0k; moved text verbatim to
