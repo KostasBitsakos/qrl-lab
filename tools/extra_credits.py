@@ -115,22 +115,51 @@ def awake_info(provider, health, now, tz="Europe/Athens"):
         ra = (health or {}).get("resets_at")
         if isinstance(ra, (int, float)):
             reset = datetime.fromtimestamp(ra, ZoneInfo(tz)).strftime("%d/%m %H:%M")
-    return {"name": name, "awake": not asleep, "badge": "💳" if state == "extra" else "", "reset": reset}
+    return {"name": name, "awake": not asleep, "badge": "💳" if state == "extra" else "", "reset": reset,
+            "state": state, "provider": provider}
 
 
 AWAKE_CSS = ("<style>.qz{display:inline-block;animation:qzf 2.4s ease-in-out infinite}"
              "@keyframes qzf{0%{transform:translateY(0);opacity:.2}50%{opacity:1}100%{transform:translateY(-8px);opacity:.1}}</style>")
 
 
+def _athens(ts, tz="Europe/Athens"):
+    from zoneinfo import ZoneInfo
+    return datetime.fromtimestamp(ts, ZoneInfo(tz)).strftime("%d/%m %H:%M")
+
+
 def awake_html(infos):
-    cells = []
+    """One card per agent. Optional info["windows"] = [{"label","pct","resets_at"}] (pct None = unknown) adds usage bars
+    (numbers come from the existing statusline/log readers, not estimated here)."""
+    cards = []
     for i in infos:
+        down = i.get("state") == "down"
         if i["awake"]:
-            icon = "🟢" + (f'<sup title="αγορασμένα credits">{i["badge"]}</sup>' if i["badge"] else "")
-            sub = "ξύπνιος"
+            icon, label, color = "🟢", "Ξύπνιος", "#2e9d5b"
+            if i["badge"]:
+                icon += f'<sup title="αγορασμένα credits">{i["badge"]}</sup>'
+            why = "Δουλεύει κανονικά και παίρνει εργασίες."
+        elif down:
+            icon, label, color = "⚫", "Εκτός", "#777"
+            why = "Δεν ανταποκρίνεται αυτή τη στιγμή· οι εργασίες πάνε στον άλλο πράκτορα αν γίνεται."
         else:
             icon = '😴<span class="qz">Z</span><span class="qz" style="animation-delay:.8s">z</span><span class="qz" style="animation-delay:1.6s">z</span>'
-            sub = "κοιμάται" + (f" · επαναφορά {i['reset']}" if i["reset"] else "")
-        cells.append(f'<span style="margin-right:12px;font-size:.85rem"><b>{i["name"]}</b> {icon}'
-                     f'<br><span style="opacity:.65;font-size:.75rem">{sub}</span></span>')
-    return AWAKE_CSS + '<div style="margin:2px 0 6px">' + "".join(cells) + "</div>"
+            label, color = "Κοιμάται (έφτασε το όριο χρήσης)", "#d9822b"
+            why = "Ξυπνά ξανά όταν περάσει η ώρα επαναφοράς."
+        rows = []
+        if i.get("reset") and not i["awake"]:
+            rows.append(f'<div style="font-size:.75rem">Επαναφορά: <b>{i["reset"]}</b> (ώρα Αθήνας)</div>')
+        for w in i.get("windows") or []:
+            if w.get("pct") is None:
+                rows.append(f'<div style="font-size:.72rem;opacity:.65">{w["label"]}: άγνωστο</div>')
+                continue
+            pct = max(0.0, min(100.0, float(w["pct"])))
+            bc = "#2e9d5b" if pct < 70 else ("#d9822b" if pct < 90 else "#c0392b")
+            rs = f' · reset {_athens(w["resets_at"])}' if w.get("resets_at") else ""
+            rows.append(f'<div style="font-size:.72rem;opacity:.8">{w["label"]}: {pct:.0f}%{rs}</div>'
+                        f'<div style="background:#8883;border-radius:4px;height:6px;margin:1px 0 3px">'
+                        f'<div style="width:{pct:.0f}%;height:6px;border-radius:4px;background:{bc}"></div></div>')
+        cards.append(f'<div style="border:1px solid #8884;border-left:4px solid {color};border-radius:6px;padding:5px 8px;'
+                     f'margin:3px 0"><div style="font-size:.9rem"><b>{i["name"]}</b> {icon} <span style="color:{color}">'
+                     f'{label}</span></div>{"".join(rows)}<div style="opacity:.6;font-size:.7rem">{why}</div></div>')
+    return AWAKE_CSS + '<div style="margin:2px 0 6px">' + "".join(cards) + "</div>"

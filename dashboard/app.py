@@ -497,8 +497,10 @@ def usage_rings():
     if extra_credits.show_credits(_d7, _h.get("state"), _ec):
         st.caption("💳 " + extra_credits.sidebar_text(_ec) + ". ΕΚΤΙΜΗΣΗ από το κόστος των συνεδριών (ίσως διαφέρει από τη "
                    "χρέωση)· το ακριβές υπόλοιπο: claude.ai → Settings → Usage.")
-    st.html(extra_credits.awake_html([extra_credits.awake_info("claude", _h, now),
-                                      extra_credits.awake_info("codex", _h.get("codex") or {}, now)]))
+    _ai_cl = extra_credits.awake_info("claude", _h, now)
+    _ai_cx = extra_credits.awake_info("codex", _h.get("codex") or {}, now)
+    _ai_cl["windows"], _ai_cx["windows"] = cw, xw  # usage % as already read above (statusline / rollout log)
+    st.html(extra_credits.awake_html([_ai_cl, _ai_cx]))
     offers = usage_limits.load_offers(os.path.join(ROOT, "docs", "free_offers.json"))
     seen = st.session_state.setdefault("_offers_seen", now - 86400)   # first view: last 24 h count as new
     n_new = sum(usage_limits.offer_is_new(o, seen) for o in offers)
