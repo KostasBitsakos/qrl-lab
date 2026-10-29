@@ -18,6 +18,7 @@ Last update: 2026-10-29 · by: Claude (J66) · task: R-20261029-005 answered (pa
   file the sandbox request when runs start. Plan: `docs/cycle2_plan.md`, expert pack `docs/expert/` (J12, d6cfa11).
 
 ## 2. In progress (what · id · owner · next check)
+- J72 29/10: daily cycle-2 report = `tools/cycle2_daily.py` (no LLM), crontab `0 15-17 * * *` UTC, posts once at 18:xx Athens to M-20261029-006, self-removes after 02/11; log `.lab/cycle2_daily/cron.log`.
 - J67 29/10: R-20261029-006 APPROVED; 14 smoke: wave1 s0-s7 13:17 UTC, wave2 3+3 via `.lab/j67/wave2.sh`; then cost gate only.
 - J64 DONE 29/10: Claude review M-20261029-110 (guard + work.py --worktree APPROVE; schedule AGREE, cond. A: val
   selection → claims only from test12 after freeze; B: smoke-first is policy, not launcher-enforced); Codex final
