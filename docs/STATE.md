@@ -4,7 +4,7 @@
      (M-/R-/run id, path, URL). Update it at the end of every task that changed something. Older detail goes to
      docs/DECISIONS.md, docs/journal/ or a topic file listed in docs/INDEX.md. -->
 
-Last update: 2026-10-29 · by: Claude (J90) · task: duplicate end-notice R-20261021-007 s16-s80; STATE condensed
+Last update: 2026-10-29 · by: Claude (J92) · task: R-20261029-006 calibration done, cost re-gate, R-20261029-009 filed
 
 ## 1. Goal now
 - PhD paper: hybrid quantum–classical extension of the DInos autoscaler; simulation first, then real cluster;
@@ -19,9 +19,10 @@ Last update: 2026-10-29 · by: Claude (J90) · task: duplicate end-notice R-2026
 
 ## 2. In progress (what · id · owner · next check)
 - J72 29/10: daily cycle-2 report = `tools/cycle2_daily.py` (no LLM), crontab `0 15-17 * * *` UTC, posts once at 18:xx Athens to M-20261029-006, self-removes after 02/11; log `.lab/cycle2_daily/cron.log`.
-- J82 29/10: R-20261029-007 APPROVED → calibration 14 runs (7 arms x 2 branches, seed 15010, 4992 ticks, 0.75 h cap,
-  reserve 10.5 CPU-h) under sandbox R-20261029-006; specs `.lab/j82/`, wave 1 s14-s21 13:40 UTC, wave 2 `.lab/j82/wave2.sh`.
-  Next: 14/14 done → re-measure cost (as J77 `.lab/j77/smoke_result.md`, gate FAIL 2x), joint re-gate, ask again. No tuning.
+- J92 29/10: calibration DONE 14/14 exit 0 (s14-s27), sandbox 3.88/160 CPU-h → `.lab/j92/calib_result.md`
+  (scripts `summarize.py`, `project.py`). Cost 1x 83-93 CPU-h, 2x 166-186 > 136 → joint re-gate FAIL (Codex key
+  cycle2-cost-regate); final cap 0.8 h < LSTM+transfer 1.91 h. rppo collapses (2.5 pods, SLO 1.0, entropy≈ln3) → static
+  check before tuning. **R-20261029-009 filed** (rec. 1.25x + full ledger + new caps). Next on approval: ledger + spec.
 - J64 DONE 29/10: Claude review M-20261029-110 (guard + work.py --worktree APPROVE; schedule AGREE, cond. A: val
   selection → claims only from test12 after freeze; B: smoke-first is policy, not launcher-enforced); Codex final
   M-20261029-111 APPROVE. Commits 7d55754 (root), 182af33 (astra wrapper). **Filed R-20261029-006** (sandbox 160 CPU-h,
@@ -64,6 +65,7 @@ Last update: 2026-10-29 · by: Claude (J90) · task: duplicate end-notice R-2026
   (`tools/mobile_view.py`, `dashboard/static/`); `enableStaticServing` needs a dashboard restart (not done, J79).
 
 ## 3. Waiting for the researcher
+- **R-20261029-009** (J92): cycle-2 cost after calibration — 1.25x margin / more CPU-h / 5 final seeds; blocks tuning.
 - R-20261029-005 ANSWERED 29/10 (J66): «paper model» = adapted DRe-SCale LSTM-PPO (arm `tuning.rppo`); criterion
   reviewer weight, then ease of replication; told him DRe-SCale is IEEE TSC 2024 (Gwydion is the 2025 one) — he may correct.
 - M-20261029-009: (a) results-retention policy (keep per-seed JSON + result md + best ckpt; audit that every
