@@ -1688,8 +1688,56 @@ def _c1_figs(_stamp):
     return cycle1_report.make_figures(ROOT, os.path.join(ROOT, ".lab", "figs", "cycle1"))
 
 
+def _cycle1_summary():
+    st.subheader("Κύκλος 1 · Ολοκληρώθηκε")
+    st.markdown("Συγκρίναμε μοντέλα που αποφασίζουν πόσα pods χρειάζονται, σε φορτίο που ανεβοκατεβαίνει "
+                "σαν ημίτονο, με θόρυβο και απότομη αιχμή. Περιβάλλον: `spike300_d5`, "
+                "καθυστέρηση εκκίνησης pod 5 βήματα. Τα αποτελέσματα είναι ιστορικά, όχι στόχοι του νέου κύκλου.")
+    result = cycle1_report.read(ROOT, "res11")
+    rows = cycle1_report.overview_rows(result)
+    if not rows:
+        st.warning("Η σύνοψη αποτελεσμάτων δεν είναι διαθέσιμη. Δες τις πηγές στις λεπτομέρειες.")
+        return
+    st.markdown("**Ποιος πήγε καλύτερα;** Από τα κύρια μοντέλα, το LSTM+transfer είχε την υψηλότερη μέση "
+                "επίδοση στο τελικό test11. Το πρόσθετο μοντέλο ελέγχου MLP (a1h) είχε ακόμη υψηλότερο μέσο όρο. "
+                "Δεν τεκμηριώθηκε συνολικός νικητής με το προκαθορισμένο στατιστικό πρωτόκολλο. "
+                "Το Dinos+Transfer V.2 ξεπέρασε επιβεβαιωμένα τα DERP και enhanced DERP.")
+    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch", column_config={
+        "Μοντέλο": st.column_config.TextColumn(help="Το μοντέλο ή ο κανόνας που επιλέγει τον αριθμό των pods."),
+        "Μέση επίδοση": st.column_config.NumberColumn(format="%d", help="Μέσο συνολικό reward στο test11· μεγαλύτερο σημαίνει καλύτερο με αυτόν τον ορισμό ανταμοιβής."),
+        "Ρόλος": st.column_config.TextColumn(help="Κύρια σύγκριση, πρόσθετος έλεγχος ή απλός κανόνας κλιμάκωσης."),
+    })
+    st.caption("Τελικός έλεγχος: test11 · 5 ανεξάρτητοι σπόροι εκπαίδευσης × 20 κοινά σενάρια αξιολόγησης. "
+               "Το checkpoint κάθε μοντέλου επιλέχθηκε από το validation, όχι από το test. "
+               f"Πηγή: `{cycle1_report.SOURCES['res11']}` · πρωτόκολλο: `{cycle1_report.SOURCES['freeze24']}`.")
+    _, hypotheses = cycle1_report.test11_hypotheses(result)
+    st.markdown("**Πόση αβεβαιότητα υπάρχει;** Τα παρακάτω διαστήματα εμπιστοσύνης 95% αφορούν "
+                "τη διαφορά δύο μοντέλων. Αν περιλαμβάνουν το 0, δεν έχει τεκμηριωθεί διαφορά.")
+    for h, contrast, diff, ci, outcome in hypotheses[:4]:
+        label = contrast.replace("V.2", "Dinos+Transfer V.2").replace(" > ", " − ")
+        interpretation = ("επιβεβαιωμένη υπεροχή" if outcome == "CONFIRMED" else
+                          "δεν επιβεβαιώθηκε διαφορά" if h == "H3" else "περιγραφικό εύρημα εκτός προκαθορισμένου ελέγχου, υπέρ του LSTM+transfer")
+        st.markdown(f"- **{label}**: {diff}, διάστημα **{ci}** — {interpretation}.")
+    st.caption("Ο προκαθορισμένος διαδοχικός έλεγχος σταμάτησε στη σύγκριση Dinos − LSTM. "
+               "Οι επόμενες συγκρίσεις είναι περιγραφικές. Δεν υπάρχουν δημοσιευμένα διαστήματα για τον μέσο κάθε μοντέλου.")
+    if st.button("Εμφάνιση γραφικών κύκλου 1", key="c1_show_figures"):
+        st.session_state["c1_figures_visible"] = True
+    if st.session_state.get("c1_figures_visible"):
+        st.caption("Μπάρες: μέσος όρος ± τυπική απόκλιση μεταξύ seeds, όχι διάστημα εμπιστοσύνης. "
+                   "Οι καμπύλες δείχνουν επίδοση στο validation κατά την εκπαίδευση. Τα δύο test παρουσιάζονται χωριστά.")
+        try:
+            _c1_figs(round(time.time() // 86400))
+            for split in cycle1_report.SPLITS:
+                for kind in ("bar", "valcurve"):
+                    path = os.path.join(ROOT, ".lab", "figs", "cycle1", f"{kind}_{split}.png")
+                    if os.path.exists(path):
+                        st.image(path, caption=f"{split} · {'Μέση επίδοση και ανά seed' if kind == 'bar' else 'Πορεία εκπαίδευσης στο validation'}")
+        except (OSError, ValueError, KeyError) as exc:
+            st.warning(f"Δεν ήταν διαθέσιμα τα γραφικά: {exc}")
+
+
 def _cycle1_view():
-    with st.expander("Μεγάλος κύκλος εκπαίδευσης και testing σε ημιτονοειδή είσοδο 1", expanded=False):
+    with st.expander("Κύκλος 1 · Πρωτόκολλο, test10, αναλυτικά αποτελέσματα και πηγές", expanded=False):
         st.caption("Ο κύκλος tuning 19–24/10 του DInos στο φορτίο του ερευνητή (ημίτονο + θόρυβος + spike), παγωμένο περιβάλλον "
                    "spike300_d5. Όλοι οι αριθμοί προέρχονται αυτούσιοι από τα αρχεία-πηγή που αναγράφονται· τίποτα δεν υπολογίζεται εδώ.")
         S = cycle1_report.SOURCES
@@ -1806,6 +1854,13 @@ def _cycle1_view():
 # ================================================================ runs
 if _tab_live(tab_runs):  # lazy: hidden tabs do no work
     with tab_runs:
+        _cycle1_summary()
+        _cycle1_view()
+        with st.container(border=True):
+            st.markdown("**Κύκλος 2 · Νέο φορτίο Poisson**")
+            st.caption("Τα αποτελέσματα θα εμφανιστούν όταν υπάρχουν ολοκληρωμένες εκτελέσεις και ελεγμένη ανάλυση. "
+                       "Το πλάνο είναι στο docs/cycle2_plan.md· οι εκτελέσεις φαίνονται παρακάτω.")
+    with tab_runs, st.expander("Εκτελέσεις, ζωντανή παρακολούθηση και τεχνικές λεπτομέρειες", expanded=False):
         st.fragment(run_every=30)(_exp_overview)()
         @st.fragment(run_every=refresh)
         def runs_view():
@@ -2101,7 +2156,6 @@ if _tab_live(tab_runs):  # lazy: hidden tabs do no work
                         st.error(str(e))
         else:
             st.caption("Κανένα run δεν τρέχει.")
-    _cycle1_view()
 
 # ================================================================ council
 if _tab_live(tab_council):  # lazy: hidden tabs do no work

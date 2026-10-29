@@ -64,3 +64,57 @@ def test_bullet_section():
     assert s.startswith("- Explicit recipe") and "Command:" not in s and "linear10k" in s
     a = c.section(c.read(ROOT, "freeze21"), "- Arms")
     assert a.startswith("- Arms") and "Checkpoint:" not in a
+
+
+def test_overview_keeps_controls_and_display_names():
+    rows = c.overview_rows(R11)
+    means = {r['Μοντέλο']: r['Μέση επίδοση'] for r in rows}
+    assert means['Dinos+Transfer V.2'] == 83983
+    assert means['HPA'] == 249
+    assert means['MLP (a1h)'] > means['LSTM+transfer']
+    main = ('LSTM', 'LSTM+transfer', 'Dinos', 'Dinos+Transfer V.2', 'DERP', 'enhanced DERP', 'HPA')
+    assert max(main, key=means.get) == 'LSTM+transfer'
+    h4 = c.test11_hypotheses(R11)[1][3]
+    assert h4[0] == 'H4' and h4[2].startswith('-')
+    assert all(float(n.strip()) < 0 for n in h4[3].strip('[]').split(','))
+    assert h4[4].startswith('descriptive')
+    assert {'LSTM', 'LSTM+transfer', 'Dinos', 'DERP', 'enhanced DERP'} <= means.keys()
+    assert 'oracle_Dstep' not in means
+    assert c.overview_rows('') == []
+
+
+def test_experiments_report_renders_inside_tab_and_figures_are_on_demand(tmp_path, monkeypatch):
+    """Run the real dashboard in an isolated lab, with no runs or production state writes."""
+    from pathlib import Path
+    from streamlit.testing.v1 import AppTest
+    root = Path(ROOT)
+    for name in ('tools', 'dashboard', 'docs', 'paper', '.streamlit'):
+        (tmp_path / name).symlink_to(root / name, target_is_directory=True)
+    for rel in (c.SOURCES['res11'], c.SOURCES['res10'], c.SOURCES['freeze24']):
+        dest = tmp_path / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text((root / rel).read_text())
+    monkeypatch.setenv('QRL_LAB_DIR', str(tmp_path))
+    monkeypatch.setenv('QRL_EAGER_TABS', '0')
+    monkeypatch.setenv('QRL_PROM_URL', 'http://127.0.0.1:9')
+    calls = []
+    monkeypatch.setattr(c, 'make_figures', lambda *args: calls.append(args) or [])
+    at = AppTest.from_file(str(tmp_path / 'dashboard/app.py'), default_timeout=60)
+    at.query_params['tab'] = '📈 Πειράματα'
+    at.run()
+    assert not at.exception
+    report_tab = next(t for t in at.tabs if 'Πειράματα' in t.label)
+    assert any(x.value == 'Κύκλος 1 · Ολοκληρώθηκε' for x in report_tab.subheader)
+    assert not any('Κύκλος 1 · Ολοκληρώθηκε' in x.value for t in at.tabs if t != report_tab for x in t.subheader)
+    table = report_tab.dataframe[0]
+    assert list(table.value.columns) == ['Μοντέλο', 'Μέση επίδοση', 'Ρόλος']
+    config = json.loads(table.proto.columns)
+    assert all(config[col].get('help') for col in table.value.columns)
+    assert report_tab.expander[0].label.startswith('Κύκλος 1 · Πρωτόκολλο')
+    raw = next(e for e in report_tab.expander if e.label.startswith('Εκτελέσεις, ζωντανή'))
+    assert not raw.proto.expanded
+    assert sum(x.value == 'Κύκλος 1 · Ολοκληρώθηκε' for x in at.subheader) == 1
+    assert not calls
+    at.button(key='c1_show_figures').click().run()
+    assert not at.exception
+    assert len(calls) == 1

@@ -20,6 +20,12 @@ Last update: 2026-10-29 · by: claude (J18) · task: md cleanup (M-20261029-017)
 - Order (C9): GitHub push → md cleanup → cycle-2 implementation.
 
 ## 2. In progress (what · id · owner · next check)
+- J23 completed Experiments UX: cycle-1 summary/table/CI at top INSIDE tab, figures on demand, raw runs collapsed
+  (`dashboard/app.py`, `tools/cycle1_report.py`); Claude review M-20261029-036, 10 tests passed
+  (`tests/test_cycle1_report.py`, `tests/test_tab_links.py`); HTTP health OK, no service restart (M-20261029-030).
+- 29/10 C21 (M-20261029-030): Codex fixed (~/.codex/config.toml model gpt-6.1-sol). Cycle 2 started: J24 (Claude) shared
+  env/workload/DRe-SCale + branch dinos-poisson; J25 (Codex) competing branch dinos-poisson-astra; J23 (Codex) Experiments
+  tab; J17 GitHub push after Codex review; J18 md cleanup. max_workers=2 (only the researcher can raise it).
 - J17 (claude): curated GitHub upload READY, Codex APPROVED round 2 (key github-export; briefs `.lab/export/`), push
   NOT done (headless permission denied `git push`). Exact approved refs: export-main 901fe54→main, cycle1-claude
   afc4ea7, cycle1-codex ad283e4 (log-free snapshots of dinos-tuning 5eae972 / -astra 16d9bf4; worktree `export/`).

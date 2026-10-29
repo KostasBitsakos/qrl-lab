@@ -116,6 +116,18 @@ def test11_hypotheses(text):
     return [], []
 
 
+def overview_rows(text):
+    """Latest reported means; retain MLP controls so a selected subset cannot imply an overall winner."""
+    names = {"V.2": "Dinos+Transfer V.2", "his HPA": "HPA", "HPA-demand": "HPA βάσει φορτίου",
+             "mlp_a1h": "MLP (a1h)", "transfer_mlp_a1h": "MLP+transfer (a1h)"}
+    notes = {"his HPA": "Αρχική υλοποίηση", "HPA-demand": "Κανόνας βάσει φορτίου",
+             "MLP": "Πρόσθετο μοντέλο ελέγχου", "mlp_a1h": "Πρόσθετο μοντέλο ελέγχου",
+             "transfer_mlp_a1h": "Πρόσθετο μοντέλο ελέγχου"}
+    return [{"Μοντέλο": names.get(name, name), "Μέση επίδοση": int(value),
+             "Ρόλος": notes.get(name, "Συγκρινόμενο μοντέλο")}
+            for name, value, _ in test11_means(text) if name not in ("fixed_best", "oracle_Dstep")]
+
+
 def iqm_lines(root):
     """[(arm_key, iqm, mean)] from .lab/tuning/c24c_iqm.txt."""
     out = []
