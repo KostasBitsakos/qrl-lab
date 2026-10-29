@@ -493,12 +493,34 @@ def test_edit_freeze():
     assert not any("παλιά απάντηση" in b for b in thread_bodies(db, m2))
     db.cancel_edit(m2)
     assert db.message(m2)["status"] == "new"
+    db.set_status(m2, "done")  # the lab db is shared with later tests
     ok("edit freeze: skipped while editing, note on save, running reply discarded")
+
+
+def test_headless_permission_roundtrip():
+    import perm_store
+    d = fresh_dispatcher()
+    db = LabDB()
+    for f in os.listdir(perm_store.perm_dir(LAB)):
+        os.remove(os.path.join(perm_store.perm_dir(LAB), f))
+    mid = db.researcher_send("Τρέξε κάτι")
+    queue("claude", {"mode": "ok", "text": "μπλοκαρίστηκα", "denials": [{"tool_name": "Bash", "tool_input": {"command": "ls /etc"}}]})
+    assert d.once() == "done"
+    pend = perm_store.pending(LAB)
+    assert len(pend) == 1 and pend[0]["source"] == "headless" and pend[0]["detail"] == "ls /etc"
+    assert d.once() is None  # still unanswered: nothing to deliver
+    perm_store.decide(pend[0]["id"], True, root=LAB)
+    queue("claude", {"mode": "ok", "text": "ξαναδοκιμάζω"})
+    assert d.once() == "done"
+    p = prompt_of(calls("claude")[-1])
+    assert "ls /etc" in p and "APPROVED" in p
+    assert d.once() is None and not perm_store.undelivered_answers(LAB)
+    ok("headless permission denial -> pending entry -> answer delivered once with the next task")
 
 
 TESTS = [test_claude_reply_and_resume, test_failover_on_quota, test_both_exhausted_then_resume,
          test_choice_mention_status_and_errors, test_paid_credits_guard, test_decisions_and_run_events, test_peers,
-         test_md_index, test_parse_reset, test_panel_and_installer, test_edit_freeze]
+         test_md_index, test_parse_reset, test_panel_and_installer, test_edit_freeze, test_headless_permission_roundtrip]
 
 if __name__ == "__main__":
     print(f"QRL-Lab v0.3 tests in {TMP}")

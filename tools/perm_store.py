@@ -62,9 +62,11 @@ def describe(tool, tin):
     return f"Χρήση εργαλείου {tool}", json.dumps(tin, ensure_ascii=False, default=str)
 
 
-def create(tool, tin, cwd="", root=None):
+def create(tool, tin, cwd="", root=None, source="hook", thread_id=""):
+    """source 'hook': live PermissionRequest (hook waits ~90 s). 'headless': a denial recorded by the dispatcher after a
+    headless task; stays pending until the researcher answers, then the answer is delivered with the next task."""
     desc, detail = describe(tool, tin)
-    rec = {"id": time.strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:6], "ts": time.time(), "tool": str(tool),
+    rec = {"source": source, "thread_id": thread_id or "", "delivered": source != "headless", "id": time.strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:6], "ts": time.time(), "tool": str(tool),
            "description": desc, "detail": detail[:MAX_DETAIL], "cwd": str(cwd or ""), "state": "pending"}
     _write(rec, root)
     return rec["id"]
@@ -92,9 +94,24 @@ def pending(root=None, max_age=300):
     for fn in os.listdir(perm_dir(root)):
         if fn.endswith(".json"):
             rec = read(fn[:-5], root)
-            if rec and rec.get("state") == "pending" and time.time() - rec.get("ts", 0) < max_age:
+            if rec and rec.get("state") == "pending" and (rec.get("source") == "headless"
+                                                          or time.time() - rec.get("ts", 0) < max_age):
                 out.append(rec)
     return sorted(out, key=lambda r: r["ts"])
+
+
+def undelivered_answers(root=None):
+    """Answered headless requests whose answer the dispatcher has not yet passed to the coordinator."""
+    recs = [read(fn[:-5], root) for fn in os.listdir(perm_dir(root)) if fn.endswith(".json")]
+    return sorted([r for r in recs if r and r.get("source") == "headless" and not r.get("delivered")
+                   and r.get("state") in ("approved", "denied")], key=lambda r: r["ts"])
+
+
+def mark_delivered(rid, root=None):
+    rec = read(rid, root)
+    if rec:
+        rec["delivered"] = True
+        _write(rec, root)
 
 
 def recent(root=None, limit=10):

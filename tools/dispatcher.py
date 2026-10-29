@@ -46,6 +46,7 @@ from contextlib import contextmanager
 TOOLS = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, TOOLS)
 from labdb import LabDB, LabError  # noqa: E402
+import perm_store  # noqa: E402
 
 PROVIDERS = ("claude", "codex")
 OTHER = {"claude": "codex", "codex": "claude"}
@@ -671,6 +672,16 @@ class Dispatcher:
                     f" then report in this thread.")
             return {"kind": "decision", "thread_id": tid, "msg_ids": [], "reply_to": tid, "forced": None,
                     "text": text, "req_ids": [r["id"]]}
+        # 2b. answers to blocked (headless) permission requests
+        ans = perm_store.undelivered_answers(self.root)
+        if ans:
+            tid = ans[0]["thread_id"] if ans[0].get("thread_id") and self.lab.message(ans[0]["thread_id"]) else self._system_thread()
+            lines = [f"- {a['tool']}: {a['detail'][:300]} -> {'APPROVED' if a['state'] == 'approved' else 'DENIED'}"
+                     + (f" ({a['message']})" if a.get("message") else "") for a in ans]
+            text = ("The researcher answered permission requests that were blocked in an earlier headless task:\n"
+                    + "\n".join(lines) + "\nIf approved, retry that action once; if denied, do not retry it. Report in this thread.")
+            return {"kind": "perm_answer", "thread_id": tid, "msg_ids": [], "reply_to": tid, "forced": None,
+                    "text": text, "req_ids": [], "perm_ids": [a["id"] for a in ans]}
         # 3. finished experiment batches
         groups = {}
         for run in self.lab.runs(limit=500):
@@ -817,6 +828,8 @@ class Dispatcher:
         return "deferred"
 
     def _consume(self, item):
+        for pid in item.get("perm_ids") or []:
+            perm_store.mark_delivered(pid, self.root)
         if item["req_ids"]:
             self.lab.mark_delivered(req_ids=item["req_ids"])
         if item.get("event_ref"):
@@ -862,8 +875,15 @@ class Dispatcher:
             return
         text, status = split_status(res["text"])
         if res["denials"]:
+            for dn in res["denials"]:  # item 8: park each blocked action for the researcher (dashboard Sudo tab / banner)
+                if isinstance(dn, dict) and dn.get("tool_name"):
+                    try:
+                        perm_store.create(dn["tool_name"], dn.get("tool_input"), self.root, self.root, source="headless",
+                                          thread_id=item["thread_id"])
+                    except Exception:
+                        pass
             names = ", ".join(sorted({d.get("tool_name", "?") for d in res["denials"] if isinstance(d, dict)}))
-            text += f"\n\n🔐 Μπλοκαρίστηκαν ενέργειες που χρειάζονταν άδεια ({names}). Αν χρειάζονται, ζήτησέ τες ρητά."
+            text += f"\n\n🔐 Μπλοκαρίστηκαν ενέργειες που χρειάζονταν άδεια ({names}). Εμφανίστηκαν στο dashboard (Sudo) για έγκριση· θα ενημερωθείς στην επόμενη εργασία."
         cost = f" · ≈${res['cost']:.2f} (εκτίμηση)" if isinstance(res.get("cost"), (int, float)) else ""
         footer = f"\n\n— {LABEL[provider]} · {res.get('model') or ''} · {int(res.get('duration_s', 0) // 60)}′{cost}"
         self._post(item["reply_to"], (text or "(χωρίς κείμενο)") + footer, kind="reply")

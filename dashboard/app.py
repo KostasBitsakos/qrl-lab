@@ -997,7 +997,8 @@ def perm_banner():
     with st.container(border=True):
         for pr in pend:
             left = max(0, int(90 - (time.time() - pr["ts"])))
-            st.error(f"🔐 Ο συντονιστής ζητά άδεια: {pr['description']} — απομένουν ~{left} δευτ.", icon="🔐")
+            _tl = "η εργασία έχει τελειώσει· η απάντηση θα σταλεί στην επόμενη εργασία" if pr.get("source") == "headless" else f"απομένουν ~{left} δευτ."
+            st.error(f"🔐 Ο συντονιστής ζητά άδεια: {pr['description']} — {_tl}", icon="🔐")
             if unlocked:
                 st.code(pr["detail"] or "(κενό)", language="bash" if pr["tool"] == "Bash" else "text")
                 c = st.columns(3)
@@ -2520,7 +2521,8 @@ with tab_sudo:
             for pr in pend:
                 with st.container(border=True):
                     left = max(0, int(90 - (time.time() - pr["ts"])))
-                    st.markdown(f"**{pr['tool']}** · {pr['description']} · απομένουν ~{left} δευτ.")
+                    _tl = "μπλοκαρίστηκε σε εργασία χωρίς terminal· η απάντησή σου θα σταλεί στον συντονιστή στην επόμενη εργασία" if pr.get("source") == "headless" else f"απομένουν ~{left} δευτ."
+                    st.markdown(f"**{pr['tool']}** · {pr['description']} · {_tl}")
                     st.code(pr["detail"] or "(κενό)", language="bash" if pr["tool"] == "Bash" else "text")
                     st.caption(f"φάκελος: `{pr['cwd']}` · {dt.datetime.fromtimestamp(pr['ts']).strftime('%H:%M:%S')}")
                     pc = st.columns(2)
