@@ -38,6 +38,7 @@ Last update: 2026-10-29 · by: claude (J18) · task: md cleanup (M-20261029-017)
 - J18 (claude): md cleanup (this update); J19 (claude): Experiments-tab UX + cycle-1 report. J10/J11 (codex) FAILED:
   «gpt-5.1-codex-max not supported with ChatGPT account» (M-20261029-019/020) — Codex peer calls fail until the model
   in `~/.codex/config.toml` or `peer_codex_model` is changed by the researcher (M-20261029-025).
+- R-20261029-003 approved: `.claude/settings.json` now allows `git push github …` headless; force/-f/origin denied (da5d4e5, J33). Joint Claude+Codex review before push still required (AGENTS.md).
 - Nothing is running (`python3 tools/launch_run.py list`); all sandboxes expired (latest R-20261023-001, 120.6/160 CPU-h).
 - Stale db row: run `20261019-092534-R-20261017-021-s93-a1` shows "starting" since 19/10 (no process). Harmless.
 
