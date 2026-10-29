@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 import modreload  # noqa: E402
 import importlib  # noqa: E402
 _LOCAL_MODS = ["labdb", "file_view", "replytext", "k8s_view", "prom_view", "web_terminal", "sudo_ui", "race_view", "brain_view",
-               "perm_store", "ext_catalog", "summarize_runs", "agent_models", "paper_plots", "paper_build", "uploads", "installed_view", "access", "outage", "models_view", "banners", "sandbox_view", "topology_view", "topology_ui", "exp_view", "exp_figs", "usage_limits", "event_tail", "msg_structure", "notif_format", "extra_credits", "knowledge_view", "tab_links"]
+               "perm_store", "ext_catalog", "summarize_runs", "agent_models", "paper_plots", "paper_build", "uploads", "installed_view", "access", "outage", "models_view", "banners", "sandbox_view", "topology_view", "topology_ui", "exp_view", "exp_figs", "usage_limits", "event_tail", "msg_structure", "notif_format", "extra_credits", "knowledge_view", "knowledge_tree", "tab_links"]
 for _n in _LOCAL_MODS:  # first import so they are in sys.modules, then reload those whose file changed
     importlib.import_module(_n)
 modreload.reload_changed(_LOCAL_MODS)
@@ -56,6 +56,7 @@ import res_view  # noqa: E402
 import token_savings  # noqa: E402
 import topology_ui  # noqa: E402
 import knowledge_view  # noqa: E402
+import knowledge_tree  # noqa: E402
 import tab_links  # noqa: E402
 import changes_view  # noqa: E402
 import models_view  # noqa: E402
@@ -3050,32 +3051,14 @@ if _tab_live(tab_arch):  # lazy: hidden tabs do no work
 # ================================================================ knowledge map (docs/index.json)
 if _tab_live(tab_know):  # lazy: hidden tabs do no work
     with tab_know:
-        st.subheader("Όλο το δέντρο γνώσης (md αρχεία)")
         try:
             _ke = knowledge_view.load(ROOT)
         except Exception as _e:
             _ke = []
             st.warning(f"Δεν διαβάστηκε το docs/index.json: {_e}")
-        st.caption("Πάτησε ένα κουτί για zoom στο κλαδί· πάτησε το μονοπάτι επάνω (breadcrumb) ή το αριστερό κουτί για πίσω. "
-                   "Κράτα/πέρνα το δάχτυλο πάνω σε αρχείο για την περιγραφή του.")
-        st.markdown(" · ".join(f'<span style="background:{knowledge_view.ROLE_COLOR[k]};padding:1px 6px;border-radius:3px">'
-                               f"{t}</span>" for k, t in knowledge_view.LEGEND), unsafe_allow_html=True)
-        _kq = st.text_input("🔎 Αναζήτηση αρχείου (όνομα, τίτλος ή περιγραφή)", key="know_q")
-        _khits = sorted(knowledge_view.matches(_ke, _kq))
-        _kfolds = knowledge_view.folders(_ke)
-        _kauto = os.path.dirname(_khits[0]) if len(_khits) == 1 else None
-        _kc1, _kc2 = st.columns([3, 1])
-        _klevel = _kc1.selectbox("Zoom σε κλαδί", ["(όλο το δέντρο)"] + _kfolds,
-                                 index=(_kfolds.index(_kauto) + 1) if _kauto in _kfolds else 0, key=f"know_lvl_{_kauto}")
-        _kdepth = _kc2.selectbox("Επίπεδα", [2, 3, 4, 5], index=1, key="know_depth")
-        if _kq:
-            st.caption(f"{len(_khits)} αποτελέσματα (κόκκινα στο δέντρο, μαζί με τους φακέλους τους).")
-        st.plotly_chart(knowledge_view.figure(_ke, _kq, None if _klevel.startswith("(") else _klevel, _kdepth),
-                        width="stretch", config={"displaylogo": False, "scrollZoom": False})
-        _kpaths = _khits or [e["path"] for e in _ke]
-        _kpick = st.selectbox("Λεπτομέρειες αρχείου", _kpaths, index=None, key="know_pick", placeholder="διάλεξε αρχείο…")
-        if _kpick:
-            st.info(knowledge_view.detail_md(next(e for e in _ke if e["path"] == _kpick)))
+        st.caption(f"Όλη η γνώση του lab ({len(_ke)} αρχεία md), οργανωμένη κατά θέμα. Πάτα ένα θέμα για να ανοίξει, "
+                   "ένα αρχείο για περίληψη και «📂 Άνοιγμα». Τσίμπημα/ροδέλα = zoom, ⤢ = όλο το δέντρο, ⌂ = αρχή.")
+        components.html(knowledge_tree.render(knowledge_view.tree_data(_ke), ROOT, FILES_TAB, height=640), height=650)
         with st.expander("⭐ Πού είναι τα ευρετήρια και πώς τα χρησιμοποιεί ο συντονιστής", expanded=False):
             st.markdown("Ο συντονιστής δεν διαβάζει όλα τα αρχεία. Ξεκινά από το `docs/STATE.md`, κάνει `grep` μιας λέξης "
                         "στο `docs/INDEX.md` (μία γραμμή ανά αρχείο, φτιάχνεται από το `tools/build_md_index.py` μαζί με το "

@@ -148,3 +148,89 @@ def detail_md(e):
     if e["path"] in INDEX_FILES:
         s += f"\n\n⭐ *Ευρετήριο:* {INDEX_FILES[e['path']]}"
     return s
+
+
+# ---------------------------------------------------------------- thematic tree (M-20261029-118: mobile zoomable tree)
+# Folders alone read as chaos (10 worktree copies, .lab/ next to docs/). The tree groups files by MEANING first,
+# then by folder inside each theme. First matching rule wins; (prefix, exact) — exact=True means whole path.
+CATEGORIES = [  # (key, label, emoji, one-line help, color, rules)
+    ("start", "Ξεκίνα εδώ", "⭐", "Τα ευρετήρια: από εδώ ξεκινά κάθε εργασία και κάθε αναζήτηση.", "#f0ad4e",
+     [(p, True) for p in INDEX_FILES if p.endswith(".md")] + [("AGENTS.md", True), ("CLAUDE.md", True),
+                                                               ("README.md", True)]),
+    ("plan", "Σχέδιο & σχεδιασμός", "🧭", "Τι θέλουμε να αποδείξουμε και πώς στήνονται οι κύκλοι.", "#5b8def",
+     [("docs/cycle2_", False), ("docs/hpa_spec.md", True), ("docs/loop_playbook.md", True),
+      ("docs/COORDINATION.md", True), ("docs/dashboard_requests", False)]),
+    ("exp", "Πειράματα & αποτελέσματα", "🧪", "Μητρώα, κύκλοι tuning, αποτελέσματα test.", "#2fa66a",
+     [("docs/tuning_experiments.md", True), (".lab/tuning/", False), ("reports/", False), ("export/results/", False)]),
+    ("paper", "Paper & βιβλιογραφία", "📝", "Σημειώσεις paper, σχετική δουλειά, συνέδρια, expert pack.", "#a05bd6",
+     [("paper/", False), ("docs/paper_notes.md", True), ("docs/related_work", False), ("docs/VENUES.md", True),
+      ("docs/venue_", False), ("docs/papers/", False), ("docs/expert/", False)]),
+    ("rules", "Κανόνες & ρόλοι", "📏", "Κανόνες του lab, ρόλοι των agents, μνήμη και prompts.", "#d9534f",
+     [("docs/rules/", False), ("prompts/", False), (".claude/", False), ("docs/claude-memory/", False)]),
+    ("talk", "Συμβούλια & παραδόσεις", "🤝", "Συζητήσεις Claude–Codex και παραδόσεις βάρδιας.", "#e07b39",
+     [(".lab/council/", False), (".lab/codex-handoff/", False), ("docs/handoffs/", False),
+      ("docs/deputy_handoff.md", True)]),
+    ("guide", "Οδηγοί & tutorials", "🎓", "Εξηγήσεις για σένα: tutorials, κινητό, ανάκαμψη, εργαλεία.", "#17a2b8",
+     [("docs/tutorial", False), ("docs/guides/", False), ("docs/MOBILE.md", True), ("docs/RECOVERY.md", True),
+      ("docs/INVENTORY.md", True), ("docs/token_", False), ("docs/extensions_eval", False),
+      ("docs/for_other_projects.md", True)]),
+    ("log", "Ημερολόγιο & αρχείο", "📓", "Τι έγινε πότε· παλιές εκδόσεις.", "#8a8f98",
+     [("docs/journal/", False), ("docs/archive/", False), ("CHANGELOG.md", True)]),
+    ("export", "GitHub export", "📦", "Το επιμελημένο αντίγραφο για το GitHub.", "#6c757d", [("export/", False)]),
+    ("code", "Κώδικας (worktrees)", "💻", "Τα md μέσα στα worktrees του κώδικα· κάθε worktree χωριστά.", "#495057",
+     [("code", False)]),
+    ("other", "Λοιπά", "📎", "Ό,τι δεν ταιριάζει αλλού.", "#adb5bd", [("", False)]),
+]
+
+
+def category(path):
+    for key, *_rest, rules in CATEGORIES:
+        for pref, exact in rules:
+            if (path == pref) if exact else path.startswith(pref):
+                return key
+    return "other"
+
+
+def _strip_prefix(path, key):
+    """Folder path shown INSIDE a theme: drop the part the theme already says (docs/, .lab/, .claude/)."""
+    for pref in ("docs/", ".lab/", ".claude/", "export/"):
+        if path.startswith(pref) and key != "code" and (pref != "export/" or key == "export"):
+            return path[len(pref):]
+    return path
+
+
+def tree_data(entries, query=""):
+    """Nested {name, kind, children|entry fields} for the HTML tree: root → theme → sub-folders → files.
+    Every node carries n (md files under it) and hit (search match in it or below)."""
+    hits = matches(entries, query)
+    meta = {c[0]: c for c in CATEGORIES}
+    root = {"id": ROOT_ID, "name": "Γνώση του lab", "kind": "root", "children": [], "n": 0, "hit": False}
+    themes = {}
+    for e in sorted(entries, key=lambda e: (e["path"] not in INDEX_FILES, e["path"])):
+        key = category(e["path"])
+        if key not in themes:
+            _k, label, emoji, help_, color, _r = meta[key]
+            themes[key] = {"id": "cat:" + key, "name": label, "emoji": emoji, "help": help_, "color": color,
+                           "kind": "theme", "children": [], "n": 0, "hit": False}
+        node = themes[key]
+        chain = [root, node]
+        rel = _strip_prefix(e["path"], key) if key != "start" else os.path.basename(e["path"])
+        parts = rel.split("/")
+        for i, part in enumerate(parts[:-1]):
+            fid = f"{node['id']}/{part}"
+            sub = next((c for c in node["children"] if c["id"] == fid), None)
+            if sub is None:
+                sub = {"id": fid, "name": part + "/", "kind": "folder", "children": [], "n": 0, "hit": False}
+                node["children"].append(sub)
+            node = sub
+            chain.append(node)
+        node["children"].append({
+            "id": e["path"], "name": parts[-1], "kind": "index" if e["path"] in INDEX_FILES else "file",
+            "path": e["path"], "title": e.get("title") or "", "desc": e.get("description") or "",
+            "lines": e.get("lines"), "note": INDEX_FILES.get(e["path"], ""), "n": 1, "hit": e["path"] in hits})
+        for c in chain:
+            c["n"] += 1
+            c["hit"] = c["hit"] or e["path"] in hits
+    order = [c[0] for c in CATEGORIES]
+    root["children"] = [themes[k] for k in order if k in themes]
+    return root

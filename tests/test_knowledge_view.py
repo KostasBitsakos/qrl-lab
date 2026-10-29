@@ -50,3 +50,27 @@ def test_figure_real_index_and_zoom():
     assert len(tr.ids) > len(entries)  # all files plus their folders
     assert kv.figure(entries, level="nope").data[0].level == kv.ROOT_ID
     assert "docs/rules" in kv.folders(entries)
+
+
+def test_theme_tree_counts_and_search():
+    entries = ENTRIES + [{"path": "code-tuning/experiments/x.md", "title": "X", "description": "", "lines": 1},
+                         {"path": ".lab/tuning/cycles/c1.md", "title": "c1", "description": "poisson", "lines": 1}]
+    t = kv.tree_data(entries, "poisson")
+    themes = {c["id"]: c for c in t["children"]}
+    assert t["n"] == len(entries) == sum(c["n"] for c in t["children"])
+    assert themes["cat:start"]["children"][0]["path"] == "docs/STATE.md"  # entry point lives under «Ξεκίνα εδώ»
+    assert themes["cat:rules"]["children"][0]["name"] == "rules/"  # docs/ prefix stripped inside a theme
+    assert themes["cat:exp"]["hit"] and not themes["cat:code"]["hit"] and t["hit"]
+    assert kv.category("export/results/a.md") == "exp" and kv.category("export/docs/a.md") == "export"
+    assert kv.category("weird.md") == "other"
+
+
+def test_tree_html_is_self_contained_and_escaped():
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    import knowledge_tree as ktr
+    page = ktr.render(kv.tree_data([{"path": "a.md", "title": "</script><b>", "description": "", "lines": 1}]), "/r/", "📁 Αρχεία")
+    assert "</script><b>" not in page and "<\\/script>" in page
+    assert "http://" not in page.replace("http://www.w3.org/2000/svg", "") and "https://" not in page  # no CDN
+    real = ktr.render(kv.tree_data(kv.load(ROOT)), ROOT, "📁 Αρχεία")
+    assert ',ROOT="/r",FILES_TAB="📁 Αρχεία";' in page  # absolute paths for the Files tab (?path=)
+    assert "__DATA__" not in real and "pointerdown" in real
