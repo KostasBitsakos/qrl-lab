@@ -105,7 +105,7 @@ Last update: 2026-10-29 · by: Claude (J66) · task: R-20261029-005 answered (pa
   load-based HPA tuned on val (`docs/tuning_experiments.md` Notes).
 - oracle_Dstep is a D-step look-ahead heuristic, not an optimal bound (`docs/paper_notes.md` §6).
 - Names (M-20261022-007): LSTM / LSTM+transfer (was DInos+T) / Dinos / Dinos+Transfer V.2; `derp` = his original
-  DERP, `derp_hist10` = enhanced DERP; each model tested at its best val checkpoint.
+  DERP, `derp_hist10` = enhanced DERP; each model tested at its best val checkpoint. Always write «Dinos+Transfer V.2», never bare «V.2» (M-20261029-121).
 - Real cluster: 1 Redis pod ≈116-118k ops/s at c=1, no saturation; stage-B sweep failed at 1→2 pods (fix 84367e1,
   never re-run); calibration paused → `.lab/outbox/calib-status.md`, `stageB-rerun-ask.md`, `docs/rules/paused.md`.
 - Every batch with status and pointers: `docs/EXPERIMENTS.md` (1532 launcher runs, 23 requests).
