@@ -4,7 +4,7 @@
      (M-/R-/run id, path, URL). Update it at the end of every task that changed something. Older detail goes to
      docs/DECISIONS.md, docs/journal/ or a topic file listed in docs/INDEX.md. -->
 
-Last update: 2026-10-29 · by: Claude (J83) · task: stale R-20261021-007 end-notice re-checked (73/73 ok, already in c18 analysis)
+Last update: 2026-10-29 · by: Claude (J84) · task: stale R-20261021-005 end-notice re-checked (147/147 dirs with JSON, already in EXPERIMENTS rows 26-27)
 
 ## 1. Goal now
 - PhD paper: hybrid quantum–classical extension of the DInos autoscaler; simulation first, then real cluster;
