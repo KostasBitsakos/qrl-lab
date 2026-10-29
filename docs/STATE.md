@@ -4,7 +4,7 @@
      (M-/R-/run id, path, URL). Update it at the end of every task that changed something. Older detail goes to
      docs/DECISIONS.md, docs/journal/ or a topic file listed in docs/INDEX.md. -->
 
-Last update: 2026-10-29 · by: claude (J48) · task: md cleanup (M-20261029-017); pre-cleanup copy:
+Last update: 2026-10-29 · by: Codex (C57) · task: J51 commit escalation (M-20261029-030); pre-cleanup copy:
 `docs/archive/STATE_2026-10-29_before_cleanup.md`
 
 ## 1. Goal now
@@ -19,10 +19,15 @@ Last update: 2026-10-29 · by: claude (J48) · task: md cleanup (M-20261029-017)
   file the sandbox request when runs start. Plan: `docs/cycle2_plan.md`, expert pack `docs/expert/` (J12, d6cfa11).
 
 ## 2. In progress (what · id · owner · next check)
-- C50: J40 reports reviewed `cycle2-harness-v1` = b609b93 on both Poisson branches (Codex APPROVE r3;
-  `.lab/cycle2-claude/status.md`). J51 (Codex, queued) owns competing-branch configs and ONE concrete aggregate
-  sandbox request after J48 launcher review/commit; brief `.lab/c50/codex-continuation.md`. J40/J48 notified;
-  reviewed harness protection and measured-cost gate required. No runs authorized by this handoff.
+- J53 DONE 29/10: Claude-branch wrapper commit cc83534 on dinos-poisson (`tuning/cycle2_entry.py` byte-identical to
+  Codex branch, 8 tests) + manifests on J51 contract `.lab/cycle2-claude/{smoke,screen}.json` (7+28; Codex r2 APPROVE,
+  key cycle2-claude-entry). Handed to J51; wrapper needs content pin in guard. "paper model" arm unmapped. No runs.
+- C56 / J51 handoff: Codex smoke/screen configs + launcher-compatible wrapper validated without training
+  (35 CLI commands; `.lab/cycle2-codex/{contract.md,validation.out,handoff-j51.md}`). Launcher gate ecca33d passed.
+  Claude review hit usage limit (04:58 UTC); J53 agreement pending. ONE aggregate request NOT filed; no runs. Next coordinator: reconcile J53 artifacts, obtain independent concrete review including
+  aggregate draft, finalize expiry, check pending duplicates, then file one approval; never submit current DRAFT
+  (`.lab/cycle2-codex/handoff-j51.md`). C57 queued J58: scoped worktree commits; root index read-only per J51.
+  Wrappers uncommitted; J51/J53 notified; brief `.lab/c57/worktree-commit.md`.
 - J40 DONE 30/10: shared harness tag `cycle2-harness-v1` = b609b93 (code-poisson; dinos-poisson-astra ff to it), Codex
   APPROVE r3 key cycle2-harness. pms:<v> via c5 (`--env-family orig --orig-variant pms:poisson_ms`), native RecurrentPPO
   DRe-SCale `python -m tuning.rppo` (sb3_contrib not installable headless), references `python -m tuning.pms_reference`;
