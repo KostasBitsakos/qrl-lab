@@ -4,7 +4,7 @@
      (M-/R-/run id, path, URL). Update it at the end of every task that changed something. Older detail goes to
      docs/DECISIONS.md, docs/journal/ or a topic file listed in docs/INDEX.md. -->
 
-Last update: 2026-10-29 · by: Claude (J82) · task: R-20261029-007 approved → calibration started
+Last update: 2026-10-29 · by: Claude (J88) · task: R-20261029-008 tags for GitHub releases
 
 ## 1. Goal now
 - PhD paper: hybrid quantum–classical extension of the DInos autoscaler; simulation first, then real cluster;
@@ -46,8 +46,7 @@ Last update: 2026-10-29 · by: Claude (J82) · task: R-20261029-007 approved →
   Codex key cycle2-launcher-j48 r1 CHANGE → r2 APPROVE. Parent spec needs `worktrees`, `frozen_env_commit` 238003f,
   `frozen_harness_commit` b609b93 (7 harness files pinned; `docs/cycle2_launcher.md`). 19 focused + legacy test_sandbox
   pass; real worktrees verified. Handoff `.lab/cycle2-launcher/handoff.md`. Next: J51 files ONE aggregate request.
-- C44: researcher set `max_workers=16` (M-20261029-066, R-20261029-004); resource/dependency-aware scheduling
-  requested (M-20261029-055/058). C38 shared env/harness briefs: `.lab/c38/{harness,launcher}.md`.
+- C44: `max_workers=16` (M-20261029-066); resource-aware scheduling (M-20261029-055/058); briefs `.lab/c38/`.
 - 29/10 J24 (claude): cycle-2 shared env FROZEN, tag `cycle2-env-v1` = 238003f (dinos-poisson, worktree code-poisson;
   `tuning/poisson_ms.py`, 10 tests; Codex APPROVE r3, key cycle2-env). Worktree code-poisson-astra created for Codex.
   Still to do before any run: harness adapter, DRe-SCale arm (sb3_contrib missing), sandbox_guard for the new
@@ -64,8 +63,12 @@ Last update: 2026-10-29 · by: Claude (J82) · task: R-20261029-007 approved →
   NOT done (headless permission denied `git push`). Exact approved refs: export-main 901fe54→main, cycle1-claude
   afc4ea7, cycle1-codex ad283e4 (log-free snapshots of dinos-tuning 5eae972 / -astra 16d9bf4; worktree `export/`).
   Push = `git push github 901fe54:refs/heads/main afc4ea7:refs/heads/cycle1-claude ad283e4:refs/heads/cycle1-codex`.
+- J88 29/10 R-20261029-008: GitHub versions = tags via `tools/publish_release.py` (`docs/github_publishing.md`);
+  tags cycle1-claude-v1.0/cycle1-codex-v1.0 pushed and verified. Deleting remote branches cycle1-claude/-codex was
+  blocked by the permission classifier → researcher runs `git push github :refs/heads/cycle1-claude :refs/heads/cycle1-codex`.
 - R-20261029-003 approved: `.claude/settings.json` now allows `git push github …` headless; force/-f/origin denied (da5d4e5, J33). Joint Claude+Codex review before push still required (AGENTS.md).
-- J71 29/10: Γνώση = mobile zoomable thematic tree (`tools/knowledge_tree.py`); Codex r1/r2 fixed (`.lab/j71/`).
+- J71/J79 29/10: Γνώση = zoomable tree (`tools/knowledge_tree.py`, `.lab/j71/`); phone CSS ≤480px + ☰ tab menu + home-screen tags
+  (`tools/mobile_view.py`, `dashboard/static/`); `enableStaticServing` needs a dashboard restart (not done, J79).
 
 ## 3. Waiting for the researcher
 - R-20261029-005 ANSWERED 29/10 (J66): «paper model» = adapted DRe-SCale LSTM-PPO (arm `tuning.rppo`); criterion

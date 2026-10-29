@@ -5,6 +5,8 @@ port = 8501
 headless = true
 runOnSave = false
 maxUploadSize = 200  # MB per file; keep equal to uploads.MAX_BYTES
+# Serves dashboard/static/ at /app/static/ (home-screen icon + web manifest, tools/mobile_view.py, J79).
+enableStaticServing = true
 
 [browser]
 gatherUsageStats = false

@@ -58,6 +58,7 @@ import topology_ui  # noqa: E402
 import knowledge_view  # noqa: E402
 import knowledge_tree  # noqa: E402
 import tab_links  # noqa: E402
+import mobile_view  # noqa: E402
 import changes_view  # noqa: E402
 import models_view  # noqa: E402
 import summarize_runs  # noqa: E402
@@ -128,6 +129,7 @@ RUN_STATUS = {"starting": ("🔵", "ξεκινά"), "running": ("🟢", "τρέ�
               "failed": ("❌", "απέτυχε"), "stopped": ("⏹️", "διακόπηκε")}
 
 st.set_page_config(page_title="QRL-Lab", page_icon="🧪", layout="wide")
+mobile_view.inject()  # phone layout + home-screen web-app tags (M-20261029-126)
 
 # ---------------------------------------------------------------- access control over Tailscale Serve (tools/access.py)
 try:
