@@ -4,7 +4,7 @@
      (M-/R-/run id, path, URL). Update it at the end of every task that changed something. Older detail goes to
      docs/DECISIONS.md, docs/journal/ or a topic file listed in docs/INDEX.md. -->
 
-Last update: 2026-10-29 · by: Claude (J84) · task: stale R-20261021-005 end-notice re-checked (147/147 dirs with JSON, already in EXPERIMENTS rows 26-27)
+Last update: 2026-10-29 · by: Claude (J82) · task: R-20261029-007 approved → calibration started
 
 ## 1. Goal now
 - PhD paper: hybrid quantum–classical extension of the DInos autoscaler; simulation first, then real cluster;
@@ -19,9 +19,9 @@ Last update: 2026-10-29 · by: Claude (J84) · task: stale R-20261021-005 end-no
 
 ## 2. In progress (what · id · owner · next check)
 - J72 29/10: daily cycle-2 report = `tools/cycle2_daily.py` (no LLM), crontab `0 15-17 * * *` UTC, posts once at 18:xx Athens to M-20261029-006, self-removes after 02/11; log `.lab/cycle2_daily/cron.log`.
-- J77 29/10: R-20261029-006 smoke 14/14 exit 0, 0.968/160 CPU-h; branches identical (determinism). Cost gate (Codex+Claude,
-  key cycle2-cost-gate) FAIL at 2x margin (≈148-179 > 136 CPU-h; 1x ≈74-90) → `.lab/j77/smoke_result.md`. Asked
-  R-20261029-007 (1 calibration 14 runs 5k ≤10.5 CPU-h [rec.] / 2 more CPU-h / 3 accept 1x). No tuning runs until answered.
+- J82 29/10: R-20261029-007 APPROVED → calibration 14 runs (7 arms x 2 branches, seed 15010, 4992 ticks, 0.75 h cap,
+  reserve 10.5 CPU-h) under sandbox R-20261029-006; specs `.lab/j82/`, wave 1 s14-s21 13:40 UTC, wave 2 `.lab/j82/wave2.sh`.
+  Next: 14/14 done → re-measure cost (as J77 `.lab/j77/smoke_result.md`, gate FAIL 2x), joint re-gate, ask again. No tuning.
 - J64 DONE 29/10: Claude review M-20261029-110 (guard + work.py --worktree APPROVE; schedule AGREE, cond. A: val
   selection → claims only from test12 after freeze; B: smoke-first is policy, not launcher-enforced); Codex final
   M-20261029-111 APPROVE. Commits 7d55754 (root), 182af33 (astra wrapper). **Filed R-20261029-006** (sandbox 160 CPU-h,
