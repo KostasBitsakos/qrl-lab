@@ -6,7 +6,8 @@ tool_name, tool_input, cwd, permission_suggestions?. Stdout JSON
 {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "allow"}}} or
 {... "decision": {"behavior": "deny", "message": "..."}}. No output + exit 0 = no decision, the terminal prompt appears.
 
-Allow is produced only when the dashboard records state "approved". Any error, timeout or malformed input prints
+Allow is produced only when the dashboard records state "approved" (for this request, or once for an earlier
+headless denial of the exact same tool + command/path, see perm_store.take_approval). Any error, timeout or malformed input prints
 nothing (fail-open-to-prompt, never auto-allow).
 """
 import json
@@ -34,6 +35,9 @@ def handle(raw, root=None, wait=WAIT_SECONDS, poll=POLL, sleep=time.sleep):
         ev = json.loads(raw)
         if not isinstance(ev, dict) or ev.get("hook_event_name") != "PermissionRequest" or not ev.get("tool_name"):
             return None
+        # the researcher already approved this exact action after an earlier headless task denied it: allow it once
+        if perm_store.take_approval(ev["tool_name"], ev.get("tool_input"), root):
+            return out("allow")
         rid = perm_store.create(ev["tool_name"], ev.get("tool_input"), ev.get("cwd", ""), root)
     except Exception:
         return None

@@ -954,7 +954,25 @@ def test_perm_hook():
     p = subprocess.run([sys.executable, os.path.join(TMP, "tools", "perm_hook.py")], input="garbage", text=True,
                        capture_output=True, env=env, timeout=20)
     assert p.returncode == 0 and p.stdout == "", (p.stdout, p.stderr)
-    ok("perm hook: allow, deny, timeout, malformed input and unwritable store never auto-allow")
+    # headless denial approved later in the dashboard: the retry of the exact same action is allowed once, nothing else
+    root2 = tempfile.mkdtemp(prefix="perm-", dir=TMP)
+    hid = perm_store.create("Bash", {"command": "rm -rf /tmp/a"}, "/x", root2, source="headless", thread_id="M-1")
+    never = lambda _: None
+    other = _j.dumps({"hook_event_name": "PermissionRequest", "tool_name": "Bash", "tool_input": {"command": "rm -rf /"}})
+    assert perm_hook.handle(ev, root=root2, wait=0.01, poll=0, sleep=never) is None  # still pending: no allow
+    assert perm_store.decide(hid, True, root=root2)
+    assert perm_hook.handle(other, root=root2, wait=0.01, poll=0, sleep=never) is None  # different command
+    r = perm_hook.handle(ev, root=root2, wait=0.01, poll=0, sleep=never)
+    assert r["hookSpecificOutput"]["decision"]["behavior"] == "allow", r
+    assert perm_store.read(hid, root2)["used"] is True
+    assert perm_hook.handle(ev, root=root2, wait=0.01, poll=0, sleep=never) is None  # used once only
+    hid2 = perm_store.create("Bash", {"command": "rm -rf /tmp/a"}, "/x", root2, source="headless")
+    perm_store.decide(hid2, False, root=root2)
+    assert perm_hook.handle(ev, root=root2, wait=0.01, poll=0, sleep=never) is None  # denied is never an allow
+    hid3 = perm_store.create("Bash", {"command": "rm -rf /tmp/a"}, "/x", root2, source="headless")
+    perm_store.decide(hid3, True, root=root2)
+    assert perm_store.take_approval("Bash", {"command": "rm -rf /tmp/a"}, root2, ttl=-1) is None  # expired
+    ok("perm hook: allow, deny, timeout, malformed input and unwritable store never auto-allow; headless approval once")
 
 
 def test_ext_catalog_and_tab():

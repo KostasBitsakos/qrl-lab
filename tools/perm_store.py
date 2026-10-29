@@ -3,6 +3,7 @@
 
 One JSON file per request in .lab/perm/<id>.json: {id, ts, tool, description, detail, cwd, state, decided_at, message}.
 state: pending -> approved | denied (written only by `decide`, called from the dashboard) | timeout | gone.
+An approved 'headless' record is consumed once by the hook when the coordinator retries that exact action (take_approval).
 Atomic writes (tmp + rename). Pure helpers, no Streamlit.
 """
 import json
@@ -80,6 +81,36 @@ def decide(rid, approve, message="", root=None):
     rec.update(state="approved" if approve else "denied", decided_at=time.time(), message=message or "")
     _write(rec, root)
     return True
+
+
+APPROVAL_TTL = 24 * 3600
+
+
+def take_approval(tool, tin, root=None, ttl=APPROVAL_TTL):
+    """One-shot use of a researcher approval given to a headless (dispatcher) denial, so the retry in the next task
+    really runs (M-20261029-003). Matches the exact tool and command/path only; approvals older than `ttl` are ignored.
+    Each approval is used at most once (O_EXCL marker file, safe across parallel jobs). -> record id or None."""
+    _, detail = describe(tool, tin)
+    detail = detail[:MAX_DETAIL]
+    d = perm_dir(root)
+    for fn in sorted(os.listdir(d)):
+        if not fn.endswith(".json"):
+            continue
+        rec = read(fn[:-5], root)
+        if not rec or rec.get("source") != "headless" or rec.get("state") != "approved" or rec.get("used"):
+            continue
+        if rec.get("tool") != str(tool) or rec.get("detail") != detail:
+            continue
+        if time.time() - float(rec.get("decided_at") or 0) > ttl:
+            continue
+        try:
+            os.close(os.open(os.path.join(d, rec["id"] + ".used"), os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+        except FileExistsError:
+            continue
+        rec.update(used=True, used_at=time.time())
+        _write(rec, root)
+        return rec["id"]
+    return None
 
 
 def mark(rid, state, root=None):
