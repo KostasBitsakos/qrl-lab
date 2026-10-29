@@ -186,8 +186,8 @@ class DispatchDB:
             raise LabError("coordinator: claude ή codex.")
         if key in ("failover", "paused", "allow_paid_credits") and value not in ("0", "1"):
             raise LabError(f"{key}: 0 ή 1.")
-        if key == "max_workers" and value not in ("1", "2", "3", "4"):
-            raise LabError("max_workers: 1–4.")
+        if key == "max_workers" and not (value.isdigit() and 1 <= int(value) <= 16):
+            raise LabError("max_workers: 1–16.")
         with self.tx() as c:
             c.execute("INSERT INTO settings(key, value, updated_at, updated_by) VALUES (?,?,?,?) ON CONFLICT(key) DO"
                       " UPDATE SET value=excluded.value, updated_at=excluded.updated_at, updated_by=excluded.updated_by",

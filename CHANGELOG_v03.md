@@ -1,6 +1,6 @@
 # Changelog v0.4 — 2026-10-29: parallel work (researcher's request, M-thread of 29/10)
 - Two lanes in `tools/dispatcher.py`: the chat coordinator (job `C<n>`, one at a time) answers researcher messages
-  even while workers run; up to `max_workers` (default 2, researcher setting 1–4) parallel workers (`J<n>`) take
+  even while workers run; up to `max_workers` (default 2, researcher setting 1–16) parallel workers (`J<n>`) take
   decisions, permission answers, run events and jobs the coordinator hands over (`tools/work.py spawn`).
 - `tools/work.py`: job board in `.lab/dispatch.db` — atomic file claims (directories cover their files), conflicts
   show the holder's goal (exit 2), agent-to-agent messages (`say`/`inbox`), recorded agreements posted in the thread
