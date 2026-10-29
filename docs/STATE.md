@@ -20,6 +20,13 @@ Last update: 2026-10-29 · by: claude (J18) · task: md cleanup (M-20261029-017)
 - Order (C9): GitHub push → md cleanup → cycle-2 implementation.
 
 ## 2. In progress (what · id · owner · next check)
+- 29/10 J24 (claude): cycle-2 shared env FROZEN, tag `cycle2-env-v1` = 238003f (dinos-poisson, worktree code-poisson;
+  `tuning/poisson_ms.py`, 10 tests; Codex APPROVE r3, key cycle2-env). Worktree code-poisson-astra created for Codex.
+  Still to do before any run: harness adapter, DRe-SCale arm (sb3_contrib missing), sandbox_guard for the new
+  worktrees, ONE sandbox request → `.lab/cycle2-claude/status.md`. No runs (M-20261029-057).
+- C37 scheduling clarification: use as many workers as useful for assigned tasks, respecting dependencies,
+  CPU/budget and model routing; no repeated worker-count question (M-20261029-055). `dispatcher.py status`
+  verified `max_workers=4`; J24 notified to signal shared-env readiness for the Codex branch.
 - C29: J25 (Codex) prep done (.lab/cycle2-codex/preparation.md, GATES.md); J25 ends. RE-SPAWN a Codex branch job
   (brief /tmp/c9/b6.md or .lab/cycle2-codex/preparation.md) when J24 reports env frozen or the sandbox is approved.
 - J25 Codex preparation (M-20261029-030): `.lab/cycle2-codex/preparation.md`, review checklist and gates;
@@ -30,7 +37,7 @@ Last update: 2026-10-29 · by: claude (J18) · task: md cleanup (M-20261029-017)
   (`tests/test_cycle1_report.py`, `tests/test_tab_links.py`); HTTP health OK, no service restart (M-20261029-030).
 - 29/10 C21 (M-20261029-030): Codex fixed (~/.codex/config.toml model gpt-6.1-sol). Cycle 2 started: J24 (Claude) shared
   env/workload/DRe-SCale + branch dinos-poisson; J25 (Codex) competing branch dinos-poisson-astra; J23 (Codex) Experiments
-  tab; J17 GitHub push after Codex review; J18 md cleanup. max_workers=2 (only the researcher can raise it).
+  tab; J17 GitHub push after Codex review; J18 md cleanup. Current worker scheduling: C37 entry above.
 - J17 (claude): curated GitHub upload READY, Codex APPROVED round 2 (key github-export; briefs `.lab/export/`), push
   NOT done (headless permission denied `git push`). Exact approved refs: export-main 901fe54→main, cycle1-claude
   afc4ea7, cycle1-codex ad283e4 (log-free snapshots of dinos-tuning 5eae972 / -astra 16d9bf4; worktree `export/`).
@@ -46,8 +53,7 @@ Last update: 2026-10-29 · by: claude (J18) · task: md cleanup (M-20261029-017)
 - Codex model fix (above) — blocks every Codex review, incl. the push review and the cycle-2 plan review
   (`docs/expert/codex_brief_cycle2.md`, M-20261029-025).
 - M-20261029-009: (a) results-retention policy (keep per-seed JSON + result md + best ckpt; audit that every
-  test10/11 number traces to a file) — awaiting OK; (c) parallel workers: v0.4 `max_workers` default 2, max 4
-  (`tools/dispatcher.py:78,189`) — his `dispatcher.py set`.
+  test10/11 number traces to a file) — awaiting OK. Worker-count clarification resolved by M-20261029-055 (§2).
 - `labq.py pending` on 28/10: 25 open messages, oldest M-20261016-043; waiting_approval: M-20261020-019,
   M-20261021-086, M-20261023-002, M-20261023-004. Most old "in_progress" items were never closed — triage, do not redo.
 - Merge/delete of single-purpose branches dinos-tuning-c19/-c20/-c22/-c23 (worktrees `code-tuning-c19` …) needs a
