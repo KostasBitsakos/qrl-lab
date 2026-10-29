@@ -49,6 +49,9 @@ If you are **the chat coordinator**:
   follows from the researcher's requests; ask the researcher (`labq.py ask`) only when it is a real choice.
 
 If you are **a worker**: do your job's input end to end, and report as rule 6 says (the dispatcher posts it).
+Never send status/progress notes to the coordinator (each one wakes a paid run; R-20261029-012): your final
+message is the report. `work.py say coordinator` only for a real escalation; add `--urgent` only when you are
+blocked on it (routine notes are batched, at most one coordinator wake-up per 20').
 
 Both roles, before editing any file:
 1. `python3 tools/work.py claim <paths...> --note "<why>"` (files or directories; only what you will edit).
@@ -59,7 +62,7 @@ Both roles, before editing any file:
    (a) split the file (each edits different functions/sections; the holder adds your paths' note, you claim after it
    releases or it agrees you edit its part), (b) one job makes both changes (send it an exact spec), or (c) wait for
    it to finish: `work.py claim <paths> --wait 600`. Record the outcome: `work.py agree <job> "<who does what>"`.
-   No answer in ~5 minutes → (c). Truly incompatible goals → `work.py say coordinator "<both options>"`.
+   No answer in ~5 minutes → (c). Truly incompatible goals → `work.py say coordinator --urgent "<both options>"`.
 3. Answer messages from other jobs promptly: every `work.py` call shows your inbox; while doing long work also run
    `work.py inbox` between steps. Be cooperative: the goal is the researcher's result, not your own job.
 4. Commit only your claimed files: `python3 tools/work.py commit -m "<msg> (<job id>)"` — never `git add -A`,

@@ -849,11 +849,37 @@ def test_peer_context_and_ttl_limits():
             assert run.call_args.kwargs["session_id"] == expected
     ok("F4 peer resumes obey the context ceiling and provider TTL, including boundary")
 
+def test_escalation_debounce():
+    d = fresh_dispatcher()
+    w = d.work
+    a = w.create("worker", "spawn", "A", "long job", reply_to="M-x", status="running")
+    esc = lambda: [i for i in d._candidates() if i["kind"] == "escalation"]
+    w.say(a, "coordinator", "progress 1")
+    first = esc()
+    assert len(first) == 1, "no wake-up yet: the first routine note wakes the coordinator"
+    d._consume(first[0])
+    w.say(a, "coordinator", "progress 2")
+    w.say(a, "coordinator", "progress 3")
+    assert esc() == [], "routine notes inside the debounce window are batched"
+    d.dd.conn.execute("UPDATE settings SET value=? WHERE key='escalation_last_wake'", (str(time.time() - 1201),))
+    batch = esc()
+    assert len(batch) == 1 and "progress 2" in batch[0]["text"] and "progress 3" in batch[0]["text"]
+    d._consume(batch[0])
+    w.say(a, "coordinator", "blocked: need a choice", kind="urgent")
+    assert len(esc()) == 1, "urgent notes wake at once"
+    d._consume(esc()[0])
+    w.say(a, "coordinator", "final note")
+    assert esc() == []
+    w.set_status(a, "done")
+    assert len(esc()) == 1, "a note from a job that already ended wakes at once"
+    ok("escalation debounce: routine notes max 1 wake per window; urgent and final notes immediate")
+
+
 TESTS = [test_run_events_full_request_set, test_retry_attempt_accounting_and_resume_policy,
          test_resume_rejection_before_work_only, test_peer_context_and_ttl_limits, test_claude_reply_and_resume, test_failover_on_quota, test_both_exhausted_then_resume,
          test_choice_mention_status_and_errors, test_paid_credits_guard, test_decisions_and_run_events, test_peers,
          test_md_index, test_parse_reset, test_panel_and_installer, test_edit_freeze, test_headless_permission_roundtrip,
-         test_work_board, test_parallel_lanes, test_max_workers_cancel_heartbeat]
+         test_work_board, test_parallel_lanes, test_max_workers_cancel_heartbeat, test_escalation_debounce]
 
 if __name__ == "__main__":
     print(f"QRL-Lab v0.3 tests in {TMP}")

@@ -10,7 +10,8 @@ any number of workers (J<n>, do the longer work in parallel). Runs see their own
   work.py claim PATH... [--note why] [--wait S]
                                               reserve files/directories BEFORE editing them; exit 2 = conflict
   work.py release [PATH...]                   give files back (all when none given; the dispatcher also releases at end)
-  work.py say JOB|coordinator TEXT            message another job (or escalate to the chat coordinator)
+  work.py say JOB|coordinator TEXT [--urgent] message another job (or escalate to the chat coordinator; --urgent
+                                              wakes it now, otherwise batched to at most 1 wake/20')
   work.py agree JOB TEXT                      record the agreement reached with JOB (also posted for the researcher)
   work.py inbox [--wait S]                    read messages addressed to you
   work.py commit [--worktree PATH] -m MSG     git commit only the files you claimed (serialised between jobs)
@@ -337,6 +338,8 @@ def main(argv=None):
     s = sub.add_parser("say")
     s.add_argument("to")
     s.add_argument("text")
+    s.add_argument("--urgent", action="store_true",
+                   help="to the coordinator: wake it now (blocking question/conflict); else batched, max 1 wake/20'")
     s = sub.add_parser("agree")
     s.add_argument("other")
     s.add_argument("text")
@@ -392,8 +395,9 @@ def main(argv=None):
     elif a.cmd == "say":
         if a.to != "coordinator" and not w.job(a.to):
             raise LabError(f"Unknown job {a.to}.")
-        w.say(me, a.to, a.text)
-        print(f"sent to {a.to}")
+        w.say(me, a.to, a.text, kind="urgent" if a.urgent else "note")
+        print(f"sent to {a.to}" + (" (batched: the coordinator wakes at most once per 20')"
+                                   if a.to == "coordinator" and not a.urgent else ""))
     elif a.cmd == "agree":
         if not w.job(a.other):
             raise LabError(f"Unknown job {a.other}.")

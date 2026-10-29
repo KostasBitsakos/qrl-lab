@@ -82,6 +82,7 @@ DEFAULTS = {
     "peer_budget_usd": "1.5",
     "task_timeout_min": "60",
     "peer_timeout_min": "15",
+    "escalation_debounce_s": "1200",  # worker->coordinator notes wake the coordinator at most once per this (R-20261029-012)
     "resume_max_tokens": "120000",    # do not resume a session whose context grew beyond this; start fresh
     "codex_resume_window_s": "900",
     "thread_messages": "12",          # thread messages included in a fresh context pack
@@ -770,7 +771,7 @@ class Dispatcher:
                    "reply_to": batch[-1]["id"], "forced": forced, "text": "\n\n".join(texts), "req_ids": []}
         # 1b. agents' escalations to the chat coordinator (could not agree, or need the researcher)
         esc = self.work.escalations()
-        if esc:
+        if esc and self._escalations_due(esc):
             src = self.work.job(esc[0]["from_job"]) or {}
             tid = src.get("thread_id") if src.get("thread_id") and self.lab.message(src["thread_id"]) \
                 else self._system_thread()
@@ -1026,6 +1027,23 @@ class Dispatcher:
                                          f" σε όριο). Το αίτημα περιμένει· συνεχίζει αυτόματα περίπου {when}.")
         return "deferred"
 
+    def _escalations_due(self, esc):
+        """Debounce (R-20261029-012): urgent notes (work.py say --urgent) and notes from jobs that already ended wake
+        the coordinator at once; routine notes wait until the last escalation wake-up is escalation_debounce_s old."""
+        for m in esc:
+            src = self.work.job(m["from_job"]) or {}
+            if m.get("kind") == "urgent" or src.get("status") not in ("queued", "running"):
+                return True
+        try:
+            gap = float(self.dd.get("escalation_debounce_s") or 0)
+        except ValueError:
+            gap = float(DEFAULTS["escalation_debounce_s"])
+        try:
+            last = float(self.dd.get("escalation_last_wake") or 0)
+        except ValueError:
+            last = 0.0
+        return time.time() - last >= gap
+
     def _consume(self, item):
         for pid in item.get("perm_ids") or []:
             perm_store.mark_delivered(pid, self.root)
@@ -1035,6 +1053,8 @@ class Dispatcher:
             self.dd.mark_notified("runs", item["event_ref"])
         if item.get("esc_ids"):
             self.work.mark_read(item["esc_ids"])
+            self.dd.conn.execute("INSERT OR REPLACE INTO settings(key, value, updated_at, updated_by)"
+                                 " VALUES ('escalation_last_wake',?,?,'dispatcher')", (str(time.time()), now_iso()))
 
     def _paid_credit_stop(self, provider, res):
         return provider == "claude" and bool(res.get("paid_credit")) and self.dd.get("allow_paid_credits") != "1"
