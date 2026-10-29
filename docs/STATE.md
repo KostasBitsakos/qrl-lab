@@ -57,8 +57,8 @@ Last update: 2026-10-29 · by: Claude (J90) · task: duplicate end-notice R-2026
   afc4ea7, cycle1-codex ad283e4 (log-free snapshots of dinos-tuning 5eae972 / -astra 16d9bf4; worktree `export/`).
   Push = `git push github 901fe54:refs/heads/main afc4ea7:refs/heads/cycle1-claude ad283e4:refs/heads/cycle1-codex`.
 - J88 29/10 R-20261029-008: GitHub versions = tags via `tools/publish_release.py` (`docs/github_publishing.md`);
-  tags cycle1-claude-v1.0/cycle1-codex-v1.0 pushed and verified. Deleting remote branches cycle1-claude/-codex was
-  blocked by the permission classifier → researcher runs `git push github :refs/heads/cycle1-claude :refs/heads/cycle1-codex`.
+  tags cycle1-claude-v1.0/cycle1-codex-v1.0 pushed and verified. J95 29/10: remote branches cycle1-claude/-codex gone;
+  `git ls-remote github` = main 901fe54 + the two tags only.
 - R-20261029-003 approved: `.claude/settings.json` now allows `git push github …` headless; force/-f/origin denied (da5d4e5, J33). Joint Claude+Codex review before push still required (AGENTS.md).
 - J71/J79 29/10: Γνώση = zoomable tree (`tools/knowledge_tree.py`, `.lab/j71/`); phone CSS ≤480px + ☰ tab menu + home-screen tags
   (`tools/mobile_view.py`, `dashboard/static/`); `enableStaticServing` needs a dashboard restart (not done, J79).
