@@ -2,7 +2,7 @@
 <!-- Read first by every coordinator (Claude or Codex). At most 150 lines. Facts only, each with a pointer
      (M-/R-/run id, path, URL). Update it at the end of every task that changed something. Older detail goes to
      docs/DECISIONS.md, docs/journal/ or a topic file listed in docs/INDEX.md. -->
-Last update: 2026-10-29 · by: Codex (J134) · task: R-005 επαναληπτική ειδοποίηση s35–s146
+Last update: 2026-10-29 · by: Claude (J141) · task: R-005 επαναληπτική ειδοποίηση s38–s146
 ## 1. Goal now
 - PhD paper: hybrid quantum–classical extension of the DInos autoscaler; simulation first, then real cluster;
   conference submission end of Nov 2026 (`docs/PLAN.md` §1, §11). Quantum work is PAUSED (`docs/rules/paused.md`).
@@ -16,7 +16,7 @@ Last update: 2026-10-29 · by: Codex (J134) · task: R-005 επαναληπτι�
 
 ## 2. In progress (what · id · owner · next check)
 - C138/M-20261029-236: J139 queued για ορατά αποτελέσματα cycle2 στην κορυφή των Πειραμάτων και DRe-SCale LSTM-PPO (rppo), με διάκριση calibration/screen και πραγματικές πηγές· διάγνωση: cycle2 placeholder στο `dashboard/app.py:1864`. Brief `.lab/c138/brief.md`, συντονισμός app.py με J136· χωρίς νέα runs.
-- J130: επαναληπτική ειδοποίηση R-20261021-005 s33–s146 ελέγχθηκε: 113 exit0 + s34 stopped/-15, αντικατάσταση s41 exit0· ήδη αναλυμένο c18/c19, χωρίς νέα runs/απόφαση (`.lab/j130/audit.json`, `report.md`; `docs/EXPERIMENTS.md`). J134 επανέλεγξε το subset s35–s146:112/112 done/exit0, έγκυρα JSON και step=total, ίδια με J130 (`.lab/j134/audit.json`, `report.md`).
+- J130: επαναληπτική ειδοποίηση R-20261021-005 s33–s146 ελέγχθηκε: 113 exit0 + s34 stopped/-15, αντικατάσταση s41 exit0· ήδη αναλυμένο c18/c19, χωρίς νέα runs/απόφαση (`.lab/j130/audit.json`, `report.md`; `docs/EXPERIMENTS.md`). J134 επανέλεγξε το subset s35–s146:112/112 done/exit0, έγκυρα JSON και step=total, ίδια με J130 (`.lab/j134/audit.json`, `report.md`). J141: s38–s146 109/109 done/exit0, ίδια με J134 (`.lab/j141/audit.json`).
 - J132 29/10:44 done/exit0 JSON (smoke14,calib14,screen16/56 s28–s43), κόστος4.761944/136 CPU-h, screen0.881944. DERP c0 ίδιο στα lanes· διαφορετικά c1: code-poisson μέσος38816.059, astra159118.951 έναντι c0 141929.233· μόνο2 seeds val, χωρίς νικητή. Script/report `.lab/j132/{summarize.py,result.md,summary.json,table.md}`. J126 wave2 DONE και αυτόματη wave3 s44–s51 στις15:30:37/38 UTC,8 reservations=6h (όχι κατανάλωση)· `.lab/j126/{driver.log,results.jsonl}`. Συνεχίζεται μόνο εγκεκριμένο screen με frozen gates/STOP/no retry· μετά DONE/STOP ledger+stage review, κανένα επόμενο στάδιο αποδεσμευμένο.
 - C118/M-20261029-196: μόνιμη αναπλήρωση όταν πάροχος κοιμάται· δύο ανταγωνιστικοί πράκτορες του διαθέσιμου παρόχου, ανεξάρτητο review από άλλο πράκτορα, συμβούλιο Claude+Codex στην επιστροφή. Καμία παύση λόγω Claude· frozen-spec εγκρίσεις/launcher/push gates ισχύουν (`AGENTS.md`, `docs/rules/handoff.md` §6, `docs/DECISIONS.md`).
 - J119 running: Codex αναπληρωτής Claude lane + ανεξάρτητο review J109/J104 και κοινό frozen spec. J120 running: Codex astra lane + ανεξάρτητο ledger/manifest/cross-review. Briefs `.lab/c118/{standin-brief,astra-brief}.md`· ανταγωνισμός μόνο πειραμάτων, solo notes/προσωρινοί κλάδοι· κανένα νέο run πριν frozen approval (M-20261029-196).
