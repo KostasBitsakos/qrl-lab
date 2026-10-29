@@ -68,6 +68,7 @@ import coord_status  # noqa: E402
 import usage_limits  # noqa: E402
 import extra_credits  # noqa: E402
 import exp_figs  # noqa: E402
+import cycle1_report  # noqa: E402
 import event_tail  # noqa: E402
 from uploads import UploadError, attachment_paths  # noqa: E402
 
@@ -1663,6 +1664,145 @@ def _exp_overview():
             st.dataframe(pd.DataFrame(rem["files"]), hide_index=True, width="stretch")
 
 
+# ---------------------------------------------------------------- big cycle 1 report (M-20261028-011)
+def _c1_md(key_or_path, heading=None, note=True):
+    txt = cycle1_report.read(ROOT, key_or_path)
+    rel = cycle1_report.SOURCES.get(key_or_path, key_or_path)
+    if not txt:
+        st.caption(f"Λείπει το αρχείο `{rel}`.")
+        return
+    st.markdown(cycle1_report.section(txt, heading) if heading else txt)
+    if note:
+        st.caption(f"Πηγή (αυτούσιο): `{rel}`")
+
+
+def _c1_table(hdr, rows, src):
+    if rows:
+        st.dataframe(pd.DataFrame([[c.replace('**', '') for c in r] for r in rows], columns=hdr[:len(rows[0])] if hdr else None),
+                     hide_index=True, width="stretch")
+    st.caption(f"Πηγή: `{src}`")
+
+
+@st.cache_data(show_spinner="Δημιουργία γραφικών (διαβάζονται τα run JSON, ~15 s)…")
+def _c1_figs(_stamp):
+    return cycle1_report.make_figures(ROOT, os.path.join(ROOT, ".lab", "figs", "cycle1"))
+
+
+def _cycle1_view():
+    with st.expander("Μεγάλος κύκλος εκπαίδευσης και testing σε ημιτονοειδή είσοδο 1", expanded=False):
+        st.caption("Ο κύκλος tuning 19–24/10 του DInos στο φορτίο του ερευνητή (ημίτονο + θόρυβος + spike), παγωμένο περιβάλλον "
+                   "spike300_d5. Όλοι οι αριθμοί προέρχονται αυτούσιοι από τα αρχεία-πηγή που αναγράφονται· τίποτα δεν υπολογίζεται εδώ.")
+        S = cycle1_report.SOURCES
+        sec = st.radio("Ενότητα", ["1 Setup", "2 Baselines", "3 Υπερπαράμετροι / frozen recipe", "4 Αποτελέσματα",
+                                   "5 Ablations / dead ends", "6 Artefact 17×", "7 Περιορισμοί", "Γραφικά"],
+                       horizontal=True, key="c1_sec")
+        if sec.startswith("1"):
+            st.markdown("**Workload και περιβάλλον.** Φορτίο ημίτονο + θόρυβος + spike του ερευνητή, pod startup delay D=5 "
+                        "(περιβάλλον `spike300_d5`). Αναλυτικά τα variants στον πίνακα του κύκλου 12a/21 παρακάτω.")
+            _tx = cycle1_report.read(ROOT, "tuning")
+            _hdr = next((ln for ln in _tx.splitlines() if ln.startswith("| Cycle")), "")
+            _rw = [ln for ln in _tx.splitlines() if ln.startswith(("| 12a |", "| 21 |"))]
+            if _rw:
+                st.markdown("\n".join([_hdr, "|---|---|---|---|"] + _rw))
+            st.caption(f"Πηγή (αυτούσιο): `{S['tuning']}`, γραμμές κύκλων 12a και 21")
+            st.markdown("**Μοντέλα και ονόματα**")
+            _c1_md("models")
+            st.markdown("**Πρωτόκολλο** (splits, seeds, checkpoint επιλογής στο val, eps, ticks): ρητή συνταγή από το freeze test11")
+            fz = cycle1_report.read(ROOT, "freeze24")
+            st.markdown(cycle1_report.section(fz, "- Training seeds") or "")
+            st.markdown(cycle1_report.section(fz, "- Checkpoint") or "")
+            st.markdown(cycle1_report.section(fz, "- Explicit recipe") or "")
+            st.caption(f"Πηγή: `{S['freeze24']}` · splits test10 = 11000-11019 (seeds 60-64), test11 = 12000-12019 (seeds 80-84)")
+            with st.expander("Πρωτόκολλα P1–P3 (πλήρες)"):
+                _c1_md("protocols")
+        elif sec.startswith("2"):
+            st.markdown("**Baselines** (παρακάτω οι αριθμοί τους ανά test split). Οι ορισμοί/ρόλοι από τα freeze αρχεία:")
+            _c1_md("freeze21", "- Arms")
+            st.markdown("**Test10**")
+            r10 = cycle1_report.read(ROOT, "res10")
+            st.dataframe(pd.DataFrame(cycle1_report.test10_baselines(r10), columns=["baseline", "return test10"]),
+                         hide_index=True, width="stretch")
+            st.caption(f"Πηγή: `{S['res10']}` (γραμμή «Baselines test10»)")
+            st.markdown("**Test11** (his HPA, HPA-demand, DERP, enhanced DERP, fixed_best, oracle_Dstep)")
+            r11 = cycle1_report.read(ROOT, "res11")
+            st.dataframe(pd.DataFrame(cycle1_report.test11_means(r11), columns=["μοντέλο", "μέσος όρος test11", "σχόλιο"]),
+                         hide_index=True, width="stretch")
+            st.caption(f"Πηγή: `{S['res11']}` (γραμμή «Means on test11»)")
+            st.markdown("**Σημείωση για την HPA του ερευνητή**")
+            _c1_md("tuning", "## Notes")
+        elif sec.startswith("3"):
+            st.markdown("**Frozen recipe test11** (c24)")
+            _c1_md("freeze24")
+            with st.expander("Frozen recipe test10 (c21)"):
+                _c1_md("freeze21")
+        elif sec.startswith("4"):
+            r10, r11 = cycle1_report.read(ROOT, "res10"), cycle1_report.read(ROOT, "res11")
+            st.markdown("##### Test10 (seeds 60-64) — πίνακας αποτελεσμάτων")
+            hdr, rows = cycle1_report.test10_main_table(r10)
+            _c1_table(hdr, rows, S["res10"])
+            st.markdown("Υποθέσεις (fixed sequence, 95% CI crossed)")
+            h = cycle1_report.test10_hypotheses(r10)
+            _c1_table(["H", "αντίθεση", "διαφορά", "CI95 crossed", "αποτέλεσμα"], h, S["res10"])
+            st.markdown("##### Test11 (seeds 80-84) — μέσοι όροι και IQM")
+            means = cycle1_report.test11_means(r11)
+            iq = {k: (i, m) for k, i, m in cycle1_report.iqm_lines(ROOT)}
+            st.dataframe(pd.DataFrame(means, columns=["μοντέλο", "μέσος όρος test11", "σχόλιο"]), hide_index=True, width="stretch")
+            st.caption(f"Πηγή: `{S['res11']}`")
+            st.dataframe(pd.DataFrame([(cycle1_report.DISPLAY.get(k, k), i, m) for k, (i, m) in iq.items()],
+                                      columns=["μοντέλο", "IQM", "μέσος όρος"]), hide_index=True, width="stretch")
+            st.caption("Πηγή: `.lab/tuning/c24c_iqm.txt` (5 seeds × 20 traces)")
+            st.markdown("Υποθέσεις test11")
+            hdr, rows = cycle1_report.test11_hypotheses(r11)
+            _c1_table(hdr, rows, S["res11"])
+            with st.expander("Ερμηνεία (αυτούσια, αναθεωρημένη μετά το Codex review)"):
+                st.markdown(cycle1_report.section(r11, "## Reading") or "")
+                st.markdown(cycle1_report.section(r10, "## Reading") or "")
+        elif sec.startswith("5"):
+            st.markdown("**Όλοι οι κύκλοι: τι δοκιμάστηκε και τι απορρίφθηκε**")
+            _c1_md("tuning", "# DInos tuning loop")
+            for t in ("c19", "c23"):
+                with st.expander(f"Screen {t}"):
+                    _c1_md(t)
+            syn = cycle1_report.cycle_syntheses(ROOT)
+            if syn:
+                pick = st.selectbox("Σύνθεση κύκλου", syn, format_func=lambda x: x[0], key="c1_syn")
+                _c1_md(pick[1])
+        elif sec.startswith("6"):
+            st.markdown("**Το «17×» είναι artefact του πρωτοκόλλου** (όχι ένδειξη καλύτερου autoscaling). Αυτούσιο το συμπέρασμα του κύκλου 3:")
+            _c1_md("c3")
+            tx = cycle1_report.read(ROOT, "tuning")
+            rows = [ln for ln in tx.splitlines() if ln.startswith("| 3 |")]
+            if rows:
+                st.markdown(rows[0])
+                st.caption(f"Πηγή: `{S['tuning']}` (γραμμή κύκλου 3)")
+        elif sec.startswith("7"):
+            st.markdown("**Περιορισμοί**")
+            st.markdown("- Ο oracle (`oracle_Dstep`) είναι ευριστικός (look-ahead D βημάτων), **όχι** βέλτιστο άνω όριο.")
+            _c1_md("paper", "## 6.")
+            _c1_md("paper", "## 7.")
+            st.markdown("Από το test11: οι δηλωμένοι περιορισμοί (n=5, ασύμμετρες συνταγές προεκπαίδευσης, διαδοχικά development μεταξύ των δύο test):")
+            st.markdown(cycle1_report.section(cycle1_report.read(ROOT, "res11"), "## Reading") or "")
+        else:
+            st.caption("Τα γραφικά δημιουργούνται μόνο όταν το ζητήσεις (διαβάζουν ~380 MB run JSON) και αποθηκεύονται στο "
+                       "`.lab/figs/cycle1/`. Μπάρες: μέσος όρος ± sd πάνω στα seeds (από τα summary JSON· τα summaries δεν περιέχουν CI για "
+                       "τον μέσο κάθε μοντέλου, οι CI υπάρχουν μόνο στις αντιθέσεις του πίνακα 4), τελείες: μέσος όρος ανά seed των 20 test traces.")
+            figdir = os.path.join(ROOT, ".lab", "figs", "cycle1")
+            if st.button("Δημιουργία γραφικών", key="c1_figs_btn"):
+                _c1_figs(round(time.time() // 86400))
+            have = sorted(glob.glob(os.path.join(figdir, "*.png")))
+            if not have:
+                st.info("Δεν έχουν δημιουργηθεί ακόμη γραφικά· πάτα «Δημιουργία γραφικών».")
+            for sp in cycle1_report.SPLITS:
+                for kind, cap in (("bar", "Μέσος όρος ανά μοντέλο (± sd πάνω στα seeds) και ανά seed"),
+                                  ("valcurve", "Validation return ανά checkpoint (μέσος όρος seeds) — καμπύλη εκπαίδευσης")):
+                    p = os.path.join(figdir, f"{kind}_{sp}.png")
+                    if os.path.exists(p):
+                        st.image(p, caption=f"{sp}: {cap}")
+            st.caption("Πηγές: `.lab/tuning/c18c_summary.json`, `.lab/tuning/c24c_summary.json`, "
+                       "`code-tuning/tuning/results/{c18c,c24c}/*.json`.")
+
+
+
 # ================================================================ runs
 if _tab_live(tab_runs):  # lazy: hidden tabs do no work
     with tab_runs:
@@ -1961,6 +2101,7 @@ if _tab_live(tab_runs):  # lazy: hidden tabs do no work
                         st.error(str(e))
         else:
             st.caption("Κανένα run δεν τρέχει.")
+    _cycle1_view()
 
 # ================================================================ council
 if _tab_live(tab_council):  # lazy: hidden tabs do no work
