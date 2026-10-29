@@ -18,8 +18,7 @@ Last update: 2026-10-29 · by: Claude (J66) · task: R-20261029-005 answered (pa
   file the sandbox request when runs start. Plan: `docs/cycle2_plan.md`, expert pack `docs/expert/` (J12, d6cfa11).
 
 ## 2. In progress (what · id · owner · next check)
-- J67 29/10: R-20261029-006 APPROVED 13:16 UTC; 14 smoke launched via sandbox-start: wave1 s0-s7 13:17 UTC
-  (`.lab/j67/*-w1.json`), wave2 3+3 by `.lab/j67/wave2.sh` (log `wave2.log`). Next: cost gate after all 14 end; NO tuning/final.
+- J67 29/10: R-20261029-006 APPROVED; 14 smoke: wave1 s0-s7 13:17 UTC, wave2 3+3 via `.lab/j67/wave2.sh`; then cost gate only.
 - J64 DONE 29/10: Claude review M-20261029-110 (guard + work.py --worktree APPROVE; schedule AGREE, cond. A: val
   selection → claims only from test12 after freeze; B: smoke-first is policy, not launcher-enforced); Codex final
   M-20261029-111 APPROVE. Commits 7d55754 (root), 182af33 (astra wrapper). **Filed R-20261029-006** (sandbox 160 CPU-h,
