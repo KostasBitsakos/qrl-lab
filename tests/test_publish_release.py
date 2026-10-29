@@ -50,3 +50,16 @@ def test_remote_tag_never_moved(tmp_path, monkeypatch):
     assert pushed == []
     pr.publish_tag("cycle9-final-v1.0", sha, str(f), None, True, {})
     assert pushed == ["refs/tags/cycle9-final-v1.0:refs/tags/cycle9-final-v1.0"]
+
+
+def test_remote_must_be_researcher_repo(monkeypatch):
+    good = "git@github.com:KostasBitsakos/dinos_sofia_k8s_redis_scaling.git"
+    for urls, ok in (([good], True), (["git@github.com:someone/fork.git"], False), ([], False),
+                     ([good, "https://gitlab.com/x.git"], False)):
+        monkeypatch.setattr(pr, "git", lambda *a, check=True, u=urls: "\n".join(u))
+        if ok:
+            pr.check_remote()
+        else:
+            with pytest.raises(SystemExit):
+                pr.check_remote()
+    assert pr.REMOTE == "github"

@@ -21,6 +21,8 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REMOTE = "github"
+REPO_URLS = {"git@github.com:KostasBitsakos/dinos_sofia_k8s_redis_scaling.git",
+             "https://github.com/KostasBitsakos/dinos_sofia_k8s_redis_scaling.git"}  # only target (M-20261029-147)
 TAG_RE = re.compile(r"^cycle\d+-(claude|codex|final)-v\d+\.\d+$")
 SECRET_RE = re.compile(r"(^|/)(\.env(\..*)?|id_rsa.*|id_ed25519.*|.*\.pem|.*\.key|auth\.json|credentials.*|"
                        r"\.kube/config|qiskit-ibm\.json)$", re.I)
@@ -56,12 +58,21 @@ def check_secrets(sha):
         sys.exit("secret-looking files in tree: " + ", ".join(bad[:10]))
 
 
+def check_remote():
+    """Refuse unless remote `github` points exactly at the researcher's repo, for fetch and push."""
+    for args in (("remote", "get-url", REMOTE), ("remote", "get-url", "--push", "--all", REMOTE)):
+        urls = git(*args, check=False).splitlines()
+        if not urls or any(u.strip() not in REPO_URLS for u in urls):
+            sys.exit(f"remote {REMOTE} must be exactly {sorted(REPO_URLS)[0]}; got {urls}")
+
+
 def remote_refs():
     out = git("ls-remote", REMOTE)
     return {ref: sha for sha, ref in (l.split("\t") for l in out.splitlines() if "\t" in l)}
 
 
 def push(refspec, dry):
+    check_remote()
     cmd = ["git", "-C", ROOT, "push", REMOTE, refspec]
     print(("DRY-RUN: " if dry else "") + " ".join(cmd))
     if not dry:
@@ -116,6 +127,7 @@ def main(argv=None):
         p.add_argument("--dry-run", action="store_true")
     a = ap.parse_args(argv)
     review = os.path.abspath(a.review)
+    check_remote()
     refs = remote_refs()
 
     if a.cmd == "tag":

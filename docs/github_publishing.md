@@ -1,6 +1,6 @@
 # GitHub publishing (R-20261029-008)
 
-Repo: KostasBitsakos/dinos_sofia_k8s_redis_scaling (remote `github`). Rules: R-20261029-002 (joint Claude+Codex review,
+Repo: ONLY github.com/KostasBitsakos/dinos_sofia_k8s_redis_scaling (remote `github`; the script refuses any other URL or remote, M-20261029-147). Rules: R-20261029-002 (joint Claude+Codex review,
 never force, never secrets), R-20261029-008 (versions as tags, no "Compare & pull").
 
 - Versions are annotated tags: `cycle<N>-claude-vX.Y`, `cycle<N>-codex-vX.Y`, `cycle<N>-final-vX.Y`. A pushed tag is
