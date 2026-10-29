@@ -93,3 +93,7 @@ to him first; large → Releases/LFS), LESSONS.md. AGENTS.md:10 and `docs/rules/
   results); every other task is done by ONE agent chosen for the objective (`docs/agent_routing.json`, CLAUDE.md routing).
   GitHub publishing of cycle results: versioned, automated after the joint review, without "Compare & pull" banners —
   mechanism (tags vs branches) pending his approval (Αποφάσεις, filed by C87).
+- (2026-10-29, R-20261029-008, J88) GitHub versions are annotated TAGS (`cycle<N>-claude|codex|final-vX.Y`), never
+  moved; `main` is the only branch (fast-forward, approved shared code). Publishing only via `tools/publish_release.py`
+  after the joint review (R-20261029-002), only to github.com/KostasBitsakos/dinos_sofia_k8s_redis_scaling
+  (M-20261029-147). Doc `docs/github_publishing.md`; cycle1 tags pushed (de38349, 3553fbe).
