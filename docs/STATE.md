@@ -4,7 +4,7 @@
      (M-/R-/run id, path, URL). Update it at the end of every task that changed something. Older detail goes to
      docs/DECISIONS.md, docs/journal/ or a topic file listed in docs/INDEX.md. -->
 
-Last update: 2026-10-29 · by: claude (J18) · task: md cleanup (M-20261029-017); pre-cleanup copy:
+Last update: 2026-10-30 · by: claude (J40) · task: md cleanup (M-20261029-017); pre-cleanup copy:
 `docs/archive/STATE_2026-10-29_before_cleanup.md`
 
 ## 1. Goal now
@@ -20,6 +20,25 @@ Last update: 2026-10-29 · by: claude (J18) · task: md cleanup (M-20261029-017)
 - Order (C9): GitHub push → md cleanup → cycle-2 implementation.
 
 ## 2. In progress (what · id · owner · next check)
+- J40 DONE 30/10: shared harness tag `cycle2-harness-v1` = b609b93 (code-poisson; dinos-poisson-astra ff to it), Codex
+  APPROVE r3 key cycle2-harness. pms:<v> via c5 (`--env-family orig --orig-variant pms:poisson_ms`), native RecurrentPPO
+  DRe-SCale `python -m tuning.rppo` (sb3_contrib not installable headless), references `python -m tuning.pms_reference`;
+  splits val 13000-13019 / test12 14000-14019 (locked). CLI, costs, limitations: `.lab/cycle2-claude/status.md` (J40).
+  Next: J41 files ONE sandbox request; re-spawn Codex branch job. No runs.
+- C49: J41 handoff verified; J48 (Claude, queued) owns final independent launcher review + scoped commit if writable.
+  J40 notified to supply reviewed harness tag/CLI/seven-arm manifest; then ONE frozen aggregate request, no runs
+  before approval (`.lab/cycle2-launcher/handoff.md`; `work.py say J48/J40`, C49).
+- J41: aggregate cycle2 launcher guard implemented; 12 focused tests + legacy sandbox regression pass (cores 4-7).
+  Guard rechecks full frozen trees/branch before spawn; `docs/cycle2_launcher.md`, `.lab/cycle2-launcher/handoff.md`.
+  UNCOMMITTED (.git read-only); Claude r1 CHANGE fixed, r2 blocked by usage until 03:29; final review needed.
+  No approval request/runs: J40 reviewed harness CLI/tag/manifest required; next worker files ONE aggregate request.
+- C44 (M-20261029-066): researcher applied the ceiling change; `dispatcher.py status` verified `max_workers=16`.
+  C43 automatic-approval obstacle resolved by researcher action (R-20261029-004). J40/J41 remain queued
+  (`work.py status`); schedule useful independent work by dependencies, resources and budget (M-20261029-055/058).
+- C38: J24 finished shared env `cycle2-env-v1` = 238003f, Codex APPROVE r3; worktree
+  `code-poisson-astra` exists (`.lab/cycle2-claude/status.md`). J40 (Claude) queued: shared harness + adapted
+  DRe-SCale; J41 (Codex) queued: launcher protection + shared budget ledger + ONE frozen sandbox request.
+  Briefs `.lab/c38/{harness,launcher}.md`; both notified to coordinate interfaces. No runs authorized by this handoff.
 - 29/10 J24 (claude): cycle-2 shared env FROZEN, tag `cycle2-env-v1` = 238003f (dinos-poisson, worktree code-poisson;
   `tuning/poisson_ms.py`, 10 tests; Codex APPROVE r3, key cycle2-env). Worktree code-poisson-astra created for Codex.
   Still to do before any run: harness adapter, DRe-SCale arm (sb3_contrib missing), sandbox_guard for the new
@@ -28,9 +47,9 @@ Last update: 2026-10-29 · by: claude (J18) · task: md cleanup (M-20261029-017)
   CPU/budget and model routing; no repeated worker-count question (M-20261029-055). `dispatcher.py status`
   verified `max_workers=4`; J24 notified to signal shared-env readiness for the Codex branch.
 - C29: J25 (Codex) prep done (.lab/cycle2-codex/preparation.md, GATES.md); J25 ends. RE-SPAWN a Codex branch job
-  (brief /tmp/c9/b6.md or .lab/cycle2-codex/preparation.md) when J24 reports env frozen or the sandbox is approved.
+  (brief /tmp/c9/b6.md or .lab/cycle2-codex/preparation.md) after J40 reviewed shared harness readiness.
 - J25 Codex preparation (M-20261029-030): `.lab/cycle2-codex/preparation.md`, review checklist and gates;
-  no runs. Waiting for J24 reviewed env/tag + new worktree + frozen sandbox approval. R-20261029-001 is an
+  no runs. Env/tag and worktree now ready (J24); waiting for J40 shared harness + frozen sandbox approval. R-20261029-001 is an
   answered question with no spec/hash (`labq.py request`), not launcher authorization; coordinator/J24 notified.
 - J23 completed Experiments UX: cycle-1 summary/table/CI at top INSIDE tab, figures on demand, raw runs collapsed
   (`dashboard/app.py`, `tools/cycle1_report.py`); Claude review M-20261029-036, 10 tests passed
