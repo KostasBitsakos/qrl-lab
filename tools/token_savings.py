@@ -72,3 +72,48 @@ def compute(counts, assumptions):
         rows.append({"key": k, "label": a["label"], "n": n, "without": wo, "with": wi, "saved": wo - wi})
         w += wo; s += wi
     return {"rows": rows, "without": w, "with": s, "saved": w - s, "pct": (100.0 * (w - s) / w) if w else 0.0}
+
+
+# ---- measured numbers (R-20261028-002): only what can be read from files; tokens ~ bytes/4 is APPROXIMATE
+BACKUP_SUFFIX = ".bak-20261028"
+
+
+def _size(path):
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return None
+
+
+def measured(root):
+    """-> {"files": [{name, now, before, saved_bytes, saved_tokens_approx, source}], "settings": [{label, value, source}]}.
+    now = CLAUDE.md / AGENTS.md in root; before = .lab/<name>.bak-20261028. A missing file gives None (never a guess)."""
+    files = []
+    for name in ("CLAUDE.md", "AGENTS.md"):
+        now, before = _size(os.path.join(root, name)), _size(os.path.join(root, ".lab", name + BACKUP_SUFFIX))
+        d = now is not None and before is not None
+        files.append({"name": name, "now": now, "before": before,
+                      "saved_bytes": before - now if d else None,
+                      "saved_tokens_approx": round((before - now) / 4) if d else None,
+                      "source": f"{name} vs .lab/{name}{BACKUP_SUFFIX} (os.path.getsize)"})
+    settings = []
+    src = ".claude/settings.local.json"
+    try:
+        cur = json.load(open(os.path.join(root, src), encoding="utf-8"))
+    except (OSError, ValueError):
+        cur = None
+    try:
+        old = json.load(open(os.path.join(root, ".lab", "settings.local.json" + BACKUP_SUFFIX), encoding="utf-8"))
+    except (OSError, ValueError):
+        old = {}
+    if cur is not None:
+        settings.append({"label": "MCP servers που μένουν ενεργοί (enabledMcpjsonServers)",
+                         "value": len(cur.get("enabledMcpjsonServers") or []), "source": src})
+        settings.append({"label": "Συνδέσεις claude.ai απενεργοποιημένες (disableClaudeAiConnectors)",
+                         "value": "ναι" if cur.get("disableClaudeAiConnectors") else "όχι",
+                         "source": src + " (το πλήθος των συνδέσεων που αφορά δεν είναι μετρημένο)"})
+        off = [k for k, v in (cur.get("enabledPlugins") or {}).items() if v is False]
+        was = [k for k, v in (old.get("enabledPlugins") or {}).items() if v is False]
+        settings.append({"label": "Plugins απενεργοποιημένα (enabledPlugins=false)", "value": len(off),
+                         "source": f"{src}; πριν: {len(was)} (.lab/settings.local.json{BACKUP_SUFFIX})"})
+    return {"files": files, "settings": settings}

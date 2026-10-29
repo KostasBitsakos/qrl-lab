@@ -2873,8 +2873,19 @@ if _tab_live(tab_ext):  # lazy: hidden tabs do no work
             for _col, _it in zip(st.columns(3), _inst[_i:_i + 3]):
                 _col.markdown(installed_view.card_html(_it), unsafe_allow_html=True)
         st.divider()
+        st.subheader("Εξοικονόμηση tokens — μετρημένα")
+        _me = token_savings.measured(ROOT)
+        st.caption("Μόνο αριθμοί που διαβάζονται από αρχεία. Tokens ≈ bytes/4 (**προσεγγιστικό**, όχι μέτρηση tokenizer).")
+        st.dataframe(pd.DataFrame([{"αρχείο": f["name"], "bytes πριν": f["before"], "bytes τώρα": f["now"],
+                                    "διαφορά bytes": f["saved_bytes"], "≈ tokens (προσεγγ.)": f["saved_tokens_approx"],
+                                    "πηγή": f["source"]} for f in _me["files"]]), hide_index=True, width="stretch")
+        st.dataframe(pd.DataFrame([{"μέγεθος": x["label"], "τιμή": x["value"], "πηγή": x["source"]} for x in _me["settings"]]),
+                     hide_index=True, width="stretch")
+        st.info("Ποσοστό συνολικής εξοικονόμησης **δεν μετριέται**: θα χρειαζόταν χρήση tokens ανά κλήση (πριν/μετά), που δεν "
+                "καταγράφεται. Το ποσοστό παρακάτω είναι μόνο εκτίμηση από παραδοχές.", icon="ℹ️")
+        st.divider()
         st.subheader("Εξοικονόμηση tokens (τελευταίες 6 ώρες) — εκτίμηση")
-        st.caption("ΕΚΤΙΜΗΣΗ, όχι μέτρηση. Πραγματικά δεδομένα: πλήθος γεγονότων στο `.lab/events.jsonl` και στα sandbox ledgers. "
+        st.caption("ΕΚΤΙΜΗΣΗ, όχι μέτρηση (το % δεν είναι βέβαιο: τα tokens ανά γεγονός είναι παραδοχές). Πραγματικά δεδομένα: πλήθος γεγονότων στο `.lab/events.jsonl` και στα sandbox ledgers. "
                    "Τα tokens ανά γεγονός είναι **παραδοχές** (πίνακας από κάτω, αποθηκεύονται στο `dashboard/token_savings.json`). "
                    "Μοντέλο: εξοικονόμηση = Σ γεγονότα × (χωρίς σύστημα − με σύστημα).")
         _tsp = os.path.join(ROOT, "dashboard", "token_savings.json")
