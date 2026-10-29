@@ -201,3 +201,14 @@ if __name__ == "__main__":
         if n.startswith("test_"):
             fn()
             print("  ok ", n)
+
+
+def test_stale_claude_reading_shown_dimmed_not_as_current():
+    """M-20261029-295: a reading older than 1 h stays pct=None but the ring shows «~N» dimmed."""
+    st = {"five_hour": {"used_percentage": 42.0, "resets_at": NOW + 7200}, "as_of": NOW - 2 * 3600}
+    w = ul.claude_windows(st, None, NOW)
+    assert w[0]["pct"] is None and w[0]["last_pct"] == 42.0 and ul.headline(w) is None
+    h = ul.ring_html("Claude", w, "#d97757", NOW)
+    assert ">~42<" in h and 'opacity=".45"' in h
+    fresh = ul.ring_html("Claude", ul.claude_windows(dict(st, as_of=NOW - 60), None, NOW), "#d97757", NOW)
+    assert ">42<" in fresh and 'opacity=".45"' not in fresh

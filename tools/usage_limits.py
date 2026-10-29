@@ -293,6 +293,7 @@ def claude_windows(status, rejection, now):
         binding = c.get("rejected") and c["reset"] is not None and c["reset"] > now
         if not w["stale"] and not binding and (ts is None or now - ts > 3600 or ts < newest):
             w["pct"] = None
+            w["last_pct"] = c["pct"]  # shown dimmed as «~N» (M-20261029-295); never counted as current
             details.append(f"παλιά ένδειξη {c['pct']:.0f}%" if c["pct"] is not None else "ποσοστό άγνωστο")
             details.append("τρέχουσα χρήση άγνωστη")
         if c.get("rejected"):
@@ -370,13 +371,18 @@ def ring_html(name, wins, color, now, empty_tip=NO_SOURCE, step=None):
     Tap/click opens a <details> popover with one «P% χρησιμοποιημένο · reset σε Hω Mλ» line per window. No JS."""
     import html
     pct = headline(wins)
-    col = ring_color(pct, color)
+    # No fresh value: show the last observed one dimmed as «~N» (an old reading, not current availability).
+    last = None if pct is not None else max((w["last_pct"] for w in wins if w.get("last_pct") is not None),
+                                            default=None)
+    shown = pct if pct is not None else last
+    col = ring_color(shown, color)
     r = 11.0
     c = 2 * math.pi * r
-    frac = 0.0 if pct is None else max(0.0, min(100.0, float(pct))) / 100.0
-    val = "—" if pct is None else f"{pct:.0f}"
+    frac = 0.0 if shown is None else max(0.0, min(100.0, float(shown))) / 100.0
+    dim = "" if pct is not None else ' opacity=".45"'
+    val = f"{pct:.0f}" if pct is not None else (f"~{last:.0f}" if last is not None else "—")
     arc = (f'<circle cx="14" cy="14" r="{r}" fill="none" stroke="{col}" stroke-width="3" stroke-linecap="round" '
-           f'stroke-dasharray="{c * frac:.2f} {c:.2f}" transform="rotate(-90 14 14)"/>') if pct else ""
+           f'stroke-dasharray="{c * frac:.2f} {c:.2f}" transform="rotate(-90 14 14)"{dim}/>') if shown else ""
     if wins:
         lines = "".join(f'<div title="{html.escape(win_line(w, now, step))}">'
                         f'{html.escape(w["label"])}: {html.escape(win_line(w, now, step))}</div>' for w in wins)
@@ -387,7 +393,7 @@ def ring_html(name, wins, color, now, empty_tip=NO_SOURCE, step=None):
             f'aria-label="{html.escape(name)} {val}%">'
             f'<svg width="28" height="28" viewBox="0 0 28 28">'
             f'<circle cx="14" cy="14" r="{r}" fill="none" stroke="rgba(137,135,129,.3)" stroke-width="3"/>{arc}'
-            f'<text x="14" y="17.3" text-anchor="middle" font-size="{8.5 if pct is not None else 10}" '
+            f'<text x="14" y="17.3" text-anchor="middle" font-size="{8.5 if pct is not None else 7.5 if last is not None else 10}" '
             f'font-family="sans-serif" fill="currentColor">{val}</text></svg>'
             f'<span style="font-size:.68rem;opacity:.8">{html.escape(name)}</span></summary>'
             f'<div class="qrl-pop"><b>{html.escape(name)}</b>{lines}</div></details>')
