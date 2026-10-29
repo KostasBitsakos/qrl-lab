@@ -67,6 +67,9 @@ Last update: 2026-10-29 · by: Claude (J66) · task: R-20261029-005 answered (pa
   Push = `git push github 901fe54:refs/heads/main afc4ea7:refs/heads/cycle1-claude ad283e4:refs/heads/cycle1-codex`.
 - R-20261029-003 approved: `.claude/settings.json` now allows `git push github …` headless; force/-f/origin denied (da5d4e5, J33). Joint Claude+Codex review before push still required (AGENTS.md).
 
+- J71 29/10: Γνώση tab = mobile zoomable thematic tree (`tools/knowledge_tree.py`, `knowledge_view.tree_data`, 11 themes;
+  tap/pinch/search, ?tab=Αρχεία&path= link; c. HEAD J71). Codex r1/r2 CHANGE fixed (`.lab/j71/`); iPhone check pending.
+
 ## 3. Waiting for the researcher
 - R-20261029-005 ANSWERED 29/10 (J66): «paper model» = adapted DRe-SCale LSTM-PPO (arm `tuning.rppo`); criterion
   reviewer weight, then ease of replication; told him DRe-SCale is IEEE TSC 2024 (Gwydion is the 2025 one) — he may correct.
