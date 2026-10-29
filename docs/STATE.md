@@ -1,11 +1,8 @@
 # STATE — QRL-Lab strategic handoff
-
 <!-- Read first by every coordinator (Claude or Codex). At most 150 lines. Facts only, each with a pointer
      (M-/R-/run id, path, URL). Update it at the end of every task that changed something. Older detail goes to
      docs/DECISIONS.md, docs/journal/ or a topic file listed in docs/INDEX.md. -->
-
-Last update: 2026-10-29 · by: Claude (J92) · task: R-20261029-006 calibration done, cost re-gate, R-20261029-009 filed
-
+Last update: 2026-10-29 · by: Codex (J134) · task: R-005 επαναληπτική ειδοποίηση s35–s146
 ## 1. Goal now
 - PhD paper: hybrid quantum–classical extension of the DInos autoscaler; simulation first, then real cluster;
   conference submission end of Nov 2026 (`docs/PLAN.md` §1, §11). Quantum work is PAUSED (`docs/rules/paused.md`).
@@ -18,20 +15,27 @@ Last update: 2026-10-29 · by: Claude (J92) · task: R-20261029-006 calibration 
   file the sandbox request when runs start. Plan: `docs/cycle2_plan.md`, expert pack `docs/expert/` (J12, d6cfa11).
 
 ## 2. In progress (what · id · owner · next check)
+- C138/M-20261029-236: J139 queued για ορατά αποτελέσματα cycle2 στην κορυφή των Πειραμάτων και DRe-SCale LSTM-PPO (rppo), με διάκριση calibration/screen και πραγματικές πηγές· διάγνωση: cycle2 placeholder στο `dashboard/app.py:1864`. Brief `.lab/c138/brief.md`, συντονισμός app.py με J136· χωρίς νέα runs.
+- J130: επαναληπτική ειδοποίηση R-20261021-005 s33–s146 ελέγχθηκε: 113 exit0 + s34 stopped/-15, αντικατάσταση s41 exit0· ήδη αναλυμένο c18/c19, χωρίς νέα runs/απόφαση (`.lab/j130/audit.json`, `report.md`; `docs/EXPERIMENTS.md`). J134 επανέλεγξε το subset s35–s146:112/112 done/exit0, έγκυρα JSON και step=total, ίδια με J130 (`.lab/j134/audit.json`, `report.md`).
+- J132 29/10:44 done/exit0 JSON (smoke14,calib14,screen16/56 s28–s43), κόστος4.761944/136 CPU-h, screen0.881944. DERP c0 ίδιο στα lanes· διαφορετικά c1: code-poisson μέσος38816.059, astra159118.951 έναντι c0 141929.233· μόνο2 seeds val, χωρίς νικητή. Script/report `.lab/j132/{summarize.py,result.md,summary.json,table.md}`. J126 wave2 DONE και αυτόματη wave3 s44–s51 στις15:30:37/38 UTC,8 reservations=6h (όχι κατανάλωση)· `.lab/j126/{driver.log,results.jsonl}`. Συνεχίζεται μόνο εγκεκριμένο screen με frozen gates/STOP/no retry· μετά DONE/STOP ledger+stage review, κανένα επόμενο στάδιο αποδεσμευμένο.
+- C118/M-20261029-196: μόνιμη αναπλήρωση όταν πάροχος κοιμάται· δύο ανταγωνιστικοί πράκτορες του διαθέσιμου παρόχου, ανεξάρτητο review από άλλο πράκτορα, συμβούλιο Claude+Codex στην επιστροφή. Καμία παύση λόγω Claude· frozen-spec εγκρίσεις/launcher/push gates ισχύουν (`AGENTS.md`, `docs/rules/handoff.md` §6, `docs/DECISIONS.md`).
+- J119 running: Codex αναπληρωτής Claude lane + ανεξάρτητο review J109/J104 και κοινό frozen spec. J120 running: Codex astra lane + ανεξάρτητο ledger/manifest/cross-review. Briefs `.lab/c118/{standin-brief,astra-brief}.md`· ανταγωνισμός μόνο πειραμάτων, solo notes/προσωρινοί κλάδοι· κανένα νέο run πριν frozen approval (M-20261029-196).
+- C124/J120: **APPROVE FOR FILING — SCREEN ONLY**, canonical amendment `42ac17ed9b0c4e2e8a29b39de365beb29137b7d6168274caf8292386d6682a94` (`.lab/j119/amendment-spec.json`, `.lab/j120/final-review.md`, `handoff.md`). Cheap-first διόρθωση PASS:56 CLI,14 waves exact coverage,7 paired nominal schedules,5 toy tests (`.lab/j120/audit-verified.log`, `check_schedule-verified.log`, `amendment-tests.log`). Μοναδικό filing J119 κατόπιν οδηγίας C124· request id εκκρεμεί. Nominal εφικτότητα, όχι measured guarantee: πραγματικό κόστος/reservations μπορεί να επιβάλει STOP και στα δύο lanes· καμία αύξηση caps/retry. Μόνο screen, κοινή χρέωση R-006, test12/shift-test κλειστά· κανένα νέο run/activation πριν έγκριση ερευνητή. Προσωρινό ref `j120-astra-screen`=182af33, frozen checkout αμετάβλητο (M-20261029-196).
+- J119/J120 (Codex substitutes, M-20261029-196): ανεξάρτητο J109 launcher/RPPO και J104 ledger review APPROVE·60 engineering tests PASS (`.lab/j119/check-0.log`, `.lab/j120/final-review.md`· J120 gates4/4 `.lab/j120/gates-reverified.log`). **R-20261029-010 FILED/OPEN**, hash42ac17ed…6682a94: ίδιο R-006, hard136/cap2.5h, SCREEN ONLY56 tasks με14 exact waves4/cheap-first· καμία activation/new run (`.lab/j119/handoff.md`).
+- Συνέχεια R-010 μόνο μετά frozen έγκριση ερευνητή: actual/reservation+remaining-ledger gates, STOP και στα2 lanes σε overrun/failure· test12/shift-test κλειστά, επόμενα stages απαιτούν concrete review/release. Απουσία Claude δεν μπλοκάρει· προσωρινά solo refs διατηρούνται, Claude+Codex council επιστροφής (`docs/rules/handoff.md` §6). J109 υλοποίηση uncommitted λόγω root read-only `.git` (`.lab/j109/commit.log`).
+- J103 (Codex): Race συνδέθηκε με πραγματικά dispatcher jobs/ταυτότητα από tasks.refs· σύνδεση app.py από J97, χωρίς restart (M-20261029-167). 18 focused tests PASS + ανάγνωση/render πραγματικού board· J97 αναφέρει live browser επιβεβαίωση jobs/ταυτότητας (C110 escalation, `.lab/j97/`). Claude review ΕΚΚΡΕΜΕΙ: P-20261029-142936-7bcd FAILED λόγω ορίου έως 15:16 UTC. Παράδοση `.lab/j103/handoff.md`.
+- J100 (Codex) DONE, review ΕΚΚΡΕΜΕΙ: sidebar ανά παράθυρο/χρόνο και αυτόματη προσφώνηση/υπογραφή (`tools/usage_limits.py`, `tools/researcher_text.py`, `tools/dispatcher.py`; M-20261029-162). 18 passed/10 deselected, fake CLIs· χωρίς restart/επιβεβαίωση live. Claude review P-20261029-142305-c162 FAILED λόγω usage limit μέχρι 15:16 UTC, χωρίς αυτόματο retry. Μετά από έλεγχο διαθεσιμότητας: επανυποβολή όπως `.lab/j100/handoff.md` (δεν χρειάζεται απόφαση ερευνητή). Αλλαγές uncommitted: `.git/index.lock` read-only· diff/tests/local check στο ίδιο handoff.
+- J97 (Codex), M-20261029-159: Greek tutorial draft **20 pages** + download tab `📚 Tutorials`; `docs/tutorials/` (PDF, PLAYBOOK, REVIEW, sources), `docs/tutorial_style.md`. Beginner-reader revisions done; 17 focused checks PASS; live desktop/390px phone downloads byte-identical; Race J103 integration verified (`.lab/j97/`).
+  Full suite 288 PASS/19 FAIL; each failure rerun alone:17 PASS/2 FAIL (exp_view deadline, coordinator label); `docs/tutorials/REVIEW.md`, `.lab/j97/isolation-results.json`. Claude review/commit pending: `.lab/j97/handoff.md` (3/5 gates); dispatcher επανελέγχθηκε C115: exhausted, reset18:10UTC, 15:16=provider recheck (`.lab/j109/claude-availability.json`, M-20261029-189). Συνέχεια Codex μετά επιβεβαιωμένη διαθεσιμότητα, χωρίς polling· draft μέχρι τεχνική έγκριση (`.lab/j97/claude_review_brief.md`). Future tutorials→Codex/playbook; shared memory/index and iPhone access: C98, M-20261029-159.
 - J72 29/10: daily cycle-2 report = `tools/cycle2_daily.py` (no LLM), crontab `0 15-17 * * *` UTC, posts once at 18:xx Athens to M-20261029-006, self-removes after 02/11; log `.lab/cycle2_daily/cron.log`.
-- J92 29/10: calibration DONE 14/14 exit 0 (s14-s27), sandbox 3.88/160 CPU-h → `.lab/j92/calib_result.md`
-  (scripts `summarize.py`, `project.py`). Cost 1x 83-93 CPU-h, 2x 166-186 > 136 → joint re-gate FAIL (Codex key
-  cycle2-cost-regate); final cap 0.8 h < LSTM+transfer 1.91 h. rppo collapses (2.5 pods, SLO 1.0, entropy≈ln3) → static
-  check before tuning. **R-20261029-009 filed** (rec. 1.25x + full ledger + new caps). Next on approval: ledger + spec.
+- J104 29/10: **R-20261029-009 APPROVED**, 1.25x, same sandbox; no runs before new spec approval. Static DRe-SCale audit: no obvious action/scaling/reset defect, collapse cause unknown (`.lab/j104/static-rppo.md`). Ledger: 126.903/136 CPU-h incl. 3.88 consumed, 154 training + 210 inference tasks, 8h unmeasured pools; cap LSTM+transfer 2.5h (`.lab/j104/ledger.md`, `verify.py` PASS).
+  Draft `.lab/j104/amendment-spec.json` BLOCKED, not filed: existing immutable R-006 cap2h, J109 πρόσθεσε same-parent υποστήριξη, ανεξάρτητο review ανατέθηκε J119 αντί αναμονής Claude (M-20261029-196); original-HPA/evaluator manifests and reference timing unresolved. Next: J119/J120 independent reviews, then frozen executable spec request; no new sandbox/no runs (`.lab/j104/handoff.md`).
+- J92 calibration DONE: 14/14 exit0 (s14-s27); sandbox3.88/160 CPU-h, rppo collapse diagnostic (`.lab/j92/calib_result.md`). Old2x re-gate FAIL superseded only as planning policy by R-009, not launch authorization.
 - J64 DONE 29/10: Claude review M-20261029-110 (guard + work.py --worktree APPROVE; schedule AGREE, cond. A: val
   selection → claims only from test12 after freeze; B: smoke-first is policy, not launcher-enforced); Codex final
   M-20261029-111 APPROVE. Commits 7d55754 (root), 182af33 (astra wrapper). **Filed R-20261029-006** (sandbox 160 CPU-h,
   expires 05/11 05:10 UTC, spec `.lab/j64/final.json`, hash 1764ff9b…4052). Next on approval: ONLY 14 smoke via
   `launch_run.py sandbox-start` with branch smoke.json children; then cost gate. Root .git writable in Claude runs.
-- C62/J60 (superseded by J64 filing R-20261029-006): smoke-only package, review digests and handoff in `.lab/j60/`
-  (`aggregate.json`, `reconciliation.md`, `handoff.md`). Original HPA needs an adapter (not HPA-demand); paper model =
-  adapted DRe-SCale (R-20261029-005, J66).
-- J40 DONE 30/10: shared harness tag `cycle2-harness-v1` = b609b93 (code-poisson; dinos-poisson-astra ff to it), Codex
   APPROVE r3 key cycle2-harness. pms:<v> via c5 (`--env-family orig --orig-variant pms:poisson_ms`), native RecurrentPPO
   DRe-SCale `python -m tuning.rppo` (sb3_contrib not installable headless), references `python -m tuning.pms_reference`;
   splits val 13000-13019 / test12 14000-14019 (locked). CLI, costs, limitations: `.lab/cycle2-claude/status.md` (J40).
@@ -43,8 +47,7 @@ Last update: 2026-10-29 · by: Claude (J92) · task: R-20261029-006 calibration 
 - C44: `max_workers=16` (M-20261029-066); resource-aware scheduling (M-20261029-055/058); briefs `.lab/c38/`.
 - 29/10 J24 (claude): cycle-2 shared env FROZEN, tag `cycle2-env-v1` = 238003f (dinos-poisson, worktree code-poisson;
   `tuning/poisson_ms.py`, 10 tests; Codex APPROVE r3, key cycle2-env). Worktree code-poisson-astra created for Codex.
-  Still to do before any run: harness adapter, DRe-SCale arm (sb3_contrib missing), sandbox_guard for the new
-  worktrees, ONE sandbox request → `.lab/cycle2-claude/status.md`. No runs (M-20261029-057).
+  Historical preparation: `.lab/cycle2-claude/status.md`, M-20261029-057; harness/launcher progress in J40/J48/J64 above.
 - J25 (Codex) prep done, J25 ended (`.lab/cycle2-codex/preparation.md`, GATES.md; M-20261029-030); re-spawn a Codex
   branch job from that brief. R-20261029-001 = answered question, no spec/hash, not launcher authorization.
 - J23 completed Experiments UX: cycle-1 summary/table/CI at top INSIDE tab, figures on demand, raw runs collapsed
@@ -63,9 +66,8 @@ Last update: 2026-10-29 · by: Claude (J92) · task: R-20261029-006 calibration 
 - R-20261029-003 approved: `.claude/settings.json` now allows `git push github …` headless; force/-f/origin denied (da5d4e5, J33). Joint Claude+Codex review before push still required (AGENTS.md).
 - J71/J79 29/10: Γνώση = zoomable tree (`tools/knowledge_tree.py`, `.lab/j71/`); phone CSS ≤480px + ☰ tab menu + home-screen tags
   (`tools/mobile_view.py`, `dashboard/static/`); `enableStaticServing` needs a dashboard restart (not done, J79).
-
 ## 3. Waiting for the researcher
-- **R-20261029-009** (J92): cycle-2 cost after calibration — 1.25x margin / more CPU-h / 5 final seeds; blocks tuning.
+- R-20261029-010 APPROVED 15:20UTC (screen only)· ενεργοποιήθηκε· σε εξέλιξη (§2 J126).
 - R-20261029-005 ANSWERED 29/10 (J66): «paper model» = adapted DRe-SCale LSTM-PPO (arm `tuning.rppo`); criterion
   reviewer weight, then ease of replication; told him DRe-SCale is IEEE TSC 2024 (Gwydion is the 2025 one) — he may correct.
 - M-20261029-009: (a) results-retention policy (keep per-seed JSON + result md + best ckpt; audit that every
@@ -74,7 +76,6 @@ Last update: 2026-10-29 · by: Claude (J92) · task: R-20261029-006 calibration 
   M-20261021-086, M-20261023-002, M-20261023-004. Most old "in_progress" items were never closed — triage, do not redo.
 - Merge/delete of single-purpose branches dinos-tuning-c19/-c20/-c22/-c23 (worktrees `code-tuning-c19` …) needs a
   joint Claude+Codex review and his OK (`docs/rules/handoff.md` rule 4).
-
 ## 4. Next steps (in order)
 1. Finish J17 push after the joint review; then implement cycle 2 per `docs/cycle2_plan.md` (skills
    `poisson-workload`, `drl-tuning`, `rl-eval-protocol`). Researcher pre-authorised all cycle decisions; runs still
@@ -106,7 +107,7 @@ Last update: 2026-10-29 · by: Claude (J92) · task: R-20261029-006 calibration 
 - Real cluster: 1 Redis pod ≈116-118k ops/s at c=1, no saturation; stage-B sweep failed at 1→2 pods (fix 84367e1,
   never re-run); calibration paused → `.lab/outbox/calib-status.md`, `stageB-rerun-ask.md`, `docs/rules/paused.md`.
 - Every batch with status and pointers: `docs/EXPERIMENTS.md` (1532 launcher runs, 23 requests). R-20261021-007
-  end-notices are stale cycle-1 duplicates (J83, J90: all exit 0 with JSON) — just acknowledge.
+  end-notices are stale cycle-1 duplicates (J83/J90; J133: exact s24–26+s33–80, 51/51 exit0, valid JSON: `.lab/j133/audit.json`, `report.md`; J140: s35–s80 again, 46/46 valid JSON) — no rerun.
 - Dashboard (28-29/10): R-20261028-002 items dd26185..1bfe9cc; right-click tab fix 88d4465 + headless approval
   retry 6563e65 verified live (M-20261029-003); sidebar coordinator state 02ad310; cycle-1 report a61e337
   (`tools/cycle1_report.py`). CLAUDE.md/AGENTS.md slimmed 28/10 (M-20261028-004; text in `docs/rules/interactive.md`); connectors off for this project (`.claude/settings.local.json`, M-20261028-006).
