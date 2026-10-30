@@ -411,6 +411,8 @@ def lane_of(item):
 
 def item_key(item):
     """Identity of a work item, so the same item is never processed twice at once."""
+    if item["kind"] == "perm_answer":
+        return "perm_answer:" + item["thread_id"]
     if item.get("job_id"):
         return "job:" + item["job_id"]
     if item.get("event_ref"):
@@ -791,15 +793,26 @@ class Dispatcher:
             yield {"kind": "decision", "thread_id": tid, "msg_ids": [], "reply_to": tid, "forced": None,
                    "text": text, "req_ids": [r["id"]], "title": f"{r['id']}: {r['title']}"}
         # 2b. answers to blocked (headless) permission requests
-        ans = perm_store.undelivered_answers(self.root)
-        if ans:
-            tid = ans[0]["thread_id"] if ans[0].get("thread_id") and self.lab.message(ans[0]["thread_id"]) else self._system_thread()
+        perm_store.withdraw_deny_rules(self.root)
+        answers = perm_store.undelivered_answers(self.root)
+        threads = {}
+        for answer in answers:
+            tid = answer.get("thread_id")
+            tid = tid if tid and self.lab.message(tid) else self._system_thread()
+            threads.setdefault(tid, []).append(answer)
+        for tid, ans in threads.items():
+            if any(j["origin"] == "perm_answer" and j["thread_id"] == tid for j in self.work.active()):
+                continue
+            last = self.dd.get("perm_last_wake:" + tid)
+            if last and time.time() - float(last) < float(self.dd.get("escalation_debounce_s")):
+                continue
             lines = [f"- {a['tool']}: {a['detail'][:300]} -> {'APPROVED' if a['state'] == 'approved' else 'DENIED'}"
                      + (f" ({a['message']})" if a.get("message") else "") for a in ans]
             text = ("The researcher answered permission requests that were blocked in an earlier headless task:\n"
-                    + "\n".join(lines) + "\nIf approved, retry that action once; if denied, do not retry it. Report in this thread.")
+                    + "\n".join(lines) + "\nIf approved, retry that action once only when no deny rule forbids it; "
+                    "if denied, do not retry it. Report in this thread.")
             yield {"kind": "perm_answer", "thread_id": tid, "msg_ids": [], "reply_to": tid, "forced": None,
-                    "text": text, "req_ids": [], "perm_ids": [a["id"] for a in ans]}
+                   "text": text, "req_ids": [], "perm_ids": [a["id"] for a in ans]}
         # 3. finished experiment batches
         groups = {}
         for run in self.lab.runs(limit=500):
@@ -912,7 +925,8 @@ class Dispatcher:
                    QRL_REPLY_TO=item["reply_to"] or "")
         budget = s["chat_budget_usd"] if lane_of(item) == "chat" else s["max_budget_usd"]
         if provider == "claude":
-            model = s["events_model"] if item["kind"] == "run_event" and s["events_model"] else s["claude_model"]
+            model = (s["events_model"] or s["peer_claude_model"]) if item["kind"] == "perm_answer" else (
+                s["events_model"] if item["kind"] == "run_event" and s["events_model"] else s["claude_model"])
             return run_claude(prompt, self.root, model, s["claude_effort"], session_id=session_id,
                               system_append=self.static_prompt(), budget=budget, timeout_s=timeout_s,
                               env=env, job=job)
@@ -943,6 +957,9 @@ class Dispatcher:
                                    reply_to=item["reply_to"], parent_msgs=item["msg_ids"], status="running")
             self.work.set_status(jid, "running")
             item["job_id"] = jid
+        if item["kind"] == "perm_answer":
+            self.dd.conn.execute("INSERT OR REPLACE INTO settings(key,value,updated_at,updated_by) VALUES (?,?,?,?)",
+                                 ("perm_last_wake:" + item["thread_id"], str(time.time()), now_iso(), "dispatcher"))
         result = "failed"
         try:
             result = self._process(item)
@@ -1105,15 +1122,22 @@ class Dispatcher:
             return
         text, status = split_status(res["text"])
         if res["denials"]:
-            for dn in res["denials"]:  # item 8: park each blocked action for the researcher (dashboard Sudo tab / banner)
-                if isinstance(dn, dict) and dn.get("tool_name"):
-                    try:
-                        perm_store.create(dn["tool_name"], dn.get("tool_input"), self.root, self.root, source="headless",
-                                          thread_id=item["thread_id"])
-                    except Exception:
-                        pass
-            names = ", ".join(sorted({d.get("tool_name", "?") for d in res["denials"] if isinstance(d, dict)}))
-            text += f"\n\n🔐 Μπλοκαρίστηκαν ενέργειες που χρειάζονταν άδεια ({names}). Εμφανίστηκαν στο dashboard (Sudo) για έγκριση· θα ενημερωθείς στην επόμενη εργασία."
+            forbidden, parked = set(), set()
+            for dn in res["denials"]:
+                if not isinstance(dn, dict) or not dn.get("tool_name"):
+                    continue
+                tool, tin = dn["tool_name"], dn.get("tool_input")
+                rule = perm_store.deny_rule(tool, tin, self.root)
+                if rule:
+                    forbidden.add(rule)
+                elif perm_store.create(tool, tin, self.root, self.root, source="headless",
+                                       thread_id=item["thread_id"]):
+                    parked.add(tool)
+            if forbidden:
+                text += "\n\nΑπαγορεύονται από ρητό κανόνα (" + ", ".join(sorted(forbidden)) + "). " \
+                        "Δεν δημιουργείται αίτημα έγκρισης και δεν θα επαναληφθούν."
+            if parked:
+                text += "\n\n🔐 Εκκρεμεί άδεια στο dashboard (Sudo) για: " + ", ".join(sorted(parked)) + "."
         cost = f" · ≈${res['cost']:.2f} (εκτίμηση)" if isinstance(res.get("cost"), (int, float)) else ""
         who = f" · {item['job_id']}" if lane_of(item) == "worker" and item.get("job_id") else ""
         footer = (f"\n\n— {LABEL[provider]} · {res.get('model') or ''}{who} · {int(res.get('duration_s', 0) // 60)}′"
@@ -1158,6 +1182,7 @@ class Dispatcher:
 
     def recover(self):
         """After a crash: tasks left 'running' and their messages are retried; spawned jobs are queued again."""
+        perm_store.withdraw_deny_rules(self.root)
         for t in [dict(r) for r in self.dd.conn.execute("SELECT * FROM tasks WHERE status='running'")]:
             self.dd.conn.execute("UPDATE tasks SET status='interrupted', ended=? WHERE id=?", (now_iso(), t["id"]))
             ids = [i for i in json.loads(t["refs"] or "[]") if i.startswith("M-")]

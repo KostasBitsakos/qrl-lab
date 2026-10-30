@@ -35,6 +35,9 @@ def handle(raw, root=None, wait=WAIT_SECONDS, poll=POLL, sleep=time.sleep):
         ev = json.loads(raw)
         if not isinstance(ev, dict) or ev.get("hook_event_name") != "PermissionRequest" or not ev.get("tool_name"):
             return None
+        rule = perm_store.deny_rule(ev["tool_name"], ev.get("tool_input"), root)
+        if rule:
+            return out("deny", f"Απαγορεύεται από ρητό κανόνα: {rule}. Δεν ζητείται έγκριση.")
         # the researcher already approved this exact action after an earlier headless task denied it: allow it once
         if perm_store.take_approval(ev["tool_name"], ev.get("tool_input"), root):
             return out("allow")
@@ -52,7 +55,9 @@ def handle(raw, root=None, wait=WAIT_SECONDS, poll=POLL, sleep=time.sleep):
             if time.time() >= deadline:
                 break
             sleep(poll)
-        perm_store.mark(rid, "timeout", root)
+        # A shared headless card outlives a hook wait; leave it answerable in the dashboard.
+        if rec and rec.get("source") != "headless":
+            perm_store.mark(rid, "timeout", root)
     except Exception:
         pass
     return None
