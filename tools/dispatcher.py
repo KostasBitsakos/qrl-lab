@@ -401,6 +401,17 @@ def split_status(text):
     return text, "done"
 
 
+def _retry_locked(fn, tries=20, wait=15.0):
+    """Run fn, retrying while SQLite reports 'database is locked' (up to ~5 minutes)."""
+    for i in range(tries):
+        try:
+            return fn()
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e) or i == tries - 1:
+                raise
+            time.sleep(wait)
+
+
 CHAT_KINDS = ("message", "escalation")
 
 
@@ -964,17 +975,23 @@ class Dispatcher:
         try:
             result = self._process(item)
         finally:
-            if item["kind"] == "job" and result == "deferred":
-                self.dd.conn.execute("UPDATE jobs SET status='queued', started=NULL WHERE id=?", (jid,))
-            else:
-                self.work.set_status(jid, result if result in ("done", "failed", "deferred", "cancelled") else "failed")
-            self.work.finish(jid)
+            # a locked database must not leave a ghost job/task marked running (30/10: J171/J172 stalled 4 h)
+            _retry_locked(lambda: self._close_job(item, jid, result))
             parents = item.get("parent_msgs") or []
             if lane == "worker" and parents and result != "deferred" and not self._active_children(parents):
                 for mid in parents:  # the last parallel job of a request is done: so is the request
                     if (self.lab.message(mid) or {}).get("status") == "in_progress":
                         self._set_status([mid], "done")
         return result
+
+    def _close_job(self, item, jid, result):
+        if item["kind"] == "job" and result == "deferred":
+            self.dd.conn.execute("UPDATE jobs SET status='queued', started=NULL WHERE id=?", (jid,))
+        else:
+            self.work.set_status(jid, result if result in ("done", "failed", "deferred", "cancelled") else "failed")
+        self.work.finish(jid)
+        self.dd.conn.execute("UPDATE tasks SET status='interrupted', ended=? WHERE status='running' AND refs LIKE ?",
+                             (now_iso(), f'%"{jid}"%'))
 
     def _process(self, item):
         available, wanted = self.provider_order(item)
