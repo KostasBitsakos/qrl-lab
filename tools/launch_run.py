@@ -32,6 +32,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from labdb import LabDB, LabError, canonical_hash, lab_dir, lab_root, now, validate_spec  # noqa: E402
 
 POLL = 5
+END_LOCK_WAIT_S = 600   # supervisor DB writes retry "database is locked" this long (s59 incident, J169)
 # Core pinning for scope 'sim' runs (R-20261017-017). One place for the default: env QRL_SIM_CPUS (e.g. "8-39" or
 # "8-15,20") overrides the constant; the spec key "cpu_affinity" (same syntax, or a list of ints) overrides both.
 # Cores 0-7 stay free for the system (dashboard, kube-apiserver, kubelet, ...). Scope 'real' is never pinned.
@@ -259,6 +260,28 @@ def sandbox_status(db, rid):
             "expires": sb["expires"], "expired": left_h <= 0, "hours_to_expiry": round(left_h, 2)}
 
 
+def finish_run(db, run_id, run_dir, status, code, reason, seconds, cpu_s, ledger_rid=None, cpus=None, ended=None,
+               note=None):
+    """End-of-run record: runs row + audit, launcher.json, sandbox ledger. `ended`/`note` only for reconciliation
+    of a run whose supervisor died after its child exited (J169)."""
+    ended = ended or now()
+    with db.tx(lock_wait_s=END_LOCK_WAIT_S) as c:   # the child is gone: never lose its end record to a busy DB
+        c.execute("UPDATE runs SET status=?, exit_code=?, ended=? WHERE run_id=?", (status, code, ended, run_id))
+        c.execute("INSERT INTO audit(ts, actor, action, target, detail) VALUES (?,?,?,?,?)",
+                  (now(), "launcher", status, run_id, (reason or f"exit {code}") + (f"; {note}" if note else "")))
+    info = {"status": status, "exit_code": code, "reason": reason, "seconds": seconds, "cpu_seconds": cpu_s}
+    if note:
+        info["reconciled"] = note
+    with open(os.path.join(run_dir, "launcher.json"), "w", encoding="utf-8") as f:
+        json.dump(info, f)
+    if ledger_rid:
+        import sandbox_guard as G
+        rec = {"ts": now(), "run_id": run_id, "event": status, "wall_s": seconds, "cpus": cpus, "cpu_seconds": cpu_s}
+        if note:
+            rec["reconciled"] = note
+        G.log_ledger(ledger_rid, rec, lab_root())
+
+
 def supervise(run_id):
     db = LabDB()
     run = db.run(run_id)
@@ -302,7 +325,7 @@ def supervise(run_id):
             c.execute("UPDATE runs SET status='failed', ended=?, exit_code=-1 WHERE run_id=?", (now(), run_id))
         log.write(f"\n[launcher] could not start: {e}\n".encode())
         return
-    with db.tx() as c:
+    with db.tx() as c:   # no long wait here: stop/expiry/cap checks must start with the child
         c.execute("UPDATE runs SET status='running', pid=?, started=? WHERE run_id=?", (proc.pid, now(), run_id))
     reason = None
     while proc.poll() is None:
@@ -333,17 +356,8 @@ def supervise(run_id):
         ru = resource.getrusage(resource.RUSAGE_CHILDREN)
         cpu_s = round(ru.ru_utime + ru.ru_stime, 2)
     status = "stopped" if reason else ("done" if code == 0 else "failed")
-    with db.tx() as c:
-        c.execute("UPDATE runs SET status=?, exit_code=?, ended=? WHERE run_id=?", (status, code, now(), run_id))
-        c.execute("INSERT INTO audit(ts, actor, action, target, detail) VALUES (?,?,?,?,?)",
-                  (now(), "launcher", status, run_id, reason or f"exit {code}"))
-    with open(os.path.join(run["run_dir"], "launcher.json"), "w", encoding="utf-8") as f:
-        json.dump({"status": status, "exit_code": code, "reason": reason, "seconds": round(time.time() - t0, 1),
-                   "cpu_seconds": cpu_s}, f)
-    if sbm:
-        import sandbox_guard as G
-        G.log_ledger(meta["request_id"], {"ts": now(), "run_id": run_id, "event": status, "wall_s": round(time.time() - t0, 1),
-                                          "cpus": sbm["cpus"], "cpu_seconds": cpu_s}, lab_root())
+    finish_run(db, run_id, run["run_dir"], status, code, reason, round(time.time() - t0, 1), cpu_s,
+               meta["request_id"] if sbm else None, sbm["cpus"] if sbm else None)
     log.close()
 
 

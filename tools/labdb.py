@@ -16,6 +16,7 @@ import json
 import os
 import re
 import sqlite3
+import time
 from contextlib import contextmanager
 
 SCHEMA_VERSION = 2
@@ -220,8 +221,22 @@ class LabDB:
         self.conn.close()
 
     @contextmanager
-    def tx(self):
-        self.conn.execute("BEGIN IMMEDIATE")
+    def tx(self, lock_wait_s=0.0):
+        """Write transaction. lock_wait_s > 0: keep retrying BEGIN on 'database is locked' (bounded backoff) up to
+        about that many seconds (the last attempt may add one busy_timeout); nothing has run yet, so a retried BEGIN
+        is side-effect free."""
+        deadline = time.monotonic() + lock_wait_s
+        delay = 0.5
+        while True:
+            try:
+                self.conn.execute("BEGIN IMMEDIATE")
+                break
+            except sqlite3.OperationalError as e:
+                busy = getattr(e, "sqlite_errorcode", None) in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED)
+                if not (busy or "locked" in str(e)) or time.monotonic() >= deadline:
+                    raise
+                time.sleep(min(delay, max(0.0, deadline - time.monotonic())))
+                delay = min(delay * 2, 30.0)
         try:
             yield self.conn
             self.conn.execute("COMMIT")
