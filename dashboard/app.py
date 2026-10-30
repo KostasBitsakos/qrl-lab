@@ -518,6 +518,7 @@ def usage_rings():
                    "χρέωση)· το ακριβές υπόλοιπο: claude.ai → Settings → Usage.")
     _ai_cl = extra_credits.awake_info("claude", _h, now)
     _ai_cx = extra_credits.awake_info("codex", _h.get("codex") or {}, now)
+    _ai_cl["windows"], _ai_cx["windows"] = cw, xw  # remaining-usage bars per vendor (M-20261030-108)
     st.html(extra_credits.awake_html([_ai_cl, _ai_cx]))
     # J228 (M-20261030-063): «δωρεάν resets / προσφορές» and «ειδοποιήσεις ορίων» removed. docs/free_offers.json was empty,
     # and offers_watch only logged rolling-window «νέο παράθυρο» events plus 2 unverified false positives (a customer story).

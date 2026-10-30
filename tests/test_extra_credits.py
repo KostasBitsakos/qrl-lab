@@ -62,7 +62,7 @@ def test_awake_info_and_html():
     b = ec.awake_info("codex", {}, P)
     b["windows"] = [{"label": "5ω", "pct": 42.0, "resets_at": 1792994400}, {"label": "7ημ", "pct": None, "resets_at": None}]
     h2 = ec.awake_html([b])
-    assert "Ξύπνιος" in h2 and "42%" in h2 and "άγνωστο" in h2 and "width:42%" in h2
+    assert "Ξύπνιος" in h2 and "απομένουν 58%" in h2 and "άγνωστο" in h2 and "width:58%" in h2
     assert "Εκτός" in ec.awake_html([ec.awake_info("codex", {"state": "down"}, P)])
     assert ec.show_credits(100, "ok", {"active": True}) and ec.show_credits(10, "extra", {"active": True})
     assert not ec.show_credits(100, "ok", {"active": False}) and not ec.show_credits(50, "ok", {"active": True})
