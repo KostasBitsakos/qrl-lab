@@ -115,6 +115,12 @@ def start(wait=8.0):
     except OSError:
         pass
     r = subprocess.run(start_command(), capture_output=True, text=True, timeout=10)
+    err = r.stderr or ""
+    if r.returncode != 0 and ("no server running" in err or "can't find session" in err):
+        # no tmux server / session `lab` yet (e.g. after a reboot): create it, then retry once
+        subprocess.run(["tmux", "new-session", "-d", "-s", TMUX_SESSION, "-c", KIT],
+                       capture_output=True, text=True, timeout=10)
+        r = subprocess.run(start_command(), capture_output=True, text=True, timeout=10)
     if r.returncode != 0:
         return False, (r.stderr or "tmux failed").strip()
     t0 = time.time()
