@@ -9,6 +9,8 @@
                                                     start every entry of a child spec under a standing sandbox approval
                                                     (kind 'sandbox'); the child is verified, not separately approved
   launch_run.py sandbox-status --request R-...      CPU-hours used/left, running runs, expiry
+  launch_run.py sandbox-activate-amendment --request R-... --amendment R-...
+                                                    activate a separately frozen, approved limits amendment
 
 It refuses unless ALL hold:
   - the request exists, is an 'approval' and its state is 'approved' (decided by the researcher in the dashboard);
@@ -24,14 +26,18 @@ import datetime as dt
 import json
 import os
 import signal
+import sqlite3
+from pathlib import Path
+from contextlib import closing
 import subprocess
 import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from labdb import LabDB, LabError, canonical_hash, lab_dir, lab_root, now, validate_spec  # noqa: E402
+from labdb import LabDB, LabError, canonical_hash, db_path, lab_dir, lab_root, now, validate_spec  # noqa: E402
 
 POLL = 5
+START_LOCK_WAIT_S = 60  # retry in the supervision loop; fail closed after this deadline
 END_LOCK_WAIT_S = 600   # supervisor DB writes retry "database is locked" this long (s59 incident, J169)
 # Core pinning for scope 'sim' runs (R-20261017-017). One place for the default: env QRL_SIM_CPUS (e.g. "8-39" or
 # "8-15,20") overrides the constant; the spec key "cpu_affinity" (same syntax, or a list of ints) overrides both.
@@ -123,7 +129,7 @@ def load_approved_spec(db, rid):
 
 def start_entry(db, rid, entry):
     r, spec = load_approved_spec(db, rid)
-    if spec.get("kind") == "sandbox":
+    if spec.get("kind") in ("sandbox", "sandbox-amendment"):
         raise LabError("Sandbox approvals require sandbox-start with a verified child spec.")
     if entry < 0 or entry >= len(spec["entries"]):
         raise LabError(f"Entry {entry} does not exist (spec has {len(spec['entries'])}).")
@@ -170,27 +176,72 @@ def load_sandbox(db, rid):
     r, spec = load_approved_spec(db, rid)
     if spec.get("kind") != "sandbox" or not isinstance(spec.get("sandbox"), dict):
         raise LabError(f"{rid} is not a sandbox approval.")
+    activation = db.conn.execute("SELECT detail FROM audit WHERE action='sandbox-amendment' AND target=?",
+                                 (rid,)).fetchall()
+    if len(activation) > 1:
+        raise LabError("Multiple sandbox amendment activations; refused.")
+    if activation:
+        import sandbox_guard as G
+        try:
+            binding = json.loads(activation[0]["detail"])
+            if (not isinstance(binding, dict) or
+                    set(binding) != {"request_id", "spec_hash", "parent_spec_hash"} or
+                    binding["parent_spec_hash"] != r["spec_hash"] or
+                    not all(isinstance(v, str) and v for v in binding.values())):
+                raise ValueError("Invalid activation binding")
+        except (TypeError, ValueError) as e:
+            raise LabError("Invalid sandbox amendment audit binding; refused.") from e
+        ar, amendment = load_approved_spec(db, binding["request_id"])
+        if ar["spec_hash"] != binding["spec_hash"]:
+            raise LabError("Activated amendment hash mismatch.")
+        spec = G.apply_amendment(spec, rid, r["spec_hash"], amendment)
+        r = dict(r, amendment_request_id=binding["request_id"], amendment_spec_hash=binding["spec_hash"])
     return r, spec
+
+
+def activate_sandbox_amendment(db, rid, amendment_id):
+    """Append-only, one-time activation; serializes with reservations, never changes approvals."""
+    import sandbox_guard as G
+    with db.tx() as c:
+        if c.execute("SELECT 1 FROM audit WHERE action='sandbox-amendment' AND target=?", (rid,)).fetchone():
+            raise LabError("Sandbox already has an activated amendment; refused.")
+        r, parent = load_sandbox(db, rid)
+        ar, amendment = load_approved_spec(db, amendment_id)
+        effective = G.apply_amendment(parent, rid, r["spec_hash"], amendment)
+        sb = effective["sandbox"]
+        if G.active_runs(db, rid):
+            raise LabError("Sandbox has starting/running runs; activation refused.")
+        if time.time() >= parse_ts_epoch(sb["expires"]):
+            raise LabError("Sandbox expired; activation refused.")
+        used = G.used_cpu_hours(db, rid, strict=True)
+        if used > sb["cpu_hours_budget"]:
+            raise LabError("Consumed cost exceeds amended budget; activation refused.")
+        for wt in sb["worktrees"]:
+            G.verify_sandbox_protected(G.select_worktree(sb, wt), lab_root())
+        c.execute("INSERT INTO audit(ts,actor,action,target,detail) VALUES (?,?,?,?,?)",
+                  (now(), "launcher", "sandbox-amendment", rid,
+                   json.dumps({"request_id": amendment_id, "spec_hash": ar["spec_hash"],
+                               "parent_spec_hash": r["spec_hash"]})))
 
 
 def start_sandbox(db, rid, child):
     """Verify a child spec against the sandbox approval and start all its entries (all or nothing)."""
     import sandbox_guard as G
-    r, parent = load_sandbox(db, rid)
-    sb = parent["sandbox"]
-    cwd, plan = G.check_child(child, parent)
-    selected = G.select_worktree(sb, child)
-    root = lab_root()
-    G.verify_sandbox_protected(selected, root)
-    avail = os.sched_getaffinity(0) if hasattr(os, "sched_getaffinity") else set()
-    pool = sorted(set(parse_cpus(child.get("cpu_affinity") or sb["cpu_affinity"])) & set(avail))
-    seeds_env = G.seed_env(sb)
-    env_threads = G.check_env(child.get("env_threads"), "child")
-    need = sum(p["reserve_cpu_h"] for p in plan)
-    sha = git_sha(cwd)
-    child_hash = canonical_hash(child)
     run_ids = []
     with db.tx() as c:
+        r, parent = load_sandbox(db, rid)
+        sb = parent["sandbox"]
+        cwd, plan = G.check_child(child, parent)
+        selected = G.select_worktree(sb, child)
+        root = lab_root()
+        G.verify_sandbox_protected(selected, root)
+        avail = os.sched_getaffinity(0) if hasattr(os, "sched_getaffinity") else set()
+        pool = sorted(set(parse_cpus(child.get("cpu_affinity") or sb["cpu_affinity"])) & set(avail))
+        seeds_env = G.seed_env(sb)
+        env_threads = G.check_env(child.get("env_threads"), "child")
+        need = sum(p["reserve_cpu_h"] for p in plan)
+        sha = git_sha(cwd)
+        child_hash = canonical_hash(child)
         runs = [x for x in c.execute("SELECT * FROM runs WHERE request_id=?", (rid,)).fetchall()]
         active = sum(1 for x in runs if x["status"] in ("starting", "running"))
         if active + len(plan) > int(sb["max_parallel"]):
@@ -221,7 +272,11 @@ def start_sandbox(db, rid, child):
                            "code_sha": sha, "cwd": cwd,
                            "sandbox": {"cpus": p["cpus"], "reserve_cpu_h": p["reserve_cpu_h"], "seeds": p["seeds"],
                                        "repo": selected["repo"], "branch": selected["branch"], "cores": pcores, "seed_env": seeds_env,
-                                       "expires": sb["expires"], "request_id": rid}}, f, indent=2, ensure_ascii=False)
+                                       "expires": sb["expires"], "request_id": rid,
+                                       "parent_spec_hash": r["spec_hash"],
+                                       "amendment_request_id": r.get("amendment_request_id"),
+                                       "amendment_spec_hash": r.get("amendment_spec_hash"),
+                                       "effective_sandbox_hash": canonical_hash(sb)}}, f, indent=2, ensure_ascii=False)
             G.log_ledger(rid, {"ts": now(), "run_id": run_id, "name": child["name"], "seeds": p["seeds"],
                                "reserve_cpu_h": p["reserve_cpu_h"], "cpus": p["cpus"], "cores": pcores,
                                "event": "start"}, root)
@@ -312,7 +367,10 @@ def supervise(run_id):
     try:
         if sbm and sbm.get("repo") in ("code-poisson", "code-poisson-astra"):
             import sandbox_guard as G
-            _, parent = load_sandbox(db, meta["request_id"])
+            pr, parent = load_sandbox(db, meta["request_id"])
+            if sbm.get("parent_spec_hash") and (pr["spec_hash"] != sbm["parent_spec_hash"] or
+                    canonical_hash(parent["sandbox"]) != sbm["effective_sandbox_hash"]):
+                raise LabError("Sandbox approval changed after reservation.")
             selected = G.select_worktree(parent["sandbox"], {"repo": sbm["repo"]})
             G.verify_sandbox_protected(selected)
             if time.time() >= parse_ts_epoch(parent["sandbox"]["expires"]):
@@ -325,30 +383,73 @@ def supervise(run_id):
             c.execute("UPDATE runs SET status='failed', ended=?, exit_code=-1 WHERE run_id=?", (now(), run_id))
         log.write(f"\n[launcher] could not start: {e}\n".encode())
         return
-    with db.tx() as c:   # no long wait here: stop/expiry/cap checks must start with the child
-        c.execute("UPDATE runs SET status='running', pid=?, started=? WHERE run_id=?", (proc.pid, now(), run_id))
     reason = None
-    while proc.poll() is None:
-        time.sleep(POLL)
-        if db.run(run_id)["stop_requested"]:
-            reason = "stopped by the researcher"
-        elif expires_ts is not None and time.time() >= expires_ts:
-            reason = f"sandbox expired at {sbm['expires']}"
-        elif time.time() - t0 > limit_s:
-            reason = f"wall-clock limit {meta['limits']['wall_clock_hours']} h reached"
-        if reason:
+    started = now()
+    recorded = False
+    start_deadline = time.monotonic() + START_LOCK_WAIT_S
+    last_stop_read = time.monotonic()
+    # A live child must never wait behind SQLite's default 10-second busy handler.
+    # Retry only the state write, between safety checks, for a bounded interval.
+    old_timeout = db.conn.execute("PRAGMA busy_timeout").fetchone()[0]
+    db.conn.execute("PRAGMA busy_timeout=0")
+    try:
+        while True:
+            if not recorded:
+                try:
+                    with db.tx() as c:
+                        c.execute("UPDATE runs SET status='running', pid=?, started=? WHERE run_id=?",
+                                  (proc.pid, started, run_id))
+                    recorded = True
+                except sqlite3.Error as e:
+                    if not ("locked" in str(e) or "busy" in str(e)):
+                        reason = f"startup database write failed: {e}"
+                    elif time.monotonic() >= start_deadline:
+                        reason = "startup database write deadline exceeded"
+            if proc.poll() is not None:
+                break
             try:
-                os.killpg(proc.pid, signal.SIGTERM)
-                for _ in range(30):
-                    if proc.poll() is not None:
-                        break
-                    time.sleep(1)
-                if proc.poll() is None:
-                    os.killpg(proc.pid, signal.SIGKILL)
+                if db.run(run_id)["stop_requested"]:
+                    reason = "stopped by the researcher"
+                last_stop_read = time.monotonic()
+            except sqlite3.Error as e:
+                if not ("locked" in str(e) or "busy" in str(e)) or (
+                        time.monotonic() - last_stop_read >= START_LOCK_WAIT_S):
+                    reason = "cannot read stop request; stopping conservatively"
+            if expires_ts is not None and time.time() >= expires_ts:
+                reason = f"sandbox expired at {sbm['expires']}"
+            elif time.time() - t0 > limit_s:
+                reason = f"wall-clock limit {meta['limits']['wall_clock_hours']} h reached"
+            if reason:
+                try:
+                    os.killpg(proc.pid, signal.SIGTERM)
+                    for _ in range(30):
+                        if proc.poll() is not None:
+                            break
+                        time.sleep(1)
+                    if proc.poll() is None:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                proc.wait()
+                break
+            time.sleep(POLL)
+    except BaseException:
+        # Unexpected supervision failures must not leave the child running unattended.
+        if proc.poll() is None:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
             proc.wait()
-            break
+        raise
+    finally:
+        db.conn.execute(f"PRAGMA busy_timeout={old_timeout}")
+    ended = now()
+    seconds = round(time.time() - t0, 1)
+    if not recorded:
+        # The child is gone, so blocking no longer delays safety checks. Preserve identity/time.
+        with db.tx(lock_wait_s=END_LOCK_WAIT_S) as c:
+            c.execute("UPDATE runs SET pid=?, started=? WHERE run_id=?", (proc.pid, started, run_id))
     code = proc.returncode
     cpu_s = None
     if sbm:   # CPU time of the whole reaped process tree (this supervisor has exactly one child)
@@ -356,9 +457,25 @@ def supervise(run_id):
         ru = resource.getrusage(resource.RUSAGE_CHILDREN)
         cpu_s = round(ru.ru_utime + ru.ru_stime, 2)
     status = "stopped" if reason else ("done" if code == 0 else "failed")
-    finish_run(db, run_id, run["run_dir"], status, code, reason, round(time.time() - t0, 1), cpu_s,
-               meta["request_id"] if sbm else None, sbm["cpus"] if sbm else None)
+    finish_run(db, run_id, run["run_dir"], status, code, reason, seconds, cpu_s,
+               meta["request_id"] if sbm else None, sbm["cpus"] if sbm else None, ended=ended)
     log.close()
+
+
+def show_run(run_prefix, path=None):
+    """Read-only status; no schema creation, migrations, or write transactions."""
+    with closing(sqlite3.connect(Path(path or db_path()).resolve().as_uri() + "?mode=ro", uri=True)) as conn:
+        conn.row_factory = sqlite3.Row
+        cols = "run_id,status,pid,exit_code,started,ended"
+        rows = conn.execute(f"SELECT {cols} FROM runs WHERE run_id=?", (run_prefix,)).fetchall()
+        if not rows:
+            rows = conn.execute(f"SELECT {cols} FROM runs WHERE substr(run_id,1,?)=? ORDER BY run_id",
+                                (len(run_prefix), run_prefix)).fetchall()
+        if not rows:
+            raise LabError(f"Unknown run: {run_prefix}")
+        if len(rows) != 1:
+            raise LabError(f"Ambiguous run prefix: {run_prefix} ({len(rows)} matches)")
+        return dict(rows[0])
 
 
 def main():
@@ -370,9 +487,14 @@ def main():
     g.add_argument("--entry", type=int)
     g.add_argument("--all", action="store_true")
     sub.add_parser("list")
+    s = sub.add_parser("show", help="read-only run status by exact id or unique prefix")
+    s.add_argument("run_id")
     s = sub.add_parser("sandbox-start")
     s.add_argument("--request", required=True)
     s.add_argument("--spec", required=True)
+    s = sub.add_parser("sandbox-activate-amendment")
+    s.add_argument("--request", required=True)
+    s.add_argument("--amendment", required=True)
     s = sub.add_parser("sandbox-status")
     s.add_argument("--request", required=True)
     s = sub.add_parser("_supervise")
@@ -381,6 +503,12 @@ def main():
 
     if a.cmd == "_supervise":
         supervise(a.run_id)
+        return
+    if a.cmd == "show":
+        try:
+            print(json.dumps(show_run(a.run_id), ensure_ascii=False))
+        except (LabError, sqlite3.Error) as e:
+            sys.exit(f"refused: {e}")
         return
     db = LabDB()
     try:
@@ -396,6 +524,9 @@ def main():
                 raise LabError(f"Cannot read child spec {a.spec}: {e}")
             for rid_ in start_sandbox(db, a.request, child):
                 print(rid_)
+        elif a.cmd == "sandbox-activate-amendment":
+            activate_sandbox_amendment(db, a.request, a.amendment)
+            print(f"{a.amendment} activated; accounting remains {a.request}")
         elif a.cmd == "sandbox-status":
             st = sandbox_status(db, a.request)
             print(f"{st['request']} ({st['branch']}): {st['cpu_hours_used']} / {st['budget']} CPU-h used, "
@@ -403,6 +534,8 @@ def main():
                   f"expires {st['expires']} ({'EXPIRED' if st['expired'] else str(st['hours_to_expiry']) + ' h left'})")
         elif a.all:
             _, spec = load_approved_spec(db, a.request)
+            if spec.get("kind") in ("sandbox", "sandbox-amendment"):
+                raise LabError("Sandbox approvals require sandbox-start with a verified child spec.")
             max_parallel = int(spec.get("max_parallel", 1))
             runs = [r for r in db.runs(limit=10000) if r["request_id"] == a.request]
             running = sum(1 for r in runs if r["status"] in ("starting", "running"))
