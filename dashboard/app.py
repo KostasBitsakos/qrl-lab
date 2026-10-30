@@ -1002,6 +1002,13 @@ def term_prompt_panel(where, unlocked):
 @st.fragment(run_every=3)
 def perm_banner():
     pend = perm_store.pending()
+    # cards of headless tasks that already ended are not urgent: one line, never a wall of banners (30/10 incident)
+    parked = [pr for pr in pend if pr.get("source") == "headless"]
+    pend = [pr for pr in pend if pr.get("source") != "headless"]
+    if parked:
+        c = st.columns([4, 1])
+        c[0].caption(f"🔐 {len(parked)} αίτημα(τα) άδειας από εργασίες που τελείωσαν — καρτέλα Sudo")
+        c[1].button("Sudo", key="banner_go_parked", on_click=_go_sudo)
     if not pend:
         term_prompt_panel("banner", (not _on_tailnet) or st.session_state.get("pin_until", 0) > time.time())
         return
