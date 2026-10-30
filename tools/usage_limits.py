@@ -366,7 +366,7 @@ RING_CSS = ("<style>.qrl-ring{position:relative;display:inline-block}"
             ".qrl-pop div{white-space:normal;overflow-wrap:anywhere}</style>")
 
 
-def ring_html(name, wins, color, now, empty_tip=NO_SOURCE, step=None):
+def ring_html(name, wins, color, now, empty_tip=NO_SOURCE, step=None, src=""):
     """Small usage ring (SVG stroke-dasharray arc over a grey track, provider colour, amber >=75 %, red >=90 %).
     Tap/click opens a <details> popover with one «P% χρησιμοποιημένο · reset σε Hω Mλ» line per window. No JS."""
     import html
@@ -396,7 +396,9 @@ def ring_html(name, wins, color, now, empty_tip=NO_SOURCE, step=None):
             f'<text x="14" y="17.3" text-anchor="middle" font-size="{8.5 if pct is not None else 7.5 if last is not None else 10}" '
             f'font-family="sans-serif" fill="currentColor">{val}</text></svg>'
             f'<span style="font-size:.68rem;opacity:.8">{html.escape(name)}</span></summary>'
-            f'<div class="qrl-pop"><b>{html.escape(name)}</b>{lines}</div></details>')
+            f'<div class="qrl-pop"><b>{html.escape(name)}</b>{lines}'
+            + (f'<div style="opacity:.6;font-size:.72rem;margin-top:4px">Πηγή: {html.escape(src)}</div>' if src else "")
+            + '</div></details>')
 
 
 def load_offers(path):

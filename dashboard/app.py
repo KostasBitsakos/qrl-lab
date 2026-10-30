@@ -487,6 +487,11 @@ def _watch_events(path, _mtime=None):
     return [r for r in reversed(rows) if isinstance(r, dict)]
 
 
+CLAUDE_RING_SRC = ("statusLine rate_limits του Claude Code (.lab/usage/claude.json, επίσημα % και reset) · απόρριψη ορίου "
+                   "από τον dispatcher όταν υπάρχει · όχι απόλυτα tokens (δεν τα εκθέτει το Claude)")
+CODEX_RING_SRC = "rollout logs του Codex CLI (~/.codex/sessions, token_count.rate_limits: used_percent, resets_at)"
+
+
 @st.fragment(run_every=60)
 def usage_rings():
     """Title + usage rings (tap = popover per window). Claude: statusLine file (tools/claude_statusline.py), else
@@ -502,8 +507,8 @@ def usage_rings():
     st.html(usage_limits.RING_CSS
             + '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:0 0 4px">'
             '<span style="font-size:1.35rem;font-weight:700;margin-right:auto">🧪 QRL-Lab</span>'
-            + usage_limits.ring_html("Claude", cw, "#d97757", now, step=RING_STEP_S)
-            + usage_limits.ring_html("Codex", xw, "#10a37f", now, step=RING_STEP_S) + "</div>")
+            + usage_limits.ring_html("Claude", cw, "#d97757", now, step=RING_STEP_S, src=CLAUDE_RING_SRC)
+            + usage_limits.ring_html("Codex", xw, "#10a37f", now, step=RING_STEP_S, src=CODEX_RING_SRC) + "</div>")
     # purchased credits + who is awake (researcher 2026-10-23); tiny JSON reads only
     _h = read_health() or {}
     _ec = extra_credits.status("claude")
@@ -513,52 +518,10 @@ def usage_rings():
                    "χρέωση)· το ακριβές υπόλοιπο: claude.ai → Settings → Usage.")
     _ai_cl = extra_credits.awake_info("claude", _h, now)
     _ai_cx = extra_credits.awake_info("codex", _h.get("codex") or {}, now)
-    _ai_cl["windows"], _ai_cx["windows"] = cw, xw  # usage % as already read above (statusline / rollout log)
     st.html(extra_credits.awake_html([_ai_cl, _ai_cx]))
-    offers = usage_limits.load_offers(os.path.join(ROOT, "docs", "free_offers.json"))
-    seen = st.session_state.setdefault("_offers_seen", now - 86400)   # first view: last 24 h count as new
-    n_new = sum(usage_limits.offer_is_new(o, seen) for o in offers)
-    with st.expander("δωρεάν resets / προσφορές" + (f" · {n_new} νέα" if n_new else "")):
-        for o in offers:
-            badge = " :red-badge[νέα]" if usage_limits.offer_is_new(o, seen) else ""
-            src = f" · [πηγή]({o['source']})" if o["source"] else ""
-            st.markdown(f"- **{o['provider']}** · [{o['title']}]({o['url']}){badge} · as_of {o['as_of']}{src}"
-                        + (f" — {o['note']}" if o["note"] else ""))
-        if not offers:
-            st.caption("Καμία επαληθευμένη εγγραφή.")
-        if n_new and st.button("Τα είδα", key="offers_seen_btn"):
-            st.session_state["_offers_seen"] = now
-            st.rerun(scope="fragment")
-        st.caption("Μόνο επίσημες πηγές (https, anthropic/claude/openai/chatgpt), μέσω `tools/offers_check.py` "
-                   "→ `docs/free_offers.json`.")
-    # offers_watch (M-20261021-056): local limit resets + UNVERIFIED candidates from official pages
-    wev = _watch_events(os.path.join(ROOT, ".lab", "offers_watch_events.jsonl"))
-    dpath = os.path.join(ROOT, ".lab", "notifications_dismissed.json")   # M-20261022-063: only the dismissals are stored
-    vis = notif_format.visible(wev, notif_format.load_dismissed(dpath), now)   # last 24 h, not dismissed; raw jsonl untouched
-    vis = list({notif_format.event_id(e): e for e in vis}.values())   # same event logged twice → one row (duplicate key, 2026-10-26)
-    # stable label + remembered open state: a dismissal must not collapse the dropdown (M-20261022-068)
-    with st.expander("ειδοποιήσεις ορίων", expanded=st.session_state.get("_nd_open", False)):
-        st.caption(f"{len(vis)} ενεργές (τελευταίες 24 ώρες)" if vis else "")
-        for prov, items in notif_format.group_by_provider([notif_format.format_event(e, now) for e in vis]).items():
-            st.markdown(f'<div style="border-left:4px solid {items[0]["brand"]};padding-left:6px;font-weight:700">'
-                        f'{items[0]["provider_label"]}</div>', unsafe_allow_html=True)
-            for f in items[:8]:
-                c1, c2 = st.columns([8, 1])
-                link = f" · [πηγή]({f['url']})" if f["url"] else ""
-                c1.markdown(f'<span style="color:{f["color"]}">{f["icon"]}</span> {f["text"]}{link}<br>'
-                            f'<span style="opacity:.6;font-size:.8em">{f["when"]} · {f["at"]}</span>', unsafe_allow_html=True)
-                if c2.button("✕", key="nd_" + f["id"], help="Απόκρυψη"):
-                    notif_format.dismiss(dpath, [f["id"]])
-                    st.session_state["_nd_open"] = True
-                    st.rerun(scope="fragment")
-        if not vis:
-            st.caption("Καμία ενεργή ειδοποίηση (τελευταίες 24 ώρες).")
-        elif st.button("Καθαρισμός όλων", key="nd_all"):
-            notif_format.dismiss(dpath, [notif_format.event_id(e) for e in vis])
-            st.session_state["_nd_open"] = True
-            st.rerun(scope="fragment")
-        st.caption("Έλεγχος κάθε 10 λεπτά (`tools/offers_watch.py`). Οι κρυμμένες δεν διαγράφονται από το αρχείο καταγραφής. "
-                   "Τα ανεπιβεβαίωτα δεν είναι προσφορές μέχρι να τα ελέγξει ο συντονιστής.")
+    # J228 (M-20261030-063): «δωρεάν resets / προσφορές» and «ειδοποιήσεις ορίων» removed. docs/free_offers.json was empty,
+    # and offers_watch only logged rolling-window «νέο παράθυρο» events plus 2 unverified false positives (a customer story).
+    # tools/offers_watch.py, offers_check.py and notif_format.py stay for reference; nothing renders them.
 
 
 with st.sidebar:
@@ -571,7 +534,7 @@ if _recent_denied:
                      f"{_recent_denied[0].get('login') or '(κανένα)'} · δες Sudo → Πρόσβαση", icon="🚨")
 # No page-level refresh timer and no slider: only small @st.fragment(run_every=...) blocks update themselves, so the
 # page never reruns as a whole (no grey-out). Heavy loads live in tabs that render only while open (tab.open).
-refresh = 5
+refresh = 10  # J228: was 5; idle fragment runs kept the script 'running' 20-80% of the time and queued every tap
 st.html("<style>@media (min-width:769px){[data-testid=stSidebar][aria-expanded=true]{min-width:350px!important;"
         "width:350px!important}}</style>")
 # Tabs wrap onto extra rows instead of scrolling sideways on narrow screens (researcher, M-20261020-009). The sliding
@@ -605,9 +568,6 @@ def sidebar_status():
     if not ev.empty:
         recent = ev[ev["ts"] > dt.datetime.now() - dt.timedelta(minutes=10)]
         notif = recent[recent["event"] == "Notification"]
-        if read_health() is None and not notif.empty and "permission" in str(notif.iloc[-1]["summary"]).lower():
-            st.warning("Ο συντονιστής περιμένει άδεια στο terminal/app: " + str(notif.iloc[-1]["summary"]),
-                       icon="🔐")
         ev = ev[ev["event"] != "HealthState"]
         if not ev.empty:
             last = ev.iloc[-1]
@@ -622,7 +582,7 @@ def sidebar_status():
         if len(open_reqs) > prev[1]:
             st.toast("Νέο αίτημα για απόφαση", icon="✋")
     st.session_state["_seen"] = (n_agent_msgs, len(open_reqs))
-    st.caption(f"Βάση: `{os.path.relpath(DB_PATH, ROOT)}` · {dt.datetime.now().strftime('%H:%M:%S')}")
+    st.caption(f"ανανέωση {dt.datetime.now().strftime('%H:%M:%S')}")
     d.close()
 
 
@@ -643,7 +603,7 @@ def _brain_state():
     return brain_view.derive(read_events_raw(1500), msgs, time.time(), health=read_health())
 
 
-@st.fragment(run_every=3)
+@st.fragment(run_every=15)
 def sidebar_brain():
     """Identical HTML when idle and no pulse is running, so the iframe is not reloaded (no flicker)."""
     components.html(brain_view.render(_brain_state()), height=255)
@@ -683,19 +643,12 @@ def health_banner():
     ctxt = codex_banner_text(h)
     if ctxt:
         dismissible("codex", f"limit:{((h or {}).get('codex') or {}).get('since')}", ctxt)
+    rtxt = outage.banner_text()  # one fragment (one timer) for both banners
+    if rtxt:
+        dismissible("reboot", banners.reboot_key(), rtxt, kind="warning")
 
 
 health_banner()
-
-
-@st.fragment(run_every=refresh)
-def recovery_banner():
-    txt = outage.banner_text()
-    if txt:
-        dismissible("reboot", banners.reboot_key(), txt, kind="warning")
-
-
-recovery_banner()
 
 # ---------------------------------------------------------------- shared decision widget (Decisions + Paper tabs)
 def decision_panel(d, select=lambda reqs: reqs, pre="", label="Αίτημα",
@@ -760,9 +713,8 @@ def decision_panel(d, select=lambda reqs: reqs, pre="", label="Αίτημα",
             props = json.loads(r.get("proposals") or "[]")
             with st.form(f"{pre}decide_{r['id']}"):
                 if options == ["ack"]:
-                    choice = "ack"
-                    note = st.text_area("Σχόλιο (προαιρετικό)", key=f"{pre}note_{r['id']}", height=80)
-                    pressed = "ack" if st.form_submit_button("👁️ Το είδα") else None
+                    st.text_area("Σχόλιο (προαιρετικό)", key=f"{pre}note_{r['id']}", height=80)
+                    st.form_submit_button("👁️ Το είδα", on_click=_cb_decide, args=(r, pre))
                 else:
                     choices, names = [], {}
                     for i, ptxt in enumerate(props, 1):
@@ -774,26 +726,12 @@ def decision_panel(d, select=lambda reqs: reqs, pre="", label="Αίτημα",
                         choices.append("no"); names["no"] = "Όχι / απόρριψη"
                     if "changes" in options or "answer" in options:
                         choices.append("own"); names["own"] = "Δική μου πρόταση"
-                    choice = st.radio("Η απόφασή σου", choices, index=None, format_func=names.get,
-                                      key=f"{pre}choice_{r['id']}")
-                    note = st.text_area("Σχόλιο — ή η δική σου πρόταση (υποχρεωτικό αν διάλεξες «Δική μου πρόταση»)",
-                                        key=f"{pre}note_{r['id']}", height=100)
-                    sent = st.form_submit_button("Υποβολή απόφασης", type="primary")
-                    pressed = choice if sent else None
-                    if sent and not choice:
-                        st.error("Διάλεξε μία επιλογή.")
-                        pressed = None
-            if pressed:
-                try:
-                    if pressed == "ack":
-                        dec, text = "ack", note
-                    else:
-                        dec, text = map_choice(r, pressed, note)
-                    state = d.decide(r["id"], dec, text, actor="researcher")
-                    st.toast(f"{r['id']}: {REQ_STATE[state][1]}", icon=REQ_STATE[state][0])
-                    st.rerun()
-                except LabError as e:
-                    st.error(str(e))
+                    st.radio("Η απόφασή σου", choices, index=None, format_func=names.get,
+                             key=f"{pre}choice_{r['id']}")
+                    st.text_area("Σχόλιο — ή η δική σου πρόταση (υποχρεωτικό αν διάλεξες «Δική μου πρόταση»)",
+                                 key=f"{pre}note_{r['id']}", height=100)
+                    st.form_submit_button("Υποβολή απόφασης", type="primary", on_click=_cb_decide, args=(r, pre))
+            _tap_error()
 
 # ---------------------------------------------------------------- structured-md composer option (M-20261022-015)
 def composer_toggle(name):
@@ -832,6 +770,123 @@ def composer_gate(name, submitted=None, files=None):
     return (body, files) if act == "send" else (None, None)
 
 
+# ---------------------------------------------------------------- tap handling (J228, M-20261030-063)
+# Phone taps felt slow and needed 2-3 presses: every tap did its DB write in the script body and then called st.rerun(),
+# i.e. TWO full runs (~0.6 s each, queued behind the 5 s fragment timers). Widget callbacks run BEFORE the script, so the
+# write and the new screen come from ONE run (a fragment-only run for buttons inside a fragment). `_once` makes a
+# repeated tap on the same action a no-op, so the extra presses can no longer send a message twice.
+def _once(sig, window=8.0):
+    """True the first time `sig` is seen in this session within `window` seconds, False for a repeat."""
+    seen = st.session_state.setdefault("_once_seen", {})
+    now = time.time()
+    for k in [k for k, t in seen.items() if now - t > window]:
+        del seen[k]
+    if sig in seen:
+        return False
+    seen[sig] = now
+    return True
+
+
+def _cb_begin_edit(mid, ekey):
+    try:
+        _db = db()
+        _db.begin_edit(mid)
+        _db.close()
+        st.session_state[ekey] = True
+    except LabError as e:
+        st.session_state["_tap_err"] = str(e)
+
+
+def _cb_save_edit(mid, ekey, txt_key):
+    if not _once(("edit_save", mid, st.session_state.get(txt_key))):
+        return
+    try:
+        de = db()
+        changed = de.save_edit(mid, st.session_state.get(txt_key, ""))
+        de.close()
+        st.session_state[ekey] = False
+        st.toast("Αποθηκεύτηκε· ο συντονιστής ειδοποιείται" if changed else "Καμία αλλαγή", icon="✏️")
+    except LabError as e:
+        st.session_state["_tap_err"] = str(e)
+
+
+def _cb_cancel_edit(mid, ekey, txt_key):
+    _dc = db()
+    _dc.cancel_edit(mid)
+    _dc.close()
+    st.session_state[ekey] = False
+    st.session_state.pop(txt_key, None)
+
+
+def _send_chat(text, files):
+    """Chat composer send (shared by the on_submit callback and the structured-md dialog path). Returns True if sent."""
+    cur_ = st.session_state.get("thread_sel")
+    target = None if (st.session_state.get("new_topic") or cur_ is None) else cur_
+    if not _once(("send", target, text, tuple(n for n, _ in (files or [])))):
+        return False
+    try:
+        dd = db()
+        reply_to = None
+        if target:
+            thr = dd.thread(target)
+            reply_to = thr[-1]["id"] if thr else None
+        mid = dd.researcher_send(text, kind=st.session_state.get("composer_kind") or "message",
+                                 thread_id=target, reply_to=reply_to,
+                                 req_model=st.session_state.get("req_model_sel") or None,
+                                 req_effort=st.session_state.get("req_effort_sel") or "medium",
+                                 attachments=files or None, root=ROOT)
+        dd.close()
+    except (LabError, UploadError) as e:
+        st.session_state["_tap_err"] = str(e)
+        return False
+    st.session_state["pending_thread"] = target or mid
+    st.session_state["new_topic"] = False
+    st.toast(f"Στάλθηκε ({mid})", icon="📨")
+    return True
+
+
+def _cb_composer_submit():
+    sub = st.session_state.get("composer")
+    if not sub:
+        return
+    txt = getattr(sub, "text", sub) if not isinstance(sub, str) else sub
+    fls = [(f.name, f.getvalue()) for f in (getattr(sub, "files", None) or [])]
+    act, body, fls = msg_structure.gate(st.session_state, "chat", txt, fls)
+    if act == "send":
+        _send_chat(body, fls)
+
+
+def _cb_decide(r, pre):
+    """Decision form callback: one run for the write and the next request (was: write + toast + st.rerun())."""
+    rid = r["id"]
+    options = json.loads(r["options"])
+    note = st.session_state.get(f"{pre}note_{rid}") or ""
+    if options == ["ack"]:
+        pressed = "ack"
+    else:
+        pressed = st.session_state.get(f"{pre}choice_{rid}")
+        if not pressed:
+            st.session_state["_tap_err"] = "Διάλεξε μία επιλογή."
+            return
+    if not _once(("decide", rid)):
+        return
+    try:
+        dd = db()
+        dec, text = ("ack", note) if pressed == "ack" else map_choice(r, pressed, note)
+        state = dd.decide(rid, dec, text, actor="researcher")
+        dd.close()
+        st.toast(f"{rid}: {REQ_STATE[state][1]}", icon=REQ_STATE[state][0])
+    except LabError as e:
+        st.session_state["_once_seen"].pop(("decide", rid), None)
+        st.session_state["_tap_err"] = str(e)
+
+
+def _tap_error():
+    msg = st.session_state.pop("_tap_err", None)
+    if msg:
+        st.error(msg)
+
+
 # ---------------------------------------------------------------- shared chat rendering
 @st.cache_data(ttl=120, max_entries=5000, show_spinner=False)
 def _linkify(text):
@@ -863,35 +918,19 @@ def render_message(m, key="chat"):
             if m["body"].find("docs/uploads/") >= 0:
                 st.caption("Κράτα τις γραμμές με τις διαδρομές των συνημμένων στο κείμενο.")
             b1, b2, _b3 = st.columns([1, 1, 6])
-            if b1.button("Αποστολή", key=f"edit_save_{key}_{m['id']}", type="primary"):
-                try:
-                    de = db()
-                    changed = de.save_edit(m["id"], new_txt)
-                    de.close()
-                    st.session_state[ekey] = False
-                    st.toast("Αποθηκεύτηκε· ο συντονιστής ειδοποιείται" if changed else "Καμία αλλαγή",
-                             icon="✏️")
-                    st.rerun()
-                except LabError as e:
-                    st.error(str(e))
-            if b2.button("Άκυρο", key=f"edit_cancel_{key}_{m['id']}"):
-                _dc = db()
-                _dc.cancel_edit(m["id"])
-                _dc.close()
-                st.session_state[ekey] = False
-                st.session_state.pop(f"edit_txt_{key}_{m['id']}", None)
-                st.rerun()
+            b1.button("Αποστολή", key=f"edit_save_{key}_{m['id']}", type="primary", on_click=_cb_save_edit,
+                      args=(m["id"], ekey, f"edit_txt_{key}_{m['id']}"))
+            b2.button("Άκυρο", key=f"edit_cancel_{key}_{m['id']}", on_click=_cb_cancel_edit,
+                      args=(m["id"], ekey, f"edit_txt_{key}_{m['id']}"))
+            _tap_error()
         else:
             shown = (replytext.readable(m["body"])[0] if m["author"] != "researcher"
                      else ext_catalog.strip_instruction(m["body"]))
             st.markdown(_linkify(shown))  # render-time only; stored text unchanged
-            if m["author"] == "researcher" and st.button("✏️ Επεξεργασία", key=f"edit_btn_{key}_{m['id']}",
-                                                         help="Παγώνει το μήνυμα ώσπου να πατήσεις «Αποστολή»"):
-                _db = db()
-                _db.begin_edit(m["id"])
-                _db.close()
-                st.session_state[ekey] = True
-                st.rerun()
+            if m["author"] == "researcher":
+                st.button("✏️ Επεξεργασία", key=f"edit_btn_{key}_{m['id']}", on_click=_cb_begin_edit,
+                          args=(m["id"], ekey), help="Παγώνει το μήνυμα ώσπου να πατήσεις «Αποστολή»")
+                _tap_error()
         if m.get("edit_count"):
             st.caption(f"(επεξεργάστηκε) · {fmt_ts(m['edited_at'])}")
         for ap in attachment_paths(m["body"]):
@@ -959,6 +998,11 @@ def show_thread(tid, key="chat", title=None):
         for m in msgs[hidden_n:]:
             render_message(m, key)
         st.html("<div id='chat-end'></div>")
+    # «ο συντονιστής δουλεύει» used to be its own 5 s fragment (one more timer, one more queued run per tick); J228
+    mine = [m for m in msgs if m["author"] == "researcher"]
+    if mine and mine[-1]["status"] in ("acknowledged", "in_progress"):
+        names = [AGENTS.get(k, (k,))[0] for k in active_agent_keys(read_events(400)) if k != "coordinator"]
+        st.info("⏳ ο συντονιστής δουλεύει…" + (" · ενεργοί τώρα: " + ", ".join(names) if names else ""))
     for m in msgs:
         if m["author"] == "researcher" and m["status"] == "delivered" and (since(m["updated_at"]) or 0) > 180:
             st.info(f"Το {m['id']} παραδόθηκε αλλά ο συντονιστής δεν το έχει αναλάβει ακόμη "
@@ -999,7 +1043,7 @@ def term_prompt_panel(where, unlocked):
         st.info(st.session_state.pop("_term_msg"))
 
 
-@st.fragment(run_every=3)
+@st.fragment(run_every=8)
 def perm_banner():
     pend = perm_store.pending()
     # cards of headless tasks that already ended are not urgent: one line, never a wall of banners (30/10 incident)
@@ -1140,20 +1184,7 @@ with tab_chat:
             st.session_state["new_topic"] = False
             st.rerun()
     else:
-        @st.fragment(run_every=refresh)
-        def working_indicator(tid):
-            # isolated from the input: only this small block refreshes
-            dd = db()
-            msgs = dd.thread(tid)
-            dd.close()
-            mine = [m for m in msgs if m["author"] == "researcher"]
-            if not mine or mine[-1]["status"] not in ("acknowledged", "in_progress"):
-                return
-            names = [AGENTS.get(k, (k,))[0] for k in active_agent_keys(read_events(400)) if k != "coordinator"]
-            st.info("⏳ ο συντονιστής δουλεύει…" + (" · ενεργοί τώρα: " + ", ".join(names) if names else ""))
-
         show_thread(cur)
-        working_indicator(cur)
 
     kind = st.segmented_control("Τύπος μηνύματος", ["message", "proposal", "code_question"],
                                 format_func=lambda k: KIND_LABEL[k], default="message", key="composer_kind")
@@ -1227,30 +1258,13 @@ with tab_chat:
                 st.error(str(e))
     # Enter sends, Shift+Enter = newline. Not inside any fragment, so typing is never refreshed away.
     composer_toggle("chat")
-    sub = st.chat_input("Γράψε εδώ… (Enter = αποστολή, Shift+Enter = νέα γραμμή)", accept_file="multiple",
-                        key="composer")
-    text, files = composer_gate("chat", *((getattr(sub, "text", sub) if not isinstance(sub, str) else sub,
-                                           [(f.name, f.getvalue()) for f in (getattr(sub, "files", None) or [])])
-                                          if sub else (None, None)))
-    if text is not None:
-        try:
-            dd = db()
-            target = None if new_topic else cur
-            reply_to = None
-            if target:
-                thr = dd.thread(target)
-                reply_to = thr[-1]["id"] if thr else None
-            mid = dd.researcher_send(text, kind=kind or "message",
-                                     thread_id=target, reply_to=reply_to,
-                                     req_model=req_model or None, req_effort=req_effort,
-                                     attachments=files or None, root=ROOT)
-            dd.close()
-            st.session_state["pending_thread"] = target or mid
-            st.session_state["new_topic"] = False
-            st.toast(f"Στάλθηκε ({mid})", icon="📨")
-            st.rerun()
-        except (LabError, UploadError) as e:
-            st.error(str(e))
+    st.chat_input("Γράψε εδώ… (Enter = αποστολή, Shift+Enter = νέα γραμμή)", accept_file="multiple",
+                  key="composer", on_submit=_cb_composer_submit)
+    # structured-md dialog path only (preview/choice pending in session state); a plain send is done by the callback
+    text, files = composer_gate("chat")
+    if text is not None and _send_chat(text, files):
+        st.rerun()
+    _tap_error()
 
 # ================================================================ decisions
 with tab_dec:
@@ -1273,7 +1287,7 @@ with tab_dec:
 # ================================================================ agents
 if _tab_live(tab_agents):  # lazy: hidden tabs do no work (M-20261021-023)
     with tab_agents:
-        @st.fragment(run_every=3)
+        @st.fragment(run_every=8)
         def agents_brain():
             components.html(brain_view.render(_brain_state(), full_names=True), height=380)
 
@@ -1984,7 +1998,7 @@ if _tab_live(tab_runs):  # lazy: hidden tabs do no work
                            "ημίτονο), όχι από τη θέση. Το ημίτονο προσαρμόζεται μόνο στη φάση (πλάτος/συχνότητα από το env).")
             else:
                 st.caption("Δεν βρέθηκαν παράμετροι θορύβου/spike για αυτό το variant (άγνωστο).")
-        @st.fragment(run_every=3)
+        @st.fragment(run_every=6)
         def exp_live():
             for _b, _bn, _rel in exp_view.BRANCHES:   # stacked, full width (researcher M-20261021-054)
                 with st.container():

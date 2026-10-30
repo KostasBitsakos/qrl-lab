@@ -15,10 +15,11 @@ import streamlit.components.v1 as components
 STATIC = "/app/static"
 TITLE = "QRL-Lab"
 THEME = "#2a78d6"
+# Tutorials are grouped under Έρευνα (M-20261029-159).
 # Grouping for the phone tab menu: keyword in the tab label -> group. Unknown labels go to "Άλλα".
 GROUPS = [
     ("Κύρια", ["Συνομιλία", "Αποφάσεις", "Πράκτορες", "Πειράματα", "Council"]),
-    ("Έρευνα", ["Paper", "Συνέδρια", "Γνώση", "Αρχεία", "Μοντέλα", "Αρχιτεκτονική"]),
+    ("Έρευνα", ["Paper", "Συνέδρια", "Γνώση", "Tutorials", "Αρχεία", "Μοντέλα", "Αρχιτεκτονική"]),
     ("Υποδομή", ["Πόροι", "Kubernetes", "Prometheus", "Grafana", "Terminal"]),
     ("Διαχείριση", ["Ιστορικό αλλαγών", "Ιστορικό", "Sudo", "Επεκτάσεις", "Διακοπές"]),
 ]
@@ -67,6 +68,27 @@ var HEAD=%(head)s,GROUPS=%(groups)s;
 HEAD.forEach(function(h){var t=h[0],a=h[1],sel=t+(a.name?'[name="'+a.name+'"]':'[rel="'+a.rel+'"]');
   if(doc.head.querySelector(sel))return;var el=doc.createElement(t);
   Object.keys(a).forEach(function(k){el.setAttribute(k,a[k]);});doc.head.appendChild(el);});
+if(!w.__qrlFb){w.__qrlFb=1;(function(){
+  /* J228 (M-20261030-063): instant feedback for every tap + top progress bar while the script runs. A tapped button is dimmed
+     and ignores a second tap until the app has finished its run (the 2nd/3rd press used to queue duplicate reruns). */
+  var fst=doc.createElement('style');fst.textContent='.qrl-pend{opacity:.55!important;pointer-events:none!important}'+
+   '#qrl-bar{position:fixed;left:0;top:0;height:3px;width:0;background:%(theme)s;z-index:999999;opacity:0;'+
+   'transition:width 6s cubic-bezier(.1,.7,.2,1),opacity .2s}#qrl-bar.on{width:92%%;opacity:1}';
+  doc.head.appendChild(fst);var bar=doc.createElement('div');bar.id='qrl-bar';doc.body.appendChild(bar);
+  var pend=[],tmo=null;
+  function app(){return doc.querySelector('[data-testid="stApp"]');}
+  function running(){var a=app();return !!a&&a.getAttribute('data-test-script-state')==='running';}
+  function clear(){pend.forEach(function(b){b.classList.remove('qrl-pend');});pend=[];}
+  function sync(){if(running()){bar.classList.add('on');}else{bar.classList.remove('on');bar.style.transition='none';
+    bar.offsetWidth;bar.style.transition='';clear();}}
+  doc.addEventListener('click',function(e){var b=e.target&&e.target.closest?e.target.closest('button'):null;
+    if(!b||b.closest('#qrl-menu')||b.id==='qrl-menu-btn')return;
+    var wrap=b.closest('[data-testid="stButton"],[data-testid="stFormSubmitButton"],[data-testid="stChatInput"]');
+    if(!wrap)return;b.classList.add('qrl-pend');pend.push(b);bar.classList.add('on');
+    clearTimeout(tmo);tmo=setTimeout(function(){if(!running()){clear();bar.classList.remove('on');}},2500);},true);
+  var t=setInterval(function(){var a=app();if(!a)return;clearInterval(t);
+    new MutationObserver(sync).observe(a,{attributes:true,attributeFilter:['data-test-script-state']});},300);
+})();}
 if(doc.getElementById('qrl-menu-btn'))return;
 var mq=w.matchMedia('(max-width:480px)');
 var st=doc.createElement('style');st.textContent='@media (max-width:480px){'+
