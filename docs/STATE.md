@@ -2,7 +2,7 @@
 <!-- Read first by every coordinator (Claude or Codex). At most 150 lines. Facts only, each with a pointer
      (M-/R-/run id, path, URL). Update it at the end of every task that changed something. Older detail goes to
      docs/DECISIONS.md, docs/journal/ or a topic file listed in docs/INDEX.md. -->
-Last update: 2026-10-30 · by: Claude (J172) · task: R-20261030-002 reconcile s59, screen resumed
+Last update: 2026-10-30 · by: Claude (C220) · task: M-20261030-052 permission-approval loop diagnosis
 ## 1. Goal now
 - PhD paper: hybrid quantum–classical extension of the DInos autoscaler; simulation first, then real cluster;
   conference submission end of Nov 2026 (`docs/PLAN.md` §1, §11). Quantum work is PAUSED (`docs/rules/paused.md`).
@@ -16,6 +16,7 @@ Last update: 2026-10-30 · by: Claude (J172) · task: R-20261030-002 reconcile s
 ## 2. In progress (what · id · owner · next check)
 - M-20261030-001 → J169: συνέχιση εγκεκριμένου R-010 screen, έλεγχος s59 και DB-lock fix· δεν τεκμαίρεται ακόμη επανεκκίνηση από την ανάθεση (`.lab/c168/`, §3). J170: απογραφή Markdown και token leaks (`.lab/j170/report.md`).
 - R-010 screen: μόνο 56 tasks, hard136 CPU-h/cap2.5h, κοινή χρέωση R-006· actual/reservation/remaining-ledger gates, STOP και στα δύο lanes σε failure/overrun, χωρίς retry/αύξηση caps. test12/shift-test και επόμενα stages κλειστά. Frozen hash42ac17ed…6682a94, approvals/reviews J119/J120 (`.lab/j119/amendment-spec.json`, `.lab/j120/final-review.md`; R-20261029-010).
+- J173 (30/10): waves1-4 screen (s28-s59, 32 runs, όλα done/exit0, nominal 3.055 CPU-h), μόνο val/2 seeds: dinos c0 καλύτερο+σταθερό (196,5k και στα δύο lanes), dinos c1 174-182k, derp ~142-159k (c1-claude 39k), derp_hist10/rppo ασταθή/αρνητικά· c0 ίδιο στα δύο lanes· κανένας νικητής, waves5-7 τρέχουν (`.lab/j173/{table.txt,summary.json,screen_w1_4.py}`).
 - J126/J132: τελευταία ενδιάμεση ανάλυση, όχι τελικό αποτέλεσμα· μόνο 2 val seeds, κανένας νικητής. Driver/ανά κύμα στοιχεία `.lab/j126/{driver.log,results.jsonl}`, κόστος/πίνακες `.lab/j132/{result.md,summary.json}`. Calibration J92 ολοκληρωμένο (`.lab/j92/calib_result.md`).
 - J100/J143 committed4286965, J165 debounce committedf1a1e8c· dispatcher activation/restart εκκρεμεί (§3). Review/tests `.lab/j157/`, `.lab/j143/handoff.md`, `.lab/j165/tests.log`· όχι επανάληψη υλοποίησης.
 - Dashboard restart R-011 DONE 29/10 19:42UTC: cycle2-first/DRe-SCale και λογότυπο πάνω από tokens επαληθεύθηκαν live (`.lab/j162/live.json`, M-20261029-293). Sidebar commit5e7daa2, Claude limits fix4a2828e (M-20261029-292/296). Bytes/4 είναι εκτίμηση ανά ανάγνωση, συνολική πραγματική εξοικονόμηση άγνωστη (`tools/token_metrics.py`).
@@ -47,6 +48,8 @@ Last update: 2026-10-30 · by: Claude (J172) · task: R-20261030-002 reconcile s
   spike300_d7 / multispike_d5 as acceptance envs (c14), noise for B1 (c17), dueling (−2.2k), PER (−15.6k), arch a12
   (c20), c23 package → `docs/tuning_experiments.md`.
 - Never evaluate DERP at eps=1; never reuse a single-use test split (test10, test11 are spent).
+- Never ask for approval of `sqlite3`: it is a settings.json deny rule, approval cannot override it, and each answer wakes a paid job that creates new cards (98 cards, ~29 jobs ≈$9 est., 30/10 09h; `.lab/c220/brief.md`, M-20261030-052). Run status: `launch_run.py list`. Do not retry denied commands; fix in progress via a Codex worker, active only after dispatcher restart.
+- Wave 5 s60-65, s67: supervisor died at start on DB lock (`launch_run.py:382`), child finished unsupervised, rows stuck `starting`, driver J126 waits. Reconciliation needs one researcher approval (`.lab/c220/brief.md` item D).
 - Sandbox-status over-reports use while runs are active (5 CPU-h reservation each) (handoff 23/10).
 - Cost: long-lived sessions with hourly in-session crons burned the weekly limit and ≈$20 of extra credits on 23/10
   (`.lab/usage/extra_credits_state.json`; `docs/COORDINATION.md` §1). Do not recreate hourly crons; v0.3 wakes the
