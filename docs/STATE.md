@@ -2,7 +2,7 @@
 <!-- Read first by every coordinator (Claude or Codex). At most 150 lines. Facts only, each with a pointer
      (M-/R-/run id, path, URL). Update it at the end of every task that changed something. Older detail goes to
      docs/DECISIONS.md, docs/journal/ or a topic file listed in docs/INDEX.md. -->
-Last update: 2026-10-30 · by: Claude (C220) · task: M-20261030-052 permission-approval loop diagnosis
+Last update: 2026-10-30 · by: Codex (C234) · task: J233 recovery escalation / M-20261030-070
 ## 1. Goal now
 - PhD paper: hybrid quantum–classical extension of the DInos autoscaler; simulation first, then real cluster;
   conference submission end of Nov 2026 (`docs/PLAN.md` §1, §11). Quantum work is PAUSED (`docs/rules/paused.md`).
@@ -14,6 +14,12 @@ Last update: 2026-10-30 · by: Claude (C220) · task: M-20261030-052 permission-
   file the sandbox request when runs start. Plan: `docs/cycle2_plan.md`, expert pack `docs/expert/` (J12, d6cfa11).
 
 ## 2. In progress (what · id · owner · next check)
+- J233: wave5 ΔΕΝ αποκαταστάθηκε: R-20261030-003 approved αλλά spec_path/spec_hash=None· το ελεγμένο reconcile απαιτεί frozen proposal. Dry-run ακριβώς ίδιο J221/J222, 7 complete/exit0 inferred/CPU tree unknown, κανένα live payload ή screen_driver.py στο /proc, 8 supervisor tests PASS. Waves6-7 δεν ξεκίνησαν· escalation C232, χωρίς νέα κάρτα ή παράκαμψη (`.lab/j233/{report.md,approval.txt,evidence-summary.json}`, M-20261030-070).
+- C232: αποκλειστική εργασία από κινητό χωρίς VS Code δεν έχει επαληθευθεί. J228 running για mobile latency/usage/cleanup· ζητήθηκε live έλεγχος send/edit/approve και αναφορά recovery/restart blockers. J233 running: προετοιμάζει ενιαίο frozen recovery + resume μόνο waves6–7· δεν έχει γίνει apply ή νέο run. R-003 approved αλλά χωρίς spec/hash, και driver απόν (`.lab/j233/evidence-summary.json`, `labq.py request R-20261030-003`, εντολή C234 μέσω `work.py say J233`).
+- J230: ανεξάρτητη μελέτη tokens, χωρίς αλλαγή κώδικα/ρυθμίσεων· deterministic status/events και προαιρετικός no-tools συνομιλητής, υλοποίηση εκκρεμής. 29/10 αυτόματα48/102 Claude tasks =23,7% recorded input, όχι quota savings· exact cold-first-call κόστος άγνωστο. Snapshot10:35 συντονιστής Sonnet (`.lab/c227/arch_codex.md`, `.lab/c227/j230/metrics.json`, M-20261030-063).
+- J228 (30/10): κινητό/tap latency: εντοπίστηκαν διπλά reruns + fragment timers· διορθώσεις committed (callbacks, idempotent submit, tap feedback, refresh 5→10s), ΕΝΕΡΓΕΣ μόνο μετά restart `qrl-dashboard`· μετρήσεις sandbox send 2.45→0.14s, απόφαση 9.2→0.27s (`.lab/j228/report.md`). Αριθμοί χρήσης/πηγές `docs/usage_numbers_sources.md`· offers/ειδοποιήσεις ορίων αφαιρέθηκαν.
+- J221: deny-rule cards/retries αποκλείονται, dedup+batch/debounce ανά thread, read-only `launch_run.py show`, startup supervision με bounded DB retries· εφαρμογή dispatcher μόνο μετά restart, commits blocked από read-only `.git` (patches στο `.lab/j221/`). Wave5: μόνο dry-run, 7 πλήρη artifacts, exit0 inferred/CPU tree unknown· καμία αποκατάσταση ή νέο run (`.lab/j221/{report.md,dry-run.json,reconciliation-approval-spec.json}`, M-20261030-052).
+- Graphify trial J225 (30/10, code only, tools+dashboard copy, venv ~/.venvs/graphify): δεν κέρδισε σε tokens (bytes/4 εκτίμηση) σε 3 ερωτήσεις, Q2 ελλιπές· 24h verdict due ~2026-10-31 10:00 UTC στο Extensions chat (thread M-20261017-016, reply-to M-20261030-060), `.lab/c224/report.md`.
 - M-20261030-001 → J169: συνέχιση εγκεκριμένου R-010 screen, έλεγχος s59 και DB-lock fix· δεν τεκμαίρεται ακόμη επανεκκίνηση από την ανάθεση (`.lab/c168/`, §3). J170: απογραφή Markdown και token leaks (`.lab/j170/report.md`).
 - R-010 screen: μόνο 56 tasks, hard136 CPU-h/cap2.5h, κοινή χρέωση R-006· actual/reservation/remaining-ledger gates, STOP και στα δύο lanes σε failure/overrun, χωρίς retry/αύξηση caps. test12/shift-test και επόμενα stages κλειστά. Frozen hash42ac17ed…6682a94, approvals/reviews J119/J120 (`.lab/j119/amendment-spec.json`, `.lab/j120/final-review.md`; R-20261029-010).
 - J173 (30/10): waves1-4 screen (s28-s59, 32 runs, όλα done/exit0, nominal 3.055 CPU-h), μόνο val/2 seeds: dinos c0 καλύτερο+σταθερό (196,5k και στα δύο lanes), dinos c1 174-182k, derp ~142-159k (c1-claude 39k), derp_hist10/rppo ασταθή/αρνητικά· c0 ίδιο στα δύο lanes· κανένας νικητής, waves5-7 τρέχουν (`.lab/j173/{table.txt,summary.json,screen_w1_4.py}`).
@@ -49,7 +55,7 @@ Last update: 2026-10-30 · by: Claude (C220) · task: M-20261030-052 permission-
   (c20), c23 package → `docs/tuning_experiments.md`.
 - Never evaluate DERP at eps=1; never reuse a single-use test split (test10, test11 are spent).
 - Never ask for approval of `sqlite3`: it is a settings.json deny rule, approval cannot override it, and each answer wakes a paid job that creates new cards (98 cards, ~29 jobs ≈$9 est., 30/10 09h; `.lab/c220/brief.md`, M-20261030-052). Run status: `launch_run.py list`. Do not retry denied commands; fix in progress via a Codex worker, active only after dispatcher restart.
-- Wave 5 s60-65, s67: supervisor died at start on DB lock (`launch_run.py:382`), child finished unsupervised, rows stuck `starting`, driver J126 waits. Reconciliation needs one researcher approval (`.lab/c220/brief.md` item D).
+- Wave5: R-20261030-003 APPROVED αλλά spec_path/spec_hash=None: το ελεγμένο reconcile δεν επιτρέπεται να κάνει apply. J233 dry-run ταυτόσημο με J221/J222, 7 complete, exit0 μόνο inferred, tree CPU unknown· κανένα live payload ή screen_driver. C234 ανέθεσε συγκεκριμένο frozen πακέτο και ασφαλές resume μόνο waves6–7 με ίδια gates· καμία νέα κάρτα πριν ολοκληρωθεί/ελεγχθεί, καμία επανεκκίνηση από wave1 (`.lab/j233/evidence-summary.json`, `labq.py request R-20261030-003`, `work.py say J233`).
 - Sandbox-status over-reports use while runs are active (5 CPU-h reservation each) (handoff 23/10).
 - Cost: long-lived sessions with hourly in-session crons burned the weekly limit and ≈$20 of extra credits on 23/10
   (`.lab/usage/extra_credits_state.json`; `docs/COORDINATION.md` §1). Do not recreate hourly crons; v0.3 wakes the
