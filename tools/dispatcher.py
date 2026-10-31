@@ -725,6 +725,15 @@ class Dispatcher:
                 lines = [f"- {m['id']} · {m['author']} · {m['kind']}: {clip(m['body'], 700)}" for m in hist]
                 parts.append("## Thread so far (latest messages, clipped; full text: python3 tools/labq.py show <id>"
                              " --full)\n" + "\n".join(lines))
+        if lane_of(item) == "chat":
+            try:  # bounded memory lookup (J261): pointers only; failures never block the run
+                import convo_context
+                mem = convo_context.relevant(item["text"], self.root, max_chars=1500)
+            except Exception:
+                mem = ""
+            if mem:
+                parts.append("## Possibly relevant memory (pointers; check before claiming, and before appending to any md file run"
+                             " `python3 tools/md_dedupe.py check <file> \"<text>\"`)\n" + mem)
         parts.append("## New input\n" + item["text"])
         others = self.work.summary_lines(exclude=job)
         parts.append("## Parallel work now (python3 tools/work.py status)\n" +
