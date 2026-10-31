@@ -71,7 +71,7 @@ def _render(dd):
     _status_fragment()
 
 
-@st.fragment(run_every=10)
+@st.fragment(run_every=30)
 def _status_fragment():
     with _dd() as dd:
         _status(dd)

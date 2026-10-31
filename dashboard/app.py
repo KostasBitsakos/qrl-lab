@@ -535,7 +535,13 @@ if _recent_denied:
                      f"{_recent_denied[0].get('login') or '(κανένα)'} · δες Sudo → Πρόσβαση", icon="🚨")
 # No page-level refresh timer and no slider: only small @st.fragment(run_every=...) blocks update themselves, so the
 # page never reruns as a whole (no grey-out). Heavy loads live in tabs that render only while open (tab.open).
-refresh = 10  # J228: was 5; idle fragment runs kept the script 'running' 20-80% of the time and queued every tap
+refresh = 30  # J260: was 10 (J228: 5); every fragment tick re-sent its elements and the page visibly flickered
+# J260 (M-20261031-002): background fragment reruns must be invisible. Streamlit marks elements of a running fragment as
+# stale (opacity .33 + transition) and shows the top-right running widget; both are hidden here, so a poll that returns the
+# same content changes nothing on screen. Taps and chat sends keep working (only the visual cue is removed).
+st.html("<style>[data-stale=true],[data-testid=stElementContainer][data-stale=true],.stale-element{opacity:1!important;"
+        "transition:none!important}[data-testid=stStatusWidget]{visibility:hidden!important}"
+        "[data-testid=stAppViewContainer] *{scroll-behavior:auto!important;overflow-anchor:auto}</style>")
 st.html("<style>@media (min-width:769px){[data-testid=stSidebar][aria-expanded=true]{min-width:350px!important;"
         "width:350px!important}}</style>")
 # Tabs wrap onto extra rows instead of scrolling sideways on narrow screens (researcher, M-20261020-009). The sliding
@@ -604,7 +610,7 @@ def _brain_state():
     return brain_view.derive(read_events_raw(1500), msgs, time.time(), health=read_health())
 
 
-@st.fragment(run_every=15)
+@st.fragment(run_every=max(15, refresh))
 def sidebar_brain():
     """Identical HTML when idle and no pulse is running, so the iframe is not reloaded (no flicker)."""
     components.html(brain_view.render(_brain_state()), height=255)
@@ -663,7 +669,7 @@ def decision_panel(d, select=lambda reqs: reqs, pre="", label="Αίτημα",
         return r_ if _unlocked else [x for x in r_ if x["scope"] != "sudo"]
     # Live check, outside the form: only compares the set of open request ids with the one rendered; it never touches
     # the form widgets, so unsaved typing is never lost. A full rerun (button) keeps widget state by key.
-    @st.fragment(run_every=5)
+    @st.fragment(run_every=max(5, refresh))
     def new_request_badge(shown_ids):
         dd = db()
         now_ids = sorted(r["id"] for r in select(dd.requests(state="open")))
@@ -1044,7 +1050,7 @@ def term_prompt_panel(where, unlocked):
         st.info(st.session_state.pop("_term_msg"))
 
 
-@st.fragment(run_every=8)
+@st.fragment(run_every=10)
 def perm_banner():
     pend = perm_store.pending()
     # cards of headless tasks that already ended are not urgent: one line, never a wall of banners (30/10 incident)
@@ -1288,7 +1294,7 @@ with tab_dec:
 # ================================================================ agents
 if _tab_live(tab_agents):  # lazy: hidden tabs do no work (M-20261021-023)
     with tab_agents:
-        @st.fragment(run_every=8)
+        @st.fragment(run_every=10)
         def agents_brain():
             components.html(brain_view.render(_brain_state(), full_names=True), height=380)
 
@@ -1999,7 +2005,7 @@ if _tab_live(tab_runs):  # lazy: hidden tabs do no work
                            "ημίτονο), όχι από τη θέση. Το ημίτονο προσαρμόζεται μόνο στη φάση (πλάτος/συχνότητα από το env).")
             else:
                 st.caption("Δεν βρέθηκαν παράμετροι θορύβου/spike για αυτό το variant (άγνωστο).")
-        @st.fragment(run_every=6)
+        @st.fragment(run_every=max(6, refresh))
         def exp_live():
             for _b, _bn, _rel in exp_view.BRANCHES:   # stacked, full width (researcher M-20261021-054)
                 with st.container():
