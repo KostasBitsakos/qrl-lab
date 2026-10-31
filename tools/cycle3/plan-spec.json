@@ -1,0 +1,57 @@
+{
+ "kind": "staged-plan-release",
+ "name": "cycle2-j269-opus-vs-astra-staged-val-only-v2",
+ "scope": "sim",
+ "parent_request": "R-20261029-006",
+ "authority": "R-20261029-001 budget, R-20261029-010 stage policy (joint stage release), M-20261031-015",
+ "plan_path": "tools/cycle3/cycle3.py",
+ "plan_sha256": "c7b28abf6637037c4e0384eae7ba6410410894c06c5dacd1f019111d6a76fbb2",
+ "lanes": {
+  "opus": "code-poisson (Claude)",
+  "astra": "code-poisson-astra (Codex)"
+ },
+ "stages": {
+  "S0": "lstm_transfer screen gap, 5k ticks, seeds 15010/15011",
+  "W": "3 lane-specific candidates/arm (derp_hist10 2, derp 0), 5k ticks, seeds 15010/15011",
+  "E": "lane top-1 per arm, 19968 ticks (transfer source 9984), seeds 15010/15011/15000",
+  "F": "per-arm winner (E only), 10 fresh seeds 15100-15109, 19968 ticks, val only",
+  "A": "optional longer-source ablation, only with leftover budget after all F submitted"
+ },
+ "nominal_cpu_h": {
+  "S0": 3.1,
+  "W": 17.07,
+  "E": 26.74,
+  "F": 44.56
+ },
+ "nominal_total": 91.47,
+ "margin": 1.25,
+ "self_cap_cpu_h": 132.0,
+ "sandbox_hard_cap_cpu_h": 136,
+ "gates": {
+  "cap_check": "used + active reservations + new reserve + 1.25*remaining mandatory nominal <= 132 (launcher hard 136)",
+  "select": "highest mean val return over the pool seeds; tie lowest SLO-violation rate, then candidate id",
+  "F": "per arm, lane winner with higher E mean (3 seeds) over its E runs; tie as above; both lanes E done first",
+  "stop_both": "approval/hash mismatch, cap check fails, forbidden seed, >=3 failed runs, any failed F run, STOP file",
+  "idle": "watch posts an alarm if a lane has queued-releasable work but 0 active for >10 min or the driver died"
+ },
+ "max_failed_runs": 3,
+ "slots_per_lane": 4,
+ "deadline_submit": "2026-11-02T10:00:00+00:00",
+ "forbidden": "test12 14000-14019, shift-test 14500-14519, no retries, no cap/limit changes, no seeds outside the sandbox allowed ranges",
+ "reviews": "council .lab/j269/codex_round1.txt; code review .lab/j269/codex_review.txt, codex_review2.txt (fixes applied; second round raised artifact-validation and DONE-honesty, fixed after); offline sim .lab/j269/sim_test.py; dry-run 192 child specs validated by sandbox_guard.check_child | v2 (J275): fix retarget total-ticks=pretrain+finetune, S0 rerun as -r2 (6 failed S0 superseded), sim_test asserts total; not re-reviewed by Codex",
+ "start": "python3 .lab/j269/cycle3.py start (detached driver+watch, receipt .lab/j269/receipt.json, state .lab/j269/state.json, log .lab/j269/driver.log)",
+ "cwd": "/home/ubuntu/qrl-lab",
+ "entries": [
+  {
+   "cmd": [
+    "/home/ubuntu/qrl-lab/.venv/bin/python",
+    "/home/ubuntu/qrl-lab/.lab/j269/cycle3.py",
+    "start"
+   ]
+  }
+ ],
+ "limits": {
+  "wall_clock_hours": 0.05
+ },
+ "limits_note": "The only entry just starts the detached driver+watch (one-shot, receipt). The staged runs themselves are launched by the driver through sandbox-start under R-20261029-006 with the sandbox limits (136 CPU-h, 2.5 h/run, <=8 active, seeds 15000/15010-11/15100-09/13000-19)."
+}
