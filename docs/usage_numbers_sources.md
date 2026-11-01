@@ -12,3 +12,14 @@
 
 Removed (J228): «δωρεάν resets / προσφορές» (`docs/free_offers.json` was empty) and «ειδοποιήσεις ορίων» (only rolling-window
 «νέο παράθυρο» events and 2 unverified false positives). `tools/offers_watch.py` may still be scheduled; if so it can be stopped.
+
+J279 / M-20261101-001: η μπάρα διαθέσιμης χρήσης υπολογίζει `100 - used%`
+(`tools/extra_credits.py:awake_html`). Το `DispatchDB.save_limits` κρατούσε με `COALESCE`
+παλιά `utilization` όταν νέο συμβάν δεν περιείχε ποσοστό, ανανεώνοντας όμως ώρα και reset.
+Η τοπική καταγραφή έδειξε `allowed`, `.99`, άρα πλασματικά πρόσφατο «απομένουν 1%»
+(`.lab/j279/evidence.json`). Η διόρθωση αποθηκεύει NULL όταν λείπει το ποσοστό· η υπάρχουσα
+μπάρα τότε δείχνει «άγνωστο». Το προαιρετικό πεδίο τεκμηριώνεται στο
+[SDKRateLimitEvent](https://code.claude.com/docs/en/agent-sdk/typescript#sdkratelimitevent).
+Χρειάζεται ενεργοποίηση του νέου κώδικα στον dispatcher και νέο συμβάν για να αντικατασταθεί
+η παλιά εγγραφή· επανεκκίνηση μόνο του dashboard δεν αρκεί. Δεν έγινε restart ή αλλαγή live DB.
+Έλεγχος αποθήκευσης → sidebar: `tests/test_usage_persistence.py`.

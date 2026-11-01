@@ -230,7 +230,9 @@ class DispatchDB:
             self.conn.execute(
                 "INSERT INTO limits(provider, window, status, utilization, resets_at, overage, updated_at)"
                 " VALUES (?,?,?,?,?,?,?) ON CONFLICT(provider, window) DO UPDATE SET status=excluded.status,"
-                " utilization=COALESCE(excluded.utilization, utilization), resets_at=excluded.resets_at,"
+                # Missing utilization is unknown for this observation. Keeping the old
+                # value would give it a new timestamp (and possibly a new reset window).
+                " utilization=excluded.utilization, resets_at=excluded.resets_at,"
                 " overage=excluded.overage, updated_at=excluded.updated_at",
                 (provider, window, li.get("status"), float(util) if util is not None else None,
                  _epoch(li["resetsAt"]) if li.get("resetsAt") else None, int(bool(li.get("isUsingOverage"))),
