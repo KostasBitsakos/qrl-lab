@@ -520,6 +520,8 @@ def usage_rings():
     _ai_cx = extra_credits.awake_info("codex", _h.get("codex") or {}, now)
     _ai_cl["windows"], _ai_cx["windows"] = cw, xw  # remaining-usage bars per vendor (M-20261030-108)
     st.html(extra_credits.awake_html([_ai_cl, _ai_cx]))
+    st.html(token_metrics.CARD_CSS + token_metrics.sidebar_bars_html(ROOT, "claude", cw, "Claude")
+            + token_metrics.sidebar_bars_html(ROOT, "codex", xw, "Codex"))  # J319 M-20261102-026
     # J228 (M-20261030-063): «δωρεάν resets / προσφορές» and «ειδοποιήσεις ορίων» removed. docs/free_offers.json was empty,
     # and offers_watch only logged rolling-window «νέο παράθυρο» events plus 2 unverified false positives (a customer story).
     # tools/offers_watch.py, offers_check.py and notif_format.py stay for reference; nothing renders them.

@@ -114,6 +114,14 @@ def summary_text(data):
     return " · ".join(parts)
 
 
+CARD_CSS = ('<style>.tk-card{border:1px solid rgba(16,163,127,.35);border-radius:12px;padding:10px 12px;'
+            'margin:6px 0 10px;background:rgba(16,163,127,.06);font-size:.85rem}'
+            '.tk-card h4{margin:0 0 6px;font-size:.95rem}.tk-row{display:flex;justify-content:space-between}'
+            '.tk-row b{color:#10a37f}.tk-bar{height:6px;border-radius:3px;background:rgba(128,128,128,.25);'
+            'margin:3px 0 1px}.tk-bar i{display:block;height:100%;border-radius:3px;background:#10a37f}'
+            '.tk-sub,.tk-foot{opacity:.7;font-size:.75rem;margin-bottom:4px}</style>')
+
+
 def card_html(data):
     """Compact sidebar card: one bar per comparison (smaller is better), honest caption, no LLM calls."""
     import html as _html
@@ -133,12 +141,7 @@ def card_html(data):
                    f'Μόνο jobs του dispatcher, όχι διαδραστικά sessions.">{_html.escape(str(u["provider"]))} 24ω '
                    f'(μετρημένα): {u["n"]} tasks · input {u["inp"]:,} · cached {u["cached"]:,} · cache-write {u["cw"]:,} · output {u["out"]:,}</div>'
                    for u in data.get("used24", []))
-    return ('<style>.tk-card{border:1px solid rgba(16,163,127,.35);border-radius:12px;padding:10px 12px;'
-            'margin:6px 0 10px;background:rgba(16,163,127,.06);font-size:.85rem}'
-            '.tk-card h4{margin:0 0 6px;font-size:.95rem}.tk-row{display:flex;justify-content:space-between}'
-            '.tk-row b{color:#10a37f}.tk-bar{height:6px;border-radius:3px;background:rgba(128,128,128,.25);'
-            'margin:3px 0 1px}.tk-bar i{display:block;height:100%;border-radius:3px;background:#10a37f}'
-            '.tk-sub,.tk-foot{opacity:.7;font-size:.75rem;margin-bottom:4px}</style>'
+    return (CARD_CSS +
             '<div class="tk-card"><h4>💡 Εξοικονόμηση tokens <small>(εκτίμηση)</small></h4>' + "".join(rows) + used
             + f'<div class="tk-foot">Μείωση μεγέθους οδηγιών έναντι 28/10 (εκτίμηση bytes/4). Συνολική πραγματική '
             f'εξοικονόμηση: άγνωστη · έλεγχος σπατάλης: {audit} · λεπτομέρειες στις Επεκτάσεις</div></div>')
@@ -169,3 +172,82 @@ def render(st, data, compact=False):
     st.caption(f"Snapshot: {data['as_of']} · τοπικός χρόνος παραγωγής {data['runtime_ms']} ms. "
                "Cache 300s, 0 κλήσεις LLM από τον μηχανισμό. Μόνο metadata 5 αρχείων, index έως 1MiB/search έως 8 γραμμές, JSON audit έως 64KiB. "
                "Overhead tokens των οδηγιών/index στις πραγματικές κλήσεις: άγνωστο.")
+
+
+# ---- J319 (M-20261102-026): sidebar «πόσα απομένουν και πού πάνε» -------------------------------------------------
+WINDOW_HOURS = {"5ω": 5, "7ημ": 168}
+MIN_PCT_FOR_ESTIMATE = 5.0  # below this the ratio tokens/pct is too noisy to show
+
+
+def usage_by_kind(root, hours, provider):
+    """MEASURED dispatcher tokens (input + cache-write + output as the CLI reported them; cached-read field not added) per task kind and model in the last
+    `hours`. None when unreadable. Same source and limits as dispatcher_usage."""
+    import sqlite3
+    path = Path(root) / ".lab/dispatch.db"
+    since = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=hours)).isoformat(timespec="seconds")
+    try:
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=2)
+        con.row_factory = sqlite3.Row
+        try:
+            rows = con.execute(
+                "SELECT COALESCE(kind,'?') kind, COALESCE(model,'?') model, COUNT(*) n,"
+                " SUM(COALESCE(input_tokens,0)+COALESCE(cache_write_tokens,0)+COALESCE(output_tokens,0)) tok"
+                " FROM tasks WHERE started >= ? AND provider = ? AND input_tokens IS NOT NULL"
+                " GROUP BY kind, model ORDER BY tok DESC", (since, provider)).fetchall()
+        finally:
+            con.close()
+        return [dict(r) for r in rows]
+    except (sqlite3.Error, OSError):
+        return None
+
+
+def remaining_lower_bound(measured_tokens, used_pct):
+    """ROUGH estimate of tokens left in a window, or None: T*(1-p)/p. NOT a guaranteed bound (provider quotas weight
+    model/cache/reasoning differently and the wall-clock window may differ from the provider's). T = measured dispatcher
+    tokens, p = used share; dispatcher-only T under-counts total use, so the true figure is likely larger. None if p is unknown,
+    < MIN_PCT_FOR_ESTIMATE or T is 0."""
+    if used_pct is None or not measured_tokens or used_pct < MIN_PCT_FOR_ESTIMATE:
+        return None
+    p = min(100.0, float(used_pct)) / 100.0
+    return int(measured_tokens * (1 - p) / p)
+
+
+def _fmt(n):
+    return f"{n/1e6:.1f}M" if n >= 1e6 else (f"{n/1e3:.0f}k" if n >= 1e3 else str(n))
+
+
+def sidebar_bars_html(root, provider, windows, name):
+    """Per provider: for each window a lower-bound estimate of tokens left (basis stated, «άγνωστο» when not derivable)
+    and small bars of where measured tokens went (by task kind·model) in the longest known window."""
+    import html as _html
+    out = []
+    longest = None
+    for w in windows or []:
+        hrs = WINDOW_HOURS.get(w.get("label"))
+        if not hrs:
+            continue
+        longest = max(longest or 0, hrs)
+        kinds = usage_by_kind(root, hrs, provider)
+        tot = sum(k["tok"] or 0 for k in (kinds or []))
+        lb = remaining_lower_bound(tot, w.get("pct"))
+        txt = f"~{_fmt(lb)} tokens (πολύ χονδρική εκτίμηση)" if lb is not None else "άγνωστο"
+        out.append(f'<div class="tk-sub">{_html.escape(str(w["label"]))}: απομένουν {txt}</div>')
+    if not out:
+        return ""
+    kinds = usage_by_kind(root, longest, provider)
+    unreadable = kinds is None
+    kinds = kinds or []
+    tot = sum(k["tok"] or 0 for k in kinds) or 0
+    bars = []
+    for k in kinds[:5]:
+        share = 100.0 * (k["tok"] or 0) / tot if tot else 0
+        lab = _html.escape(f'{k["kind"]} · {k["model"]}')
+        bars.append(f'<div class="tk-row"><span>{lab}</span><b>{share:.0f}%</b></div>'
+                    f'<div class="tk-bar"><i style="width:{share:.0f}%"></i></div>')
+    where = ("".join(bars) if bars else '<div class="tk-sub">' + ("η βάση δεν διαβάζεται" if unreadable else "καμία μετρημένη χρήση") + '</div>')
+    return ('<div class="tk-card"><h4>📊 ' + _html.escape(name) + ' <small>(εκτίμηση)</small></h4>' + "".join(out)
+            + f'<div class="tk-sub">Πού πάνε ({longest}ω, μετρημένα tokens jobs dispatcher):</div>' + where
+            + '<div class="tk-foot" title="Εκτίμηση T·(1−p)/p: T = μετρημένα tokens (input+cache-write+output) των jobs του '
+              'dispatcher στο παράθυρο, p = ποσοστό χρήσης που αναφέρει ο πάροχος. Δεν περιλαμβάνει διαδραστικά sessions, '
+              'ενώ ο πάροχος ζυγίζει διαφορετικά μοντέλα/cache/reasoning· όχι εγγυημένο.">Χονδρική εκτίμηση T·(1−p)/p από μετρημένα tokens dispatcher (παράθυρο = τελευταίες ώρες, όχι reset) · '
+              'ο πάροχος δίνει μόνο %, όχι απόλυτα tokens</div></div>')
