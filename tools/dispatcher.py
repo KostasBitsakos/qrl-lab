@@ -96,6 +96,32 @@ QUOTA_RE = re.compile(
     r"exceeded your current quota|upgrade to (?:pro|plus|max))", re.I)
 TRANSIENT_RE = re.compile(r"(rate limit|overloaded|temporarily unavailable|timed? ?out|connection|503|529)", re.I)
 STATUS_LINE_RE = re.compile(r"\n?\s*STATUS:\s*(done|failed|waiting_approval)\s*$", re.I)
+CLAUDE_ALIASES = ("haiku", "sonnet", "opus")
+
+
+def route_request(req_model, req_effort):
+    """The dashboard selector (messages.req_model/req_effort) -> (provider, model, effort); all None = auto (settings)."""
+    m = str(req_model or "")
+    if m.startswith("coordinator:"):
+        m = m[len("coordinator:"):]
+    if not m:
+        provider, model = None, None
+    elif m in CLAUDE_ALIASES or m.startswith("claude-"):
+        provider, model = "claude", m
+    elif m == "codex":
+        provider, model = "codex", None
+    elif m.startswith("gpt-"):
+        provider, model = "codex", m
+    else:
+        provider, model = None, None
+    effort = None
+    if provider and req_effort and req_effort != "ultra":
+        effort = "medium" if req_effort == "med" else req_effort
+    elif provider == "codex" and req_effort == "ultra":
+        effort = "ultra"
+    return provider, model, effort
+
+
 MENTION_RE = re.compile(r"^\s*@(claude|codex)\b[:,]?\s*", re.I)
 
 SCHEMA = """
@@ -782,7 +808,10 @@ class Dispatcher:
             batch = [m for m in rows if m["thread_id"] == tid]
             forced = None
             texts = []
+            sel_provider, sel_model, sel_effort = None, None, None
             for m in batch:
+                if m.get("req_model"):  # the last explicit selector in the batch wins
+                    sel_provider, sel_model, sel_effort = route_request(m.get("req_model"), m.get("req_effort"))
                 body = m["body"]
                 mm = MENTION_RE.match(body)
                 if mm:
@@ -791,8 +820,11 @@ class Dispatcher:
                 if m.get("edit_note"):
                     body = LabDB.EDIT_NOTE + "\n" + body
                 texts.append(f"{m['id']} ({m['kind']}): {body}")
+            if forced and sel_provider and forced != sel_provider:
+                sel_model = sel_effort = None  # an explicit @mention overrides the selector's model
             yield {"kind": "message", "thread_id": tid, "msg_ids": [m["id"] for m in batch],
-                   "reply_to": batch[-1]["id"], "forced": forced, "text": "\n\n".join(texts), "req_ids": []}
+                   "reply_to": batch[-1]["id"], "forced": forced or sel_provider, "sel_model": sel_model,
+                   "sel_effort": sel_effort, "text": "\n\n".join(texts), "req_ids": []}
         # 1b. agents' escalations to the chat coordinator (could not agree, or need the researcher)
         esc = self.work.escalations()
         if esc and self._escalations_due(esc):
@@ -949,10 +981,13 @@ class Dispatcher:
         if provider == "claude":
             model = (s["events_model"] or s["peer_claude_model"]) if item["kind"] == "perm_answer" else (
                 s["events_model"] if item["kind"] == "run_event" and s["events_model"] else s["claude_model"])
-            return run_claude(prompt, self.root, model, s["claude_effort"], session_id=session_id,
+            if item.get("sel_model"):
+                model = item["sel_model"]
+            return run_claude(prompt, self.root, model, item.get("sel_effort") or s["claude_effort"], session_id=session_id,
                               system_append=self.static_prompt(), budget=budget, timeout_s=timeout_s,
                               env=env, job=job)
-        return run_codex(prompt, self.root, s["codex_model"] or None, s["codex_effort"] or None,
+        return run_codex(prompt, self.root, item.get("sel_model") or s["codex_model"] or None,
+                         item.get("sel_effort") or s["codex_effort"] or None,
                          session_id=session_id, timeout_s=timeout_s, env=env, job=job)
 
     def _cancelled(self, item):

@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 import modreload  # noqa: E402
 import importlib  # noqa: E402
 _LOCAL_MODS = ["labdb", "file_view", "replytext", "k8s_view", "prom_view", "web_terminal", "sudo_ui", "race_view", "brain_view",
-               "perm_store", "ext_catalog", "summarize_runs", "agent_models", "paper_plots", "paper_build", "uploads", "installed_view", "access", "outage", "models_view", "banners", "sandbox_view", "topology_view", "topology_ui", "exp_view", "exp_figs", "usage_limits", "event_tail", "msg_structure", "notif_format", "extra_credits", "knowledge_view", "knowledge_tree", "tab_links", "mobile_view", "tutorials_view", "cycle2_report"]
+               "perm_store", "ext_catalog", "summarize_runs", "agent_models", "paper_plots", "paper_build", "uploads", "installed_view", "access", "outage", "models_view", "banners", "sandbox_view", "topology_view", "topology_ui", "exp_view", "exp_figs", "usage_limits", "event_tail", "msg_structure", "notif_format", "extra_credits", "knowledge_view", "knowledge_tree", "kb_graph_view", "tab_links", "mobile_view", "tutorials_view", "cycle2_report"]
 _LOCAL_MODS.append("token_metrics")
 for _n in _LOCAL_MODS:  # first import so they are in sys.modules, then reload those whose file changed
     importlib.import_module(_n)
@@ -58,6 +58,7 @@ import token_metrics  # noqa: E402
 import topology_ui  # noqa: E402
 import knowledge_view  # noqa: E402
 import knowledge_tree  # noqa: E402
+import kb_graph_view  # noqa: E402
 import tab_links  # noqa: E402
 import mobile_view  # noqa: E402
 import changes_view  # noqa: E402
@@ -920,7 +921,8 @@ def render_message(m, key="chat"):
         st.caption(f"**{label}** · {fmt_ts(m['ts'])} · {KIND_LABEL.get(m['kind'], m['kind'])}"
                    f"{extra} · `{m['id']}`")
         ekey = f"editing_{key}_{m['id']}"
-        if m["author"] == "researcher" and st.session_state.get(ekey):
+        # the DB status is the truth: after a reload (empty session_state) a held message still shows its editor
+        if m["author"] == "researcher" and (st.session_state.get(ekey) or m.get("status") == "editing"):
             # editing in place: keyed widgets keep their text across the fragment's auto-refresh
             new_txt = st.text_area("Νέο κείμενο", value=m["body"], key=f"edit_txt_{key}_{m['id']}",
                                    height=140, label_visibility="collapsed")
@@ -3099,14 +3101,27 @@ if _tab_live(tab_arch):  # lazy: hidden tabs do no work
 # ================================================================ knowledge map (docs/index.json)
 if _tab_live(tab_know):  # lazy: hidden tabs do no work
     with tab_know:
+        # J322 (M-20261102-026 item 7): the knowledge graph first (graphify call/import graph of tools/kb.py), the docs tree below
+        _kg, _kg_err = kb_graph_view.load(ROOT)
+        _ks = kb_graph_view.index_stats(ROOT)
+        if _kg is None:
+            st.warning(f"Δεν υπάρχει γράφος γνώσης ({_kg_err}). Τρέξε `python3 tools/kb.py refresh`.")
+        else:
+            _ch = _ks.get("chunks", {})
+            st.caption(f"Γράφος κώδικα (graphify, μόνο AST): {len(_kg['nodes'])} αρχεία με εξαρτήσεις από {_kg['total_files']} "
+                       f"({_kg['total_symbols']:,} σύμβολα) · ευρετήριο kb.py: "
+                       + ", ".join(f"{k} {v:,}" for k, v in sorted(_ch.items())) + f" · χτίστηκε {_ks.get('built', '?')}. "
+                       "Κόμβος = αρχείο (χρώμα = corpus, μέγεθος = σύμβολα), ακμή = calls/imports/uses μεταξύ αρχείων. "
+                       "Πάτα κόμβο για γείτονες, γράψε για αναζήτηση, ροδέλα = zoom. Ερώτηση: `python3 tools/kb.py query \"…\"`.")
+            components.html(kb_graph_view.render(_kg, 620), height=700)
         try:
             _ke = knowledge_view.load(ROOT)
         except Exception as _e:
             _ke = []
             st.warning(f"Δεν διαβάστηκε το docs/index.json: {_e}")
-        st.caption(f"Όλη η γνώση του lab ({len(_ke)} αρχεία md), οργανωμένη κατά θέμα. Πάτα ένα θέμα για να ανοίξει, "
-                   "ένα αρχείο για περίληψη και «📂 Άνοιγμα». Τσίμπημα/ροδέλα = zoom, ⤢ = όλο το δέντρο, ⌂ = αρχή.")
-        components.html(knowledge_tree.render(knowledge_view.tree_data(_ke), ROOT, FILES_TAB, height=640), height=650)
+        with st.expander(f"📚 Δέντρο εγγράφων ({len(_ke)} αρχεία md, κατά θέμα)", expanded=False):
+            st.caption("Πάτα ένα θέμα για να ανοίξει, ένα αρχείο για περίληψη και «📂 Άνοιγμα». Τσίμπημα/ροδέλα = zoom, ⤢ = όλο το δέντρο, ⌂ = αρχή.")
+            components.html(knowledge_tree.render(knowledge_view.tree_data(_ke), ROOT, FILES_TAB, height=640), height=650)
         with st.expander("⭐ Πού είναι τα ευρετήρια και πώς τα χρησιμοποιεί ο συντονιστής", expanded=False):
             st.markdown("Ο συντονιστής δεν διαβάζει όλα τα αρχεία. Ξεκινά από το `docs/STATE.md`, κάνει `grep` μιας λέξης "
                         "στο `docs/INDEX.md` (μία γραμμή ανά αρχείο, φτιάχνεται από το `tools/build_md_index.py` μαζί με το "

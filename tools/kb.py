@@ -447,6 +447,24 @@ def cmd_scan(a):
     return 1 if bad or names else 0
 
 
+def logged(a):
+    """Run a retrieval command and append its measured output size (bytes only, never the text) to
+    .lab/kb/queries.jsonl: the dashboard's honest «tokens saved» estimate counts these (J322)."""
+    import contextlib, io
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = a.f(a)
+    out = buf.getvalue()
+    sys.stdout.write(out)
+    try:
+        with open(KB / "queries.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps({"ts": int(time.time()), "cmd": a.cmd, "out_bytes": len(out.encode()),
+                                "actor": os.environ.get("QRL_COORDINATOR", "")}) + "\n")
+    except OSError:
+        pass
+    return rc
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sp = ap.add_subparsers(dest="cmd", required=True)
@@ -458,6 +476,8 @@ def main():
     sp.add_parser("stats").set_defaults(f=cmd_stats)
     sp.add_parser("scan").set_defaults(f=cmd_scan)
     a = ap.parse_args()
+    if a.cmd in ("query", "callers"):
+        sys.exit(logged(a))
     sys.exit(a.f(a))
 
 

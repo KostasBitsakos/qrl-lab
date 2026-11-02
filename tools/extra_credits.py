@@ -150,12 +150,14 @@ def awake_html(infos):
         if i.get("reset") and not i["awake"]:
             rows.append(f'<div style="font-size:.75rem">Επαναφορά: <b>{i["reset"]}</b> (ώρα Αθήνας)</div>')
         for w in i.get("windows") or []:
+            future = bool(w.get("resets_at")) and float(w["resets_at"]) > time.time()  # a past reset is history
             if w.get("pct") is None:
-                rows.append(f'<div style="font-size:.72rem;opacity:.65">{w["label"]}: άγνωστο</div>')
+                rs = f' · επόμενο reset {_athens(w["resets_at"])}' if future else ""
+                rows.append(f'<div style="font-size:.72rem;opacity:.65">{w["label"]}: άγνωστο{rs}</div>')
                 continue
             pct = max(0.0, 100.0 - min(100.0, float(w["pct"])))  # remaining share, as the researcher asked
             bc = "#2e9d5b" if pct > 30 else ("#d9822b" if pct > 10 else "#c0392b")
-            rs = f' · reset {_athens(w["resets_at"])}' if w.get("resets_at") else ""
+            rs = f' · reset {_athens(w["resets_at"])}' if future else ""
             rows.append(f'<div style="font-size:.72rem;opacity:.8">{w["label"]}: απομένουν {pct:.0f}%{rs}</div>'
                         f'<div style="background:#8883;border-radius:4px;height:6px;margin:1px 0 3px">'
                         f'<div style="width:{pct:.0f}%;height:6px;border-radius:4px;background:{bc}"></div></div>')

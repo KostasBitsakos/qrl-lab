@@ -76,6 +76,32 @@ def dispatcher_usage(root, hours=24):
         return []
 
 
+# docs/kb_eval.md TOTAL row: 15 dev-set questions, best-case grep baseline 11392 tokens (bytes/4), KB output 4578.
+KB_GREP_TOK_PER_Q = 11392 / 15
+
+
+def kb_savings(root, hours=24 * 7):
+    """Honest kb.py estimate from the measured query log (.lab/kb/queries.jsonl: output bytes per query/callers call).
+    saved ≈ n × (grep baseline per question from the dev-set eval) − Σ measured KB output tokens (bytes/4).
+    None when there is no log. An estimate, not billed usage; the eval is a small dev-set (grep wins on exact symbols)."""
+    path = Path(root) / ".lab" / "kb" / "queries.jsonl"
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()[-20000:]
+    except OSError:
+        return None
+    since = time.time() - hours * 3600
+    n = out = 0
+    for ln in lines:
+        try:
+            r = json.loads(ln)
+        except ValueError:
+            continue
+        if r.get("ts", 0) >= since and r.get("cmd") == "query" and type(r.get("out_bytes")) is int:
+            n += 1
+            out += r["out_bytes"] // 4
+    return {"hours": hours, "n": n, "out_tok": out, "saved_tok": max(0, round(n * KB_GREP_TOK_PER_Q - out))}
+
+
 def snapshot(root):
     started = time.monotonic()
     root = Path(root)
@@ -102,6 +128,7 @@ def snapshot(root):
                            "docs/INDEX.md · rg -i -m 8 --max-columns 500 --max-columns-preview token",
                            "ανά συγκεκριμένη αναζήτηση · " + stamp))
     return {"as_of": stamp, "rows": rows, "audit": load_audit(root), "used24": dispatcher_usage(root, 24),
+            "kb": kb_savings(root),
             "runtime_ms": round((time.monotonic() - started) * 1000, 2)}
 
 
@@ -136,6 +163,17 @@ def card_html(data):
         rows.append(f'<div class="tk-row"><span>{name}</span><b>−{saved:.0f}%</b></div>'
                     f'<div class="tk-bar"><i style="width:{saved:.0f}%"></i></div>'
                     f'<div class="tk-sub">≈{n:,} tokens λιγότερα ανά ανάγνωση</div>')
+    kb = data.get("kb")
+    if kb is None or not kb["n"]:
+        rows.append('<div class="tk-row"><span>Βάση γνώσης (kb.py)</span><b>άγνωστο</b></div>'
+                    '<div class="tk-sub">δεν υπάρχουν καταγεγραμμένα queries ακόμη (.lab/kb/queries.jsonl)</div>')
+    else:
+        rows.append(f'<div class="tk-row"><span>Βάση γνώσης (kb.py), {kb["hours"] // 24}ημ</span>'
+                    f'<b>≈{kb["saved_tok"]:,} tokens</b></div>'
+                    f'<div class="tk-sub" title="n × (grep baseline {KB_GREP_TOK_PER_Q:.0f} tokens/ερώτηση από το dev-set '
+                    f'docs/kb_eval.md) − μετρημένο output του kb ({kb["out_tok"]:,} tokens, bytes/4). Μικρό dev-set, '
+                    f'best-case grep· για exact-symbol το grep κερδίζει. ΔΕΝ μετρά πραγματικές ολόκληρες ανάγνωσεις αρχείων.">'
+                    f'{kb["n"]} queries · ΕΚΤΙΜΗΣΗ έναντι grep (bytes/4)</div>')
     audit = _html.escape(str(data["audit"]["status"]))
     used = "".join(f'<div class="tk-sub" title="Άθροισμα όσων ανέφερε το CLI στο τέλος κάθε task (.lab/dispatch.db). '
                    f'Μόνο jobs του dispatcher, όχι διαδραστικά sessions.">{_html.escape(str(u["provider"]))} 24ω '

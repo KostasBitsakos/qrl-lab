@@ -344,6 +344,10 @@ class LabDB:
             parent = c.execute("SELECT * FROM messages WHERE id=?", (reply_to,)).fetchone()
             if parent is None:
                 raise LabError(f"Unknown message {reply_to}.")
+            if parent["author"] == "researcher" and parent["status"] == "editing":
+                # edit hold: nothing is answered while the researcher edits; the dispatcher re-queues it on send
+                raise LabError(f"{reply_to} is being edited by the researcher: do not reply; the dispatcher re-queues "
+                               "it when he presses send.")
             mid = self._new_id(c, "messages", "id", "M")
             t = now()
             c.execute("INSERT INTO messages(id, ts, thread_id, reply_to, author, kind, title, body, status, updated_at, model)"
@@ -694,6 +698,10 @@ def validate_spec(spec):
     """A run spec is what an approval covers. Keep it explicit; the launcher refuses anything else."""
     if not isinstance(spec, dict):
         raise LabError("Spec must be a JSON object.")
+    if spec.get("kind") == "sandbox-amendment":
+        from sandbox_guard import validate_amendment_spec
+        validate_amendment_spec(spec)
+        return True
     for key in ("name", "scope", "cwd", "entries"):
         if key not in spec:
             raise LabError(f"Spec is missing '{key}'.")
