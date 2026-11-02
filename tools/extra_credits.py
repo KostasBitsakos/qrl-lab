@@ -158,10 +158,11 @@ def awake_html(infos):
             pct = max(0.0, 100.0 - min(100.0, float(w["pct"])))  # remaining share, as the researcher asked
             bc = "#2e9d5b" if pct > 30 else ("#d9822b" if pct > 10 else "#c0392b")
             rs = f' · reset {_athens(w["resets_at"])}' if future else ""
-            rows.append(f'<div style="font-size:.72rem;opacity:.8">{w["label"]}: απομένουν {pct:.0f}%{rs}</div>'
+            tk = f' · ~{w["tok"]} tokens' if w.get("tok") else ""
+            rows.append(f'<div style="font-size:.72rem;opacity:.8">{w["label"]}: απομένουν {pct:.0f}%{tk}{rs}</div>'
                         f'<div style="background:#8883;border-radius:4px;height:6px;margin:1px 0 3px">'
                         f'<div style="width:{pct:.0f}%;height:6px;border-radius:4px;background:{bc}"></div></div>')
         cards.append(f'<div style="border:1px solid #8884;border-left:4px solid {color};border-radius:6px;padding:5px 8px;'
                      f'margin:3px 0"><div style="font-size:.9rem"><b>{i["name"]}</b> {icon} <span style="color:{color}">'
-                     f'{label}</span></div>{"".join(rows)}<div style="opacity:.6;font-size:.7rem">{why}</div></div>')
+                     f'{label}</span></div>{"".join(rows)}</div>')
     return AWAKE_CSS + '<div style="margin:2px 0 6px">' + "".join(cards) + "</div>"

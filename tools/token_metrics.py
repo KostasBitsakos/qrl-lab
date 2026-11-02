@@ -254,6 +254,21 @@ def _fmt(n):
     return f"{n/1e6:.1f}M" if n >= 1e6 else (f"{n/1e3:.0f}k" if n >= 1e3 else str(n))
 
 
+def with_token_estimates(root, provider, windows):
+    """Copies of the usage windows with w["tok"] = rough tokens left (see remaining_lower_bound) when derivable."""
+    out = []
+    for w in windows or []:
+        w = dict(w)
+        hrs = WINDOW_HOURS.get(w.get("label"))
+        if hrs and w.get("pct") is not None:
+            tot = sum(k["tok"] or 0 for k in (usage_by_kind(root, hrs, provider) or []))
+            lb = remaining_lower_bound(tot, w["pct"])
+            if lb is not None:
+                w["tok"] = _fmt(lb)
+        out.append(w)
+    return out
+
+
 def sidebar_bars_html(root, provider, windows, name):
     """Per provider: for each window a lower-bound estimate of tokens left (basis stated, «άγνωστο» when not derivable)
     and small bars of where measured tokens went (by task kind·model) in the longest known window."""
