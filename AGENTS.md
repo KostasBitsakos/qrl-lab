@@ -12,8 +12,11 @@ Source of truth: `docs/PLAN.md` §1, §2, §6. Start every task from `docs/STATE
 - No `kubectl apply/scale/delete/patch`, IBM Quantum jobs, installs outside the venv, purchases, API keys.
 - Never read or print secrets (`~/.ssh`, tokens, `.env`, `~/.codex/auth.json`, `~/.kube/config`, IBM credentials).
 - Quantum: no speed-up claims from simulator timings; parameter savings only vs a parameter-matched classical control.
-- Small, testable diffs; every result-producing change is reviewed by the other model.
+- Small, testable diffs; every result-producing change is reviewed by the other model. During provider sleep, an independent
+  agent of the available provider substitutes; two competing experiment agents continue, with Claude+Codex council on return
+  (M-20261029-196; `docs/rules/handoff.md` §6). Frozen-spec approvals and joint pre-push review still apply.
 - Never change `.claude/settings.json`, `~/.codex/`, `prompts/`, systemd units or dispatcher settings unless asked.
+- Retrieval first: for "where is / who calls / what was decided / what happened to <id>" run `python3 tools/kb.py query "<question>"` before reading files, then read only the returned file:line windows (`docs/rules/kb.md`). Exact symbol in a known dir → plain grep is cheaper. Run `kb.py refresh` if the index is older than your target file.
 
 <!-- qrl-v0.3 shared memory -->
 ## Coordination
@@ -22,6 +25,8 @@ Source of truth: `docs/PLAN.md` §1, §2, §6. Start every task from `docs/STATE
   (Παρασκευάς): open replies with «Κώστα,» and sign «— Πάρις» (Codex coordinating: «— Πάρις (Codex)») (M-20261028-011).
 - Update `docs/STATE.md` (≤150 lines) after any task that changed something. Notes: grep `docs/INDEX.md` (generated;
   never edit or read whole). Decisions: `docs/DECISIONS.md`. Journal: `docs/journal/`.
+- All researcher-visible replies, status notes and contributions from Codex must be in Greek (M-20261029-159).
+  English review format below applies only to internal exchanges; translate before posting to the researcher.
 
 ## If you are Codex (not coordinating)
 Co-researcher; read-only unless the request says approved implementation work. Council: independent proposal,
