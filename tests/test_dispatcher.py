@@ -899,6 +899,7 @@ def write_codex_rollout(primary, secondary, secondary_reset_in=6 * 86400):
                "plan_type": "pro"}}}
     with open(os.path.join(d, "rollout-test.jsonl"), "w", encoding="utf-8") as f:
         f.write(json.dumps(rec) + "\n")
+    D.governor.CODEX_GLOB = os.path.join(HOME, ".codex", "sessions", "**", "rollout-*.jsonl")  # not the real ~/.codex, whatever imported usage_limits first
     D.governor._codex_memo.clear()
 
 
@@ -910,6 +911,7 @@ def test_governor_and_parallelism_with_reported_usage():
     d.dd.set("max_workers", "2")
     db = LabDB()
     shutil.rmtree(os.path.join(HOME, ".codex"), ignore_errors=True)
+    D.governor.CODEX_GLOB = os.path.join(HOME, ".codex", "sessions", "**", "rollout-*.jsonl")  # not the real ~/.codex, whatever imported usage_limits first
     D.governor._codex_memo.clear()
     root = db.researcher_send("Δύο δουλειές")
     # Claude reports 80 % weekly use with 6 days to reset (pace ~14 %): over pace + 10. The chat answer is never held back.
@@ -938,6 +940,7 @@ def test_governor_and_parallelism_with_reported_usage():
     wait_until(lambda: n_tasks(d, "codex") == 2, what="second worker on Codex")
     assert alive_lanes(d).count("worker") == 2 and n_tasks(d, "claude") == 1
     drain(d)
+    D.governor.CODEX_GLOB = None
     ok("governor + parallelism: reported usage drives provider choice; unknown usage -> one job; fresh usage -> two")
 
 
@@ -948,6 +951,7 @@ def test_held_job_does_not_block_the_queue_and_peer_requeues():
     d.dd.set("governor_enabled", "1")
     d.dd.set("max_workers", "2")
     shutil.rmtree(os.path.join(HOME, ".codex"), ignore_errors=True)
+    D.governor.CODEX_GLOB = os.path.join(HOME, ".codex", "sessions", "**", "rollout-*.jsonl")  # not the real ~/.codex, whatever imported usage_limits first
     D.governor._codex_memo.clear()
     d.dd.save_limits("claude", [{"rateLimitType": "seven_day", "utilization": 0.8, "status": "allowed",
                                  "resetsAt": int(time.time()) + 6 * 86400},
@@ -972,6 +976,7 @@ def test_held_job_does_not_block_the_queue_and_peer_requeues():
     assert d.dd.conn.execute("SELECT status FROM peer_requests WHERE id='P-T'").fetchone()[0] == "queued"
     d.dd.conn.execute("UPDATE jobs SET status='cancelled' WHERE id=?", (held,))
     drain(d)
+    D.governor.CODEX_GLOB = None
     ok("a governor-held job stays queued and does not block later jobs; provider state untouched; peer re-queued")
 
 
