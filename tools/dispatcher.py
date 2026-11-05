@@ -749,6 +749,7 @@ class Dispatcher:
         head = (f"[QRL-Lab task · you are {role} ({LABEL[provider]}) · job {job or '-'} · thread {item['thread_id']} · "
                 f"reply-to {reply_id} · author for your posts: coordinator · co-researcher: {OTHER[provider]}]")
         parts = [head]
+        in_pack = set(item["msg_ids"])  # message ids already in this prompt: never echoed back as «memory»
         if provider == "codex":  # Codex has no system-prompt flag: the static part goes first (stable prefix)
             parts.insert(0, self.static_prompt())
         if fresh:
@@ -760,6 +761,7 @@ class Dispatcher:
                 note_lines.append(f"docs/STATE.md has {n_lines} lines: condense it to ≤{s['state_max_lines']}.")
             hist = self.lab.thread(item["thread_id"])
             hist = [m for m in hist if m["id"] not in item["msg_ids"]][-int(s["thread_messages"]):]
+            in_pack |= {m["id"] for m in hist}
             if hist:
                 lines = [f"- {m['id']} · {m['author']} · {m['kind']}: {clip(m['body'], 700)}" for m in hist]
                 parts.append("## Thread so far (latest messages, clipped; full text: python3 tools/labq.py show <id>"
@@ -767,7 +769,7 @@ class Dispatcher:
         if lane_of(item) == "chat":
             try:  # bounded memory lookup (J261): pointers only; failures never block the run
                 import convo_context
-                mem = convo_context.relevant(item["text"], self.root, max_chars=1500)
+                mem = convo_context.relevant(item["text"], self.root, max_chars=1500, exclude_ids=in_pack)
             except Exception:
                 mem = ""
             if mem:

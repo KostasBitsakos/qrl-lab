@@ -276,8 +276,8 @@ def test_choice_mention_status_and_errors():
     queue("claude", {"mode": "ok", "text": "Ζήτησα έγκριση.\nSTATUS: waiting_approval"})
     assert d.once() == "done"
     p = prompt_of(calls("claude")[0])
-    new_input = p.split("## New input\n", 1)[1].split("\n\n## ", 1)[0]  # memory pointers may quote the raw message
-    assert "ρώτα τον scholar" in new_input and "@claude" not in new_input and "asked for Claude" in p
+    assert "ρώτα τον scholar" in p and "@claude" not in p and "asked for Claude" in p
+    assert f"labq.py show {m2}" not in p  # regression: the current message is never its own «memory» pointer
     assert db.message(m2)["status"] == "waiting_approval"
     assert "STATUS" not in thread_bodies(db, m2)[-1]
     # a non-quota failure is reported and does not spend the other model's quota

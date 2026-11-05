@@ -35,8 +35,10 @@ def _clip(s, n):
     return s if len(s) <= n else s[:n - 1] + "…"
 
 
-def candidates(root):
-    """Yield (group, pointer, text) from every source; a failing source never blocks the others."""
+def candidates(root, exclude_ids=()):
+    """Yield (group, pointer, text) from every source; a failing source never blocks the others.
+    Messages whose id is in `exclude_ids` (the current message, thread messages already in the pack) are skipped."""
+    exclude = set(exclude_ids or ())
     try:
         with open(os.path.join(root, "docs", "index.json"), encoding="utf-8") as f:
             data = json.load(f)
@@ -60,17 +62,18 @@ def candidates(root):
                 f"{r['title']} {r.get('decision_text') or ''} {(r.get('body') or '')[:400]}"
         for r in d.conn.execute("SELECT id, title, body FROM messages WHERE author='researcher' "
                                 "ORDER BY ts DESC LIMIT 600"):
-            yield "message", f"labq.py show {r['id']}", f"{r['title'] or ''} {r['body'] or ''}"
+            if r["id"] not in exclude:
+                yield "message", f"labq.py show {r['id']}", f"{r['title'] or ''} {r['body'] or ''}"
     except Exception:
         pass
 
 
-def relevant(text, root, max_chars=1800, min_score=2, per_group=3):
+def relevant(text, root, max_chars=1800, min_score=2, per_group=3, exclude_ids=()):
     qk = keys(text)
     if not qk:
         return ""
     groups = {}
-    for grp, ptr, body in candidates(root):
+    for grp, ptr, body in candidates(root, exclude_ids):
         sc = len(qk & keys(body))
         if sc >= min_score:
             groups.setdefault(grp, []).append((sc, ptr, body))

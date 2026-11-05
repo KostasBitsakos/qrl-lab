@@ -45,3 +45,17 @@ def test_append_and_replace():
     n = len(open(p, encoding="utf-8").read().splitlines())
     assert md.main(["append", p, "- brand new words about dashboard flicker async refresh v2", "--replace", str(n)]) == 0
     assert open(p, encoding="utf-8").read().count("flicker") == 1
+
+
+def test_exclude_ids_removes_current_and_pack_messages():
+    from labdb import LabDB
+    root = _root()
+    os.makedirs(os.path.join(root, ".lab"))
+    db = LabDB(os.path.join(root, ".lab", "lab.db"))
+    text = "ανανεωση πιστοποιητικων του K8s με grant"
+    cur, other = db.researcher_send(text), db.researcher_send(text + " ξανά")
+    r = cc.relevant(text, root)
+    assert f"labq.py show {cur}" in r and f"labq.py show {other}" in r  # sanity: both match without a filter
+    r = cc.relevant(text, root, exclude_ids={cur})
+    assert f"labq.py show {cur}" not in r and f"labq.py show {other}" in r
+    assert f"labq.py show {other}" not in cc.relevant(text, root, exclude_ids={cur, other})
