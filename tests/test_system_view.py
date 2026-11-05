@@ -26,11 +26,13 @@ def make_dbs(tmp):
         ("2026-11-02T23:34:03+00:00", "message", json.dumps(["M-1", "C1"]), "claude", "opus", "done", 0.26),
         ("2026-11-02T23:35:00+00:00", "message", json.dumps(["M-2", "C2"]), "claude", "sonnet", "done", 0.10),
         ("2026-11-02T23:36:00+00:00", "job", json.dumps(["J1"]), "codex", "codex-default", "done", None),
+        ("2026-11-02T23:37:00+00:00", "message", json.dumps(["M-3"]), "codex", "codex-default", "done", None),
     ])
     c.commit(); c.close()
     c = sqlite3.connect(lab)
-    c.execute("CREATE TABLE messages(id TEXT PRIMARY KEY, req_model TEXT)")
-    c.executemany("INSERT INTO messages VALUES (?,?)", [("M-1", "opus"), ("M-2", None)])
+    c.execute("CREATE TABLE messages(id TEXT PRIMARY KEY, ts TEXT, req_model TEXT, body TEXT)")
+    c.executemany("INSERT INTO messages VALUES (?,?,?,?)", [("M-1", "1", "opus", "γεια"), ("M-2", "2", None, "τι νέα"),
+                                                            ("M-3", "3", "sonnet", "@codex: κοίτα")])
     c.commit(); c.close()
     return d, lab
 
@@ -51,7 +53,8 @@ def test_routing_and_real_tasks(tmp_path):
     assert set(sv.KINDS) <= kinds
     t = {r["id"]: r for r in sv.recent_tasks(d, lab, s=s)}
     assert "req_model=opus" in t[1]["why"]           # the Opus run came from the message selector
-    assert t[2]["why"].startswith("ρύθμιση `claude_model`")
+    assert "ρύθμιση `claude_model`" in t[2]["why"]
+    assert "@codex" in t[4]["why"]                    # an explicit @mention beats the selector
 
 
 def test_claude_model_for_matches_old_dispatcher_logic():
@@ -104,3 +107,25 @@ def test_read_only(tmp_path):
 
 def test_composer_default_is_auto():
     assert next(iter(agent_models.model_choices(None))) is None
+
+
+def test_missing_claude_telemetry_is_unknown():
+    rows = sv.claude_usage(None, NOW)
+    assert [r["window"] for r in rows] == ["5ω", "7ημ"] and all(r["pct"] == sv.UNKNOWN for r in rows)
+
+
+def test_paths_follow_dispatch_db_override(monkeypatch, tmp_path):
+    monkeypatch.setenv("QRL_DISPATCH_DB", str(tmp_path / "x.db"))
+    assert sv.paths(str(tmp_path))["dispatch"] == str(tmp_path / "x.db")
+
+
+def test_unreadable_db_is_flagged(tmp_path):
+    rows = sv.settings_rows(str(tmp_path / "missing.db"))
+    assert rows and all(r["source"] == "ΒΑΣΗ ΜΗ ΑΝΑΓΝΩΣΙΜΗ" for r in rows)
+
+
+def test_failed_commands_are_not_counted(tmp_path, monkeypatch):
+    d, _ = make_dbs(tmp_path)
+    monkeypatch.setattr(sv, "_cmd", lambda args, timeout=5: (False, "boom"))
+    st = {r["name"]: r["state"] for r in sv.services(NOW, heartbeat=str(tmp_path / "none"), db=d)}
+    assert st["crontab"].startswith("μη διαθέσιμο") and st["systemd timers (user)"].startswith("μη διαθέσιμο")

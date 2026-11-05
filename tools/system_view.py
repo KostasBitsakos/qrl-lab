@@ -19,9 +19,14 @@ import dispatcher as D
 import usage_limits as U
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DISPATCH_DB = os.path.join(ROOT, ".lab", "dispatch.db")
-LAB_DB = os.path.join(ROOT, ".lab", "lab.db")
-HEARTBEAT = os.path.join(ROOT, ".lab", "bridge_heartbeat")
+def paths(root=ROOT):
+    """dispatch.db honours QRL_DISPATCH_DB like dispatcher/usage_limits, so every section reads the same database."""
+    return {"dispatch": os.environ.get("QRL_DISPATCH_DB") or os.path.join(root, ".lab", "dispatch.db"),
+            "lab": os.path.join(root, ".lab", "lab.db"), "heartbeat": os.path.join(root, ".lab", "bridge_heartbeat"),
+            "claude_status": os.environ.get("QRL_CLAUDE_USAGE_FILE") or os.path.join(root, ".lab", "usage", "claude.json")}
+
+
+DISPATCH_DB, LAB_DB, HEARTBEAT = (paths()[k] for k in ("dispatch", "lab", "heartbeat"))
 UNITS = ("qrl-dispatcher", "qrl-dashboard")
 UNKNOWN = "άγνωστη"
 try:
@@ -74,25 +79,31 @@ def connect_ro(path):
     return sqlite3.connect("file:" + os.path.abspath(path) + "?mode=ro", uri=True, timeout=2)
 
 
-def _rows(path, sql, args=()):
+def _rows(path, sql, args=(), strict=False):
     try:
         with closing(connect_ro(path)) as c:
             c.row_factory = sqlite3.Row
             return [dict(r) for r in c.execute(sql, args)]
     except sqlite3.Error:
+        if strict:
+            raise
         return []
 
 
 # ---------------------------------------------------------------- settings
 def settings_rows(db=DISPATCH_DB):
     """One row per DEFAULTS key (plus unknown stored keys): value, default, source, last change."""
-    stored = {r["key"]: r for r in _rows(db, "SELECT key, value, updated_at, updated_by FROM settings")}
+    try:
+        stored = {r["key"]: r for r in _rows(db, "SELECT key, value, updated_at, updated_by FROM settings", strict=True)}
+        unread = False
+    except sqlite3.Error:
+        stored, unread = {}, True
     out = []
     for key, default in D.DEFAULTS.items():
         group, label, help_ = SETTINGS_META.get(key, ("Άλλες", key, ""))
         r = stored.get(key)
         out.append({"group": group, "key": key, "label": label, "value": r["value"] if r else default,
-                    "default": default, "source": "βάση" if r else "προεπιλογή",
+                    "default": default, "source": "βάση" if r else ("ΒΑΣΗ ΜΗ ΑΝΑΓΝΩΣΙΜΗ" if unread else "προεπιλογή"),
                     "changed": f"{r['updated_at'] or '?'} · {r['updated_by'] or '?'}" if r else "", "help": help_})
     return out
 
@@ -139,14 +150,21 @@ def recent_tasks(db=DISPATCH_DB, lab_db=LAB_DB, limit=15, s=None):
         mids = [r for r in refs if isinstance(r, str) and r.startswith("M-")]
         sel = None
         if mids:
-            q = "SELECT req_model FROM messages WHERE id IN (%s) AND req_model IS NOT NULL" % ",".join("?" * len(mids))
-            got = [r["req_model"] for r in _rows(lab_db, q, mids)]
-            sel = got[-1] if got else None
-        if sel:
-            why = f"επιλογή μηνύματος req_model={sel}"
+            q = "SELECT id, req_model, body FROM messages WHERE id IN (%s) ORDER BY ts, id" % ",".join("?" * len(mids))
+            msgs = _rows(lab_db, q, mids)
+            mention = next((m for m in reversed(msgs) if D.MENTION_RE.match(m["body"] or "")), None)
+            if mention:
+                sel = "@" + D.MENTION_RE.match(mention["body"]).group(1).lower()
+            else:
+                got = [m["req_model"] for m in msgs if m["req_model"]]
+                sel = got[-1] if got else None
+        if sel and sel.startswith("@"):
+            why = f"(εκτίμηση) {sel} στο μήνυμα"
+        elif sel:
+            why = f"(εκτίμηση) επιλογή μηνύματος req_model={sel}"
         elif s and t["provider"] == "claude":
             exp, src = D.claude_model_for(s, t["kind"])
-            why = f"ρύθμιση `{src}`" + ("" if exp == t["model"] else f" (τώρα: {exp})")
+            why = f"(εκτίμηση) ρύθμιση `{src}`" + ("" if exp == t["model"] else f" (τώρα: {exp})")
         else:
             why = "ρυθμίσεις"
         out.append({"id": t["id"], "started": t["started"], "kind": t["kind"], "provider": t["provider"],
@@ -191,7 +209,8 @@ def claude_usage(status, now):
         util = row.get("utilization")
         cands[key] = dict(pct=float(util) * 100 if isinstance(util, (int, float)) else None,
                           reset=U._measurement_time(row.get("resets_at")), as_of=ts, source="dispatch.db.limits")
-    return [_usage_row("claude", key, c, now) for key, c in sorted(cands.items())]
+    missing = dict(pct=None, reset=None, as_of=None, source="καμία μέτρηση")
+    return [_usage_row("claude", key, cands.get(key, missing), now) for key in ("five_hour", "seven_day")]
 
 
 def codex_usage(entries, now):
@@ -226,16 +245,17 @@ def rate_rows(db=DISPATCH_DB, now=None):
 
 # ---------------------------------------------------------------- services
 def _cmd(args, timeout=5):
+    """-> (ok, text). ok is False when the command could not run or failed."""
     try:
         p = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
-        return p.stdout.strip() or p.stderr.strip()
+        return p.returncode == 0, (p.stdout.strip() or p.stderr.strip())
     except (OSError, subprocess.SubprocessError) as e:
-        return f"σφάλμα: {type(e).__name__}"
+        return False, f"σφάλμα: {type(e).__name__}"
 
 
 def services(now=None, heartbeat=HEARTBEAT, db=DISPATCH_DB):
     now = now or time.time()
-    out = [{"name": u, "state": _cmd(["systemctl", "--user", "is-active", u + ".service"])} for u in UNITS]
+    out = [{"name": u, "state": _cmd(["systemctl", "--user", "is-active", u + ".service"])[1] or "άγνωστο"} for u in UNITS]
     try:
         hb = os.path.getmtime(heartbeat)
         out.append({"name": "heartbeat dispatcher", "state": _age(hb, now) if now - hb > 120 else f"πριν {int(now - hb)} s"})
@@ -243,11 +263,16 @@ def services(now=None, heartbeat=HEARTBEAT, db=DISPATCH_DB):
         out.append({"name": "heartbeat dispatcher", "state": "δεν υπάρχει"})
     paused = _rows(db, "SELECT value FROM settings WHERE key='paused'")
     out.append({"name": "παύση dispatcher", "state": "ναι" if paused and paused[0]["value"] == "1" else "όχι"})
-    cron = [ln for ln in _cmd(["crontab", "-l"]).splitlines() if ln.strip() and not ln.startswith("#")
-            and "no crontab" not in ln]
-    out.append({"name": "crontab", "state": f"{len(cron)} γραμμές" + (": " + "; ".join(c[:80] for c in cron) if cron else "")})
-    timers = [ln for ln in _cmd(["systemctl", "--user", "list-timers", "--no-legend", "--all"]).splitlines() if ln.strip()]
-    out.append({"name": "systemd timers (user)", "state": str(len(timers))})
+    ok, text = _cmd(["crontab", "-l"])
+    if ok or "no crontab" in text:
+        cron = [ln for ln in text.splitlines() if ok and ln.strip() and not ln.startswith("#")]
+        state = f"{len(cron)} γραμμές" + (": " + "; ".join(c[:80] for c in cron) if cron else "")
+    else:
+        state = f"μη διαθέσιμο ({text[:80]})"
+    out.append({"name": "crontab", "state": state})
+    ok, text = _cmd(["systemctl", "--user", "list-timers", "--no-legend", "--all"])
+    timers = [ln for ln in text.splitlines() if ln.strip()]
+    out.append({"name": "systemd timers (user)", "state": str(len(timers)) if ok else f"μη διαθέσιμο ({text[:80]})"})
     prov = _rows(db, "SELECT name, state, until_ts, note FROM providers")
     for p in prov:
         until = p.get("until_ts")
@@ -265,26 +290,29 @@ def render(root=ROOT):
     import streamlit as st
 
     now = time.time()
+    P = paths(root)
     st.caption("Μόνο προβολή. Οι αλλαγές ρυθμίσεων έρχονται στο Β4. Καμία κλήση μοντέλου από αυτή την καρτέλα.")
-    rows = settings_rows()
+    rows = settings_rows(P["dispatch"])
     s = effective(rows)
 
     st.subheader("Χρήση ανά πάροχο")
     try:
-        usage = claude_usage(U.load_claude_status(), now) + codex_usage(U.latest_codex(now), now)
+        status = U.load_claude_status(P["claude_status"]) or {}
+        status = dict(status, _dispatcher=U.load_dispatcher_usage(P["dispatch"]))
+        usage = claude_usage(status, now) + codex_usage(U.latest_codex(now), now)
     except Exception as e:  # never break the dashboard
         usage = [{"provider": "?", "window": "?", "pct": UNKNOWN, "source": f"σφάλμα {type(e).__name__}"}]
     st.dataframe(pd.DataFrame(usage), hide_index=True, width="stretch")
     st.caption("Τιμή «άγνωστη» = το παράθυρο έληξε ή δεν υπάρχει μέτρηση. Ρυθμός από τον πίνακα tasks (≈$ μόνο Claude):")
-    st.dataframe(pd.DataFrame(rate_rows(now=now)), hide_index=True, width="stretch")
+    st.dataframe(pd.DataFrame(rate_rows(P["dispatch"], now=now)), hide_index=True, width="stretch")
 
     st.subheader("Δρομολόγηση: ποιος απαντά σε τι, και γιατί")
     st.dataframe(pd.DataFrame(routing_rows(s)), hide_index=True, width="stretch")
     st.caption("Τελευταίες εκτελέσεις (τι έτρεξε πραγματικά):")
-    st.dataframe(pd.DataFrame(recent_tasks(s=s)), hide_index=True, width="stretch")
+    st.dataframe(pd.DataFrame(recent_tasks(P["dispatch"], P["lab"], s=s)), hide_index=True, width="stretch")
 
     st.subheader("Υπηρεσίες")
-    st.dataframe(pd.DataFrame(services(now)), hide_index=True, width="stretch")
+    st.dataframe(pd.DataFrame(services(now, P["heartbeat"], P["dispatch"])), hide_index=True, width="stretch")
 
     st.subheader("Όλες οι ρυθμίσεις")
     for group in dict.fromkeys(r["group"] for r in rows):
