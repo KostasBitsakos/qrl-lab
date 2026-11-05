@@ -41,7 +41,8 @@ def fake_run(cmd, **kw):
         g = lambda f: int(cm[cm.index(f) + 1])
         assert g('--total-ticks') == g('--pretrain-ticks') + g('--finetune-ticks'), ('total != pretrain+finetune', name)
     tk = int(e['cmd'][e['cmd'].index('--total-ticks') + 1]); x['seed'] = e['seed']; x['total_ticks'] = tk
-    x['checkpoint_results'] = {str(tk): list(x['checkpoint_results'].values())[-1]}
+    ck = int(e['cmd'][e['cmd'].index('--checkpoints') + 1]) if '--checkpoints' in e['cmd'] else tk   # real files key by finetune ticks
+    x['checkpoint_results'] = {str(ck): list(x['checkpoint_results'].values())[-1]}
     for ck in x['checkpoint_results'].values():
         for ep in ck['val']['episodes']: ep['ret'] = 1000.0 * h; 
     ok = not (n['fail'] and n['fail'] in name)

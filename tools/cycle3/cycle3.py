@@ -125,7 +125,7 @@ def task(lane, stage, arm, cid, cmd_base, seed, ticks, src):
     out = f'tuning/results/cycle3-{lane}/{name}.json'
     cmd = retarget(cmd_base, arm, seed, out, ticks, src)
     w = wall(arm, ticks, src)
-    return dict(name=name, lane=lane, stage=stage, arm=arm, cid=cid, seed=seed, cwd=cwd, out=out, ticks=ticks, nominal=nominal(arm, ticks, src),
+    return dict(name=name, lane=lane, stage=stage, arm=arm, cid=cid, seed=seed, cwd=cwd, out=out, ticks=ticks, src=src, nominal=nominal(arm, ticks, src),
                 wall=w, cmd=cmd)
 
 
@@ -135,14 +135,19 @@ def child_spec(t):
             'entries': [{'name': t['name'], 'seed': t['seed'], 'cpus': 1, 'wall_clock_hours': t['wall'], 'cmd': t['cmd']}]}
 
 
-def val_stats(path, seed=None, ticks=None):
+def pretrain_of(cmd):
+    """Pretrain ticks in a task command (0 if none); ledger records from before J274 carry no 'src' field."""
+    return int(cmd[cmd.index('--pretrain-ticks') + 1]) if '--pretrain-ticks' in cmd else 0
+
+
+def val_stats(path, seed=None, ticks=None, ck_key=None):
     """(mean return, mean SLO-violation rate) of the last checkpoint on val; raises on any provenance/shape mismatch."""
     x = json.loads(Path(path).read_text())
     if x.get('eval_splits') != ['val'] or (seed is not None and x.get('seed') != seed) or \
             (ticks is not None and x.get('total_ticks') != ticks):
         raise ValueError('provenance mismatch')
     ck = list(x['checkpoint_results'].items())[-1]
-    if ticks is not None and ck[0] != str(ticks):
+    if ticks is not None and ck[0] != str(ck_key if ck_key is not None else ticks):
         raise ValueError('wrong checkpoint')
     ep = ck[1]['val']['episodes']
     if len(ep) != 20:
@@ -307,8 +312,10 @@ def drive():
     submitted_nom = 0.0
     done_e, done_f, winners, a_added = set(), set(), {l: {} for l in LANES}, False
     mandatory = sum(planned_nominal().values())
+    static_by_name = {}
     for t in all_tasks_static(sc):
         queue[t['lane']].append(t)
+        static_by_name[t['name']] = t
     import fcntl
     lock = open(OUT / 'driver.lock', 'w')
     try:
@@ -321,6 +328,7 @@ def drive():
             r = json.loads(line)
             if r['stage'] == 'S0' and not r['name'].endswith('-r2'):
                 continue                   # 6 S0 runs failed on the total-ticks bug (J274): superseded by the -r2 reruns, charged via DB usage
+            r = {**static_by_name.get(r['name'], {}), **r}   # ledger lines keep only a summary: restore cmd/out/cwd for the checks
             TASKS[r['name']] = r
             seen.add(r['name'])
             if r['stage'] != 'A':
@@ -347,10 +355,10 @@ def drive():
             outp = ROOT / tk['cwd'] / tk['out']
             if x['status'] == 'done' and x['exit_code'] == 0 and outp.exists():
                 try:
-                    val_stats(outp, tk['seed'], tk['ticks'])    # provenance + 20 val episodes + finite, else a declared failure
+                    val_stats(outp, tk['seed'], tk['ticks'] + pretrain_of(tk['cmd']), tk['ticks'])    # provenance + 20 val episodes + finite, else a declared failure
                     OK.add(name)
-                except Exception:
-                    pass
+                except Exception as ex:
+                    log(f'check {name}: {ex!r}')
             if name not in OK:
                 failed.add(name)
                 log(f'FAILED {name} status={x["status"]} exit={x["exit_code"]}')
@@ -423,7 +431,7 @@ def drive():
                 if p.returncode != 0:
                     stop(f'sandbox-start failed for {t["name"]}')
                 rec['t0'] = time.time()
-                TASKS[t['name']] = rec
+                TASKS[t['name']] = dict(rec, cmd=t['cmd'])    # the ledger line is a summary; the check needs cmd (pretrain ticks)
                 seen.add(t['name'])
                 if t['stage'] != 'A':
                     submitted_nom += t['nominal']

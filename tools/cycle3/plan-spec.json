@@ -5,7 +5,7 @@
  "parent_request": "R-20261029-006",
  "authority": "R-20261029-001 budget, R-20261029-010 stage policy (joint stage release), M-20261031-015",
  "plan_path": "tools/cycle3/cycle3.py",
- "plan_sha256": "c7b28abf6637037c4e0384eae7ba6410410894c06c5dacd1f019111d6a76fbb2",
+ "plan_sha256": "ae41cc03067bcc34bc3f1ebb4618f39d3f407f68c6ba77269deab04d9da13ea6",
  "lanes": {
   "opus": "code-poisson (Claude)",
   "astra": "code-poisson-astra (Codex)"
@@ -38,7 +38,7 @@
  "slots_per_lane": 4,
  "deadline_submit": "2026-11-02T10:00:00+00:00",
  "forbidden": "test12 14000-14019, shift-test 14500-14519, no retries, no cap/limit changes, no seeds outside the sandbox allowed ranges",
- "reviews": "council .lab/j269/codex_round1.txt; code review .lab/j269/codex_review.txt, codex_review2.txt (fixes applied; second round raised artifact-validation and DONE-honesty, fixed after); offline sim .lab/j269/sim_test.py; dry-run 192 child specs validated by sandbox_guard.check_child | v2 (J275): fix retarget total-ticks=pretrain+finetune, S0 rerun as -r2 (6 failed S0 superseded), sim_test asserts total; not re-reviewed by Codex",
+ "reviews": "council .lab/j269/codex_round1.txt; code review .lab/j269/codex_review.txt, codex_review2.txt (fixes applied; second round raised artifact-validation and DONE-honesty, fixed after); offline sim .lab/j269/sim_test.py; dry-run 192 child specs validated by sandbox_guard.check_child | v2 (J275): fix retarget total-ticks=pretrain+finetune, S0 rerun as -r2 (6 failed S0 superseded), sim_test asserts total; not re-reviewed by Codex | v3 (J284): val_stats checks finetune checkpoint key and total=pretrain+finetune; resume/submit records carry cmd; sim_test aligned with real file format; not re-reviewed by Codex",
  "start": "python3 .lab/j269/cycle3.py start (detached driver+watch, receipt .lab/j269/receipt.json, state .lab/j269/state.json, log .lab/j269/driver.log)",
  "cwd": "/home/ubuntu/qrl-lab",
  "entries": [
