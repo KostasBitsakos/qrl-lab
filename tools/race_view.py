@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Task labels and the 80s «race view» for the dashboard Agents tab. Pure functions, no Streamlit, no I/O except
-`load_events`. The race is one self-contained HTML/CSS/SVG document (rendered with st.components.v1.html);
+"""Task labels and the 80s «race view» for the dashboard Agents tab. Pure functions, no Streamlit, read-only I/O in
+the load helpers. The race is one self-contained HTML/CSS/SVG document (rendered with st.components.v1.html);
 only the pixel font comes from Google Fonts, with a monospace fallback, and there is no JavaScript at all
 (swerving and obstacle dodging are pure CSS keyframes; activity and trouble are derived in Python from the logs).
 """
@@ -10,6 +10,10 @@ import json
 import os
 import sys
 import time
+import datetime as dt
+import sqlite3
+from contextlib import closing
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from agent_log import PREFIX as PREFIX_RE, STOPWORDS, clean_label, task_word  # noqa: E402
@@ -24,6 +28,72 @@ TYPICAL_SECONDS = {"engineer": 600, "scholar": 300, "Explore": 90, "runner": 300
 GAP_SECONDS = 300  # coordinator actions further apart than this belong to different tasks
 LOOKBACK = 120     # the coordinator's Agent-tool call precedes the SubagentStart by at most this long
 DEFAULT_COLOR = "#898781"
+
+
+def load_jobs(path):
+    """Read the dispatcher snapshot without creating a DB or changing its schema.
+
+    None means unavailable (use legacy events); [] means a readable, empty board.
+    jobs.provider is a requested provider, so execution identity comes only from
+    the latest tasks row whose refs contain this exact job id (dispatcher._attempt).
+    """
+    try:
+        with closing(sqlite3.connect(Path(path).resolve().as_uri() + "?mode=ro", uri=True, timeout=1)) as db:
+            db.row_factory = sqlite3.Row
+            with db:
+                db.execute("BEGIN")
+                jobs = [dict(r) for r in db.execute(
+                    "SELECT id, lane, title, status, created, started, ended, cancel FROM jobs ORDER BY n")]
+                by_id = {j["id"]: j for j in jobs}
+                for t in db.execute("SELECT refs, provider, model FROM tasks ORDER BY id"):
+                    try:
+                        refs = json.loads(t["refs"] or "[]")
+                    except (ValueError, TypeError):
+                        continue
+                    if not isinstance(refs, list):
+                        continue
+                    for ref in refs:
+                        if isinstance(ref, str) and ref in by_id:
+                            by_id[ref].update(provider=t["provider"], model=t["model"] or "")
+            return jobs
+    except (OSError, sqlite3.Error, ValueError):
+        return None
+
+
+def _job_time(value):
+    try:
+        parsed = dt.datetime.fromisoformat(value)
+        return parsed.timestamp() if parsed.tzinfo else None
+    except (ValueError, TypeError):
+        return None
+
+
+def job_lanes(jobs, now, window, max_lanes):
+    """Authoritative dispatcher lanes; hook history cannot add ghost cars."""
+    out = []
+    for j in {j["id"]: j for j in jobs}.values():
+        status = j.get("status") or "unknown"
+        active = status in ("queued", "running")
+        end = _job_time(j.get("ended"))
+        if not active and (end is None or now - end > window):
+            continue
+        start = _job_time(j.get("started")) or _job_time(j.get("created"))
+        provider = {"codex": "Codex", "claude": "Claude"}.get(j.get("provider"), "άγνωστος πάροχος")
+        coord = j.get("lane") == "chat"
+        name = f"{j['id']} · {'Πάρις (' + provider + ')' if coord else provider}"
+        reasons = ["ζητήθηκε ακύρωση"] if active and j.get("cancel") else []
+        out.append(dict(job_id=j["id"], role="coordinator" if coord else j.get("provider") or "unknown",
+                        name=name, provider=provider, model=j.get("model") or "", effort="", coord=coord,
+                        task=j.get("title") or "", label=j.get("title") or "", desc=j.get("title") or "",
+                        start=start, end=None if active else end, status=status, progress=None,
+                        elapsed=max(0, (now if active else end) - start) if start else 0,
+                        color="#ff2a6d" if coord else "#05d9e8", activity=0, reasons=reasons,
+                        obstacles=0, final=status == "failed"))
+    out.sort(key=lambda r: (r["status"] not in ("running", "queued"), not r["coord"],
+                            -(r["start"] or 0)))
+    # Never truncate active jobs; max_lanes limits only the terminal history.
+    active = [r for r in out if r["status"] in ("running", "queued")]
+    return active + [r for r in out if r["status"] not in ("running", "queued")][:max(0, max_lanes - len(active))]
 
 
 def load_events(path, max_lines=6000):
@@ -213,15 +283,20 @@ def two_words(label, task="", role=""):
     return " ".join(words)[:DESC_MAX]
 
 
-def lanes(events, now=None, roles=None, window=6 * 3600, max_lanes=16, health=None, models=None, coord_model=None):
+def lanes(events, now=None, roles=None, window=6 * 3600, max_lanes=16, health=None, models=None, coord_model=None,
+          jobs=None):
     """Race lanes: one per subagent run (plus the coordinator when it acted in the last 2 minutes).
 
     Active runs first, then the most recently finished. Each lane: dict(role, name, model, label, start, end,
     status ("running"|"done"|"failed"), elapsed, progress (0..1 or None for unknown), color).
     models: {agent_id: display text} (tools/agent_models.py) overrides the record's model; coord_model: the
     coordinator lane's model text.
+    jobs: an authoritative dispatcher snapshot; None preserves legacy hook mode.
+    Dispatcher mode uses only board jobs, avoiding stale hook copies of the same work.
     """
     now = time.time() if now is None else now
+    if jobs is not None:
+        return job_lanes(jobs, now, window, max_lanes)
     identity = agent_models.coordinator_identity(events, health, now)
     roles = roles or {}
     ann = annotate(events)
@@ -373,15 +448,15 @@ def render(lane_list, now=None):
     parts = [f'<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
              f'<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap">'
              f'<style>{CSS}</style></head><body><div class="screen" id="race">'
-             f'<h1>🏁 QRL GRAND PRIX</h1><div class="sub">{active} στην πίστα · {len(lane_list) - active} τερμάτισαν</div>{cap}']
+             f'<h1>🏁 QRL GRAND PRIX</h1><div class="sub">{active} στην πίστα · {len(lane_list) - active} εκτός εκτέλεσης</div>{cap}']
     if not lane_list:
         parts.append('<div class="sub">Η πίστα είναι άδεια. Κανένας πράκτορας δεν τρέχει.</div>')
     else:
         parts.append(f'<div class="road" style="--h:{TRACK_H}px">')
     for idx, r in enumerate(lane_list):
         color = r["color"] if str(r.get("color", "")).startswith("#") and len(r["color"]) in (4, 7) else DEFAULT_COLOR
-        display_name = r["name"] if r.get("coord") else r["name"].split(" · ")[0]
-        who = esc(display_name if (not r["model"] or r.get("coord")) else f'{display_name} · {r["model"]}'
+        display_name = r["name"] if r.get("coord") or r.get("job_id") else r["name"].split(" · ")[0]
+        who = esc(display_name if (not r["model"] or (r.get("coord") and not r.get("job_id"))) else f'{display_name} · {r["model"]}'
                   + (f" · {r['effort']}" if r.get("effort") else ""))
         word = esc(r.get("desc") or r.get("label") or "")
         reasons = r.get("reasons") or []
@@ -404,9 +479,9 @@ def render(lane_list, now=None):
             else:
                 run = (f'<div class="runner run" style="bottom:calc((100% - 100px) * {r["progress"]:.3f})">'
                        f'{obs}{sw}</div>')
-        elif r["status"] == "idle":
+        elif r["status"] in ("idle", "queued"):
             dim = " dim"
-            st_html = '<span>zzz</span>'
+            st_html = '<span>σε ουρά</span>' if r["status"] == "queued" else '<span>zzz</span>'
             run = f'<div class="runner parked">{CAR.format(c=color)}<span class="w">{word}</span></div>'
         else:
             dim = " dim"
@@ -419,7 +494,13 @@ def render(lane_list, now=None):
             else:
                 run = f'<div class="runner parked">{CAR.format(c=color)}<span class="w">{word} {mark}</span></div>'
         why_html = f'<span class="why">⚠ {why}</span>' if why else ""
-        parts.append(f'<div class="lane{dim}" title="{why}"><div class="hd"><span class="role" style="color:{color}">{who}</span>'
+        if r.get("job_id"):
+            status_text = {"running": "τρέχει", "done": "ολοκληρώθηκε", "cancelled": "ακυρώθηκε",
+                           "failed": "απέτυχε", "queued": "σε ουρά", "waiting_approval": "περιμένει έγκριση"}.get(r["status"], r["status"])
+            st_html += f'<span> · {esc(status_text)}</span>'
+        title = esc(r.get("task") or "") if r.get("job_id") else why
+        job_title = f'<span class="role">{title}</span>' if r.get("job_id") else ""
+        parts.append(f'<div class="lane{dim}" title="{title}"><div class="hd"><span class="role" style="color:{color}">{who}</span>{job_title}'
                      f'<span class="st">{st_html}</span>{why_html}</div><div class="track{road_cls}"{road_sty}>'
                      f'<div class="finish"></div>{run}</div></div>')
     if lane_list:

@@ -20,6 +20,8 @@ import sys
 
 SKIP_DIRS = {".git", ".venv", "venv", "env", "node_modules", ".lab", "__pycache__", ".mypy_cache", ".pytest_cache",
              ".ipynb_checkpoints", "site-packages", "dist", "build", ".tox", ".cache"}
+# .lab subfolders that hold durable knowledge (M-20261028-006); .lab/outbox, tmp, backups stay out
+LAB_KEEP = {"tuning", "council", "codex-handoff"}
 OUT_MD = os.path.join("docs", "INDEX.md")
 OUT_JSON = os.path.join("docs", "index.json")
 DESC_LEN = 140
@@ -102,8 +104,15 @@ def extra_roots(root):
 
 def iter_md(base):
     for dirpath, dirnames, filenames in os.walk(base):
-        dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".")
-                             or d in (".claude", ".agents"))
+        rel = os.path.relpath(dirpath, base)
+        if rel == ".lab":  # only curated knowledge folders of .lab (results, councils, handoffs), not drafts
+            dirnames[:] = sorted(d for d in dirnames if d in LAB_KEEP)
+            continue
+        if rel.split(os.sep)[0] == ".lab":
+            dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS and not d.startswith("."))
+        else:
+            dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".")
+                                 or d in (".claude", ".agents") or (rel == "." and d == ".lab"))
         for fn in sorted(filenames):
             if fn.lower().endswith(".md"):
                 yield os.path.join(dirpath, fn)

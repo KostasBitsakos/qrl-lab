@@ -20,8 +20,9 @@ from labdb import LabError, lab_dir, lab_root
 # (C-20261021-03: a second, parallel tuning worktree for the Codex branch; each sandbox names its repo and branch, and
 # the worktree's checked-out branch must equal the sandbox branch)
 WORKTREES = {"code": "code-tuning", "code-astra": "code-tuning-astra",
-             "code-poisson": "code-poisson", "code-poisson-astra": "code-poisson-astra"}
+             "code-poisson": "code-poisson", "code-poisson-astra": "code-poisson-astra", "code-poisson-spiky": "code-poisson-spiky"}
 CYCLE2_BRANCHES = {"code-poisson": "dinos-poisson", "code-poisson-astra": "dinos-poisson-astra"}
+SANDBOX_BRANCHES = dict(CYCLE2_BRANCHES, **{"code-poisson-spiky": "dinos-poisson-spiky"})
 # Peeled reviewed cycle2-env-v1 commit, never a movable tag/branch.
 CYCLE2_ENV_COMMIT = "238003f58a7ae547c9ff03b05f5484ea5a1c342b"
 # Peeled reviewed cycle2-harness-v1 commit (J40, Codex APPROVE r3) and the shared harness files pinned to it.
@@ -34,6 +35,19 @@ CYCLE2_HARNESS_FILES = ("tuning/pms_adapter.py", "tuning/rppo.py", "tuning/pms_r
                         "tuning/legacy/c5_protocol.py", "tuning/legacy/orig_variants.py",
                         # shared evaluation helpers (greedy_fn, summarize) and the transfer source env (Codex J48 r1)
                         "tuning/legacy/run_legacy.py", "tuning/legacy/env_orig.py")
+# Spiky profile is separate: existing parents retain their exact original pins.
+SPIKY_REPO = "code-poisson-spiky"
+SPIKY_ENV_COMMIT = "7748887e47db735bf8bfb098bdbdf16ca5c9434d"
+SPIKY_HARNESS_COMMIT = "a4302c096d52ee80ac7bc38b5f7daf7d515a23c5"
+SPIKY_ENTRY_SHA256 = CYCLE2_ENTRY_SHA256  # wrapper unchanged, verified independently
+
+
+def profile(sb):
+    spiky = sb.get("repo") == SPIKY_REPO
+    return (SPIKY_ENV_COMMIT, SPIKY_HARNESS_COMMIT, SPIKY_ENTRY_SHA256) if spiky else (
+        CYCLE2_ENV_COMMIT, CYCLE2_HARNESS_COMMIT, CYCLE2_ENTRY_SHA256)
+
+
 FORBIDDEN_WORDS = ("kubectl", "qiskit_ibm", "ibm_quantum", "ibmq", "qiskit-ibm", "helm", "kube")
 FORBIDDEN_KEYS = {"real", "qpu", "kube_context", "backend_name", "ibm"}
 # Files whose bytes on the tuning worktree must equal those on REFERENCE_BRANCH (qrl-dev) before any launch:
@@ -146,47 +160,63 @@ def select_worktree(sb, child):
             if not isinstance(pair, dict) or set(pair) != {"repo", "branch"}:
                 raise LabError("Each sandbox worktree needs exactly repo and branch.")
             repo = pair["repo"]
-            if not isinstance(repo, str) or repo in seen or repo not in CYCLE2_BRANCHES:
+            if not isinstance(repo, str) or repo in seen or repo not in SANDBOX_BRANCHES:
                 raise LabError("Unknown or duplicate aggregate worktree repo.")
-            if pair["branch"] != CYCLE2_BRANCHES[repo]:
+            if pair["branch"] != SANDBOX_BRANCHES[repo]:
                 raise LabError("Cycle2 worktree branch binding differs from the reviewed mapping.")
             seen.add(repo)
         matches = [p for p in pairs if p["repo"] == child.get("repo")]
         if len(matches) != 1:
             raise LabError("Child repo must select one authorized sandbox worktree.")
         selected = dict(sb, **matches[0])
-    if selected.get("repo") in CYCLE2_BRANCHES:
+    if selected.get("repo") in SANDBOX_BRANCHES:
         if pairs is None:
             raise LabError("Cycle2 requires one aggregate sandbox worktrees list.")
-        if sb.get("frozen_env_commit") != CYCLE2_ENV_COMMIT:
+        env_pin, harness_pin, entry_pin = profile(selected)
+        if sb.get("frozen_env_commit") != env_pin:
             raise LabError("Cycle2 frozen_env_commit must equal the reviewed environment commit.")
-        if sb.get("frozen_harness_commit") != CYCLE2_HARNESS_COMMIT:
+        if sb.get("frozen_harness_commit") != harness_pin:
             raise LabError("Cycle2 frozen_harness_commit must equal the reviewed harness commit.")
-        if sb.get("frozen_entry_sha256") != CYCLE2_ENTRY_SHA256:
+        if sb.get("frozen_entry_sha256") != entry_pin:
             raise LabError("Cycle2 frozen_entry_sha256 must equal the reviewed wrapper digest.")
     return selected
 
 
 def verify_sandbox_protected(sb, root=None):
     wt = worktree_path(sb, root)
-    if sb.get("repo") in CYCLE2_BRANCHES:
+    if sb.get("repo") in SANDBOX_BRANCHES:
         if worktree_branch(wt) != sb["branch"]:
             raise LabError(f"Worktree {wt} is not on branch {sb['branch']}.")
+        env_pin, harness_pin, entry_pin = profile(sb)
         dirs = ("sim_v2", "experiments/dinos_simv2")
-        out = subprocess.run(["git", "-C", wt, "ls-tree", "-rz", "--name-only", CYCLE2_ENV_COMMIT,
+        out = subprocess.run(["git", "-C", wt, "ls-tree", "-rz", "--name-only", env_pin,
                               "--", *dirs], capture_output=True, timeout=30)
         tracked = set(os.fsdecode(p) for p in out.stdout.split(b"\0") if p)
         if out.returncode or not set(PROTECTED_FILES) <= tracked:
             raise LabError("Protected file tree missing from reviewed environment commit.")
-        verify_protected(wt, CYCLE2_ENV_COMMIT, tuple(sorted(tracked)) + ("tuning/poisson_ms.py",))
-        verify_protected(wt, CYCLE2_HARNESS_COMMIT, CYCLE2_HARNESS_FILES)
+        verify_protected(wt, env_pin, tuple(sorted(tracked)) + ("tuning/poisson_ms.py",))
+        verify_protected(wt, harness_pin, CYCLE2_HARNESS_FILES)
         try:
             with open(os.path.join(wt, CYCLE2_ENTRY_FILE), "rb") as f:
                 entry_hash = _sha(f.read())
         except OSError as exc:
             raise LabError("Protected wrapper is missing or unreadable. Nothing was started.") from exc
-        if entry_hash != CYCLE2_ENTRY_SHA256:
+        if entry_hash != entry_pin:
             raise LabError("Protected wrapper differs from reviewed digest. Nothing was started.")
+        if sb.get("repo") == SPIKY_REPO:
+            # Pin all tuning Python imports, not merely the entry point and a few harness helpers.
+            out = subprocess.run(["git", "-C", wt, "ls-tree", "-rz", "--name-only", harness_pin,
+                                  "--", "tuning"], capture_output=True, timeout=30)
+            sources = tuple(os.fsdecode(p) for p in out.stdout.split(b"\0") if p.endswith(b".py"))
+            if out.returncode or not sources:
+                raise LabError("Spiky tuning source tree missing.")
+            verify_protected(wt, harness_pin, sources)
+            for base, subdirs, names in os.walk(os.path.join(wt, "tuning")):
+                subdirs[:] = [d for d in subdirs if d != "__pycache__"]
+                for name in names:
+                    rel = os.path.relpath(os.path.join(base, name), wt)
+                    if name.endswith(".py") and rel not in sources:
+                        raise LabError(f"Unreviewed spiky Python source {rel}; refused.")
         # Reject extra importable sources even if gitignored. Bytecode caches are generated normally.
         for directory in dirs:
             for base, subdirs, names in os.walk(os.path.join(wt, directory)):
@@ -390,6 +420,11 @@ def check_child(child, parent, root=None, now=None):
     check_env(child.get("env"), "child")
     check_env(child.get("env_threads"), "child")
     selected = select_worktree(sb, child)
+    if selected.get("repo") == SPIKY_REPO:
+        from labdb import canonical_hash
+        allowed = sb.get("allowed_children")
+        if not isinstance(allowed, list) or canonical_hash(child) not in allowed:
+            raise LabError("Spiky child is not in the frozen Stage1 manifest.")
     cwd = resolve_cwd(child["cwd"], selected, root)
     cap = float(sb["per_run_wall_clock_hours"])
     default_h = (child.get("limits") or {}).get("wall_clock_hours", cap)
@@ -430,12 +465,53 @@ def sandbox_dir(root=None):
     return os.path.join(lab_dir(root), "sandbox")
 
 
+def validate_amendment_spec(spec):
+    """Non-executable approval envelope. No replacement sandbox or arbitrary overrides."""
+    check_finite(spec)
+    required = {"kind", "name", "scope", "parent_request", "parent_spec_hash", "changes", "review"}
+    if set(spec) != required or spec.get("kind") != "sandbox-amendment" or spec.get("scope") != "sim":
+        raise LabError("Invalid sandbox amendment envelope.")
+    if not all(isinstance(spec.get(k), str) and spec[k] for k in ("name", "parent_request", "parent_spec_hash")):
+        raise LabError("Amendment needs a name, parent request and parent spec hash.")
+    digest = spec["parent_spec_hash"]
+    if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+        raise LabError("Amendment parent spec hash must be canonical SHA256.")
+    changes = spec["changes"]
+    if not isinstance(changes, dict) or set(changes) != {"per_run_wall_clock_hours", "cpu_hours_budget"}:
+        raise LabError("Amendment may change only per-run wall cap and CPU budget.")
+    for key, value in changes.items():
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+            raise LabError(f"Invalid amendment {key}.")
+    if changes["per_run_wall_clock_hours"] > 2.5:
+        raise LabError("Amendment per-run wall cap exceeds 2.5h.")
+    if changes["cpu_hours_budget"] > 136:
+        raise LabError("Amendment CPU budget exceeds the R-009 ceiling of 136 CPU-h.")
+    if not isinstance(spec["review"], dict) or not spec["review"]:
+        raise LabError("Amendment requires frozen review context.")
+
+
+def apply_amendment(parent, rid, parent_hash, amendment):
+    """Return an effective copy; original approval bytes and protected settings stay intact."""
+    import copy
+    validate_amendment_spec(amendment)
+    if parent.get("kind") != "sandbox" or parent.get("scope") != "sim" or not isinstance(parent.get("sandbox"), dict):
+        raise LabError("Amendments require a sim sandbox parent.")
+    if amendment["parent_request"] != rid or amendment["parent_spec_hash"] != parent_hash:
+        raise LabError("Amendment parent request/hash mismatch.")
+    sb = parent["sandbox"]
+    if "worktrees" not in sb:
+        raise LabError("Amendments require an aggregate sandbox.")
+    if amendment["changes"]["cpu_hours_budget"] > sb["cpu_hours_budget"]:
+        raise LabError("Amendment cannot increase the original CPU budget.")
+    effective = copy.deepcopy(parent)
+    effective["sandbox"].update(amendment["changes"])
+    return effective
+
+
 def used_cpu_hours(db, rid, now=None, strict=False):
     """Actual CPU-hours of finished runs + reserved worst case of runs still starting/running (parent rid)."""
     total = 0.0
-    for r in db.runs(limit=100000):
-        if r["request_id"] != rid:
-            continue
+    for r in db.conn.execute("SELECT * FROM runs WHERE request_id=?", (rid,)).fetchall():
         try:
             with open(os.path.join(r["run_dir"], "spec_entry.json"), encoding="utf-8") as f:
                 sbm = json.load(f).get("sandbox") or {}
@@ -461,7 +537,8 @@ def used_cpu_hours(db, rid, now=None, strict=False):
 
 
 def active_runs(db, rid):
-    return sum(1 for r in db.runs(limit=100000) if r["request_id"] == rid and r["status"] in ("starting", "running"))
+    return db.conn.execute("SELECT COUNT(*) FROM runs WHERE request_id=? AND status IN ('starting','running')",
+                           (rid,)).fetchone()[0]
 
 
 def log_ledger(rid, record, root=None):

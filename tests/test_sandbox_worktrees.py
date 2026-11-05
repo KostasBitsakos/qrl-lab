@@ -33,7 +33,8 @@ def root():
 
 def test_worktree_map():
     assert G.WORKTREES == {"code": "code-tuning", "code-astra": "code-tuning-astra",
-                           "code-poisson": "code-poisson", "code-poisson-astra": "code-poisson-astra"}
+                           "code-poisson": "code-poisson", "code-poisson-astra": "code-poisson-astra",
+                           "code-poisson-spiky": "code-poisson-spiky"}
 
 
 def test_paths_and_branch_check(root):
