@@ -31,6 +31,7 @@ import importlib  # noqa: E402
 _LOCAL_MODS = ["labdb", "file_view", "replytext", "k8s_view", "prom_view", "web_terminal", "sudo_ui", "race_view", "brain_view",
                "perm_store", "ext_catalog", "summarize_runs", "agent_models", "paper_plots", "paper_build", "uploads", "installed_view", "access", "outage", "models_view", "banners", "sandbox_view", "topology_view", "topology_ui", "exp_view", "exp_figs", "usage_limits", "event_tail", "msg_structure", "notif_format", "extra_credits", "knowledge_view", "knowledge_tree", "kb_graph_view", "tab_links", "mobile_view", "tutorials_view", "cycle2_report"]
 _LOCAL_MODS.append("token_metrics")
+_LOCAL_MODS.append("system_view")
 for _n in _LOCAL_MODS:  # first import so they are in sys.modules, then reload those whose file changed
     importlib.import_module(_n)
 modreload.reload_changed(_LOCAL_MODS)
@@ -75,6 +76,7 @@ import extra_credits  # noqa: E402
 import exp_figs  # noqa: E402
 import cycle1_report  # noqa: E402
 import tutorials_view  # noqa: E402
+import system_view  # noqa: E402
 import event_tail  # noqa: E402
 from uploads import UploadError, attachment_paths  # noqa: E402
 
@@ -1094,7 +1096,7 @@ DEC_TAB = "✅ Αποφάσεις"
 _open_files = "path" in st.query_params and not st.session_state.get("fb_tab_done")
 st.session_state["fb_tab_done"] = True
 TAB_NAMES = [HOME_TAB, DEC_TAB, "🤖 Πράκτορες", "📈 Πειράματα", "⚖️ Council",
-             "🖥️ Πόροι", "☸️ Kubernetes", "📡 Prometheus", "📊 Grafana", FILES_TAB, "📝 Paper", "🎓 Συνέδρια", "🧾 Ιστορικό", "🔐 Sudo", "🧩 Επεκτάσεις", "🔌 Διακοπές", "🧭 Ιστορικό αλλαγών", "🧠 Μοντέλα", "🏛️ Αρχιτεκτονική", "⌨️ Terminal", "🗂️ Γνώση", "📚 Tutorials"]
+             "🖥️ Πόροι", "☸️ Kubernetes", "📡 Prometheus", "📊 Grafana", FILES_TAB, "📝 Paper", "🎓 Συνέδρια", "🧾 Ιστορικό", "🔐 Sudo", "🧩 Επεκτάσεις", "🔌 Διακοπές", "🧭 Ιστορικό αλλαγών", "🧠 Μοντέλα", "🏛️ Αρχιτεκτονική", "⌨️ Terminal", "🗂️ Γνώση", "📚 Tutorials", "⚙️ Σύστημα"]
 # Tab persistence (F5 / shared link): st.tabs(key="tab", bind="query-params") in Streamlit 1.66 keeps the active
 # label in ?tab=... and restores it on load; ?path=... (file deep link) only picks the default when ?tab is absent.
 # The default is part of the tabs widget identity: it must stay the same on every rerun of the session, otherwise the first
@@ -1110,10 +1112,10 @@ if _side:  # tabs in the left column, the terminal in a right-hand column
         st.iframe(_term_url, height=700)
     with _left:
         (tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_prom, tab_grafana, tab_files, tab_paper, tab_venues,
-         tab_audit, tab_sudo, tab_ext, tab_outage, tab_changes, tab_models, tab_arch, tab_term, tab_know, tab_tutorials) = st.tabs(TAB_NAMES, default=_tab_default, key="tab", bind="query-params")
+         tab_audit, tab_sudo, tab_ext, tab_outage, tab_changes, tab_models, tab_arch, tab_term, tab_know, tab_tutorials, tab_system) = st.tabs(TAB_NAMES, default=_tab_default, key="tab", bind="query-params")
 else:
     (tab_chat, tab_dec, tab_agents, tab_runs, tab_council, tab_res, tab_k8s, tab_prom, tab_grafana, tab_files, tab_paper, tab_venues,
-     tab_audit, tab_sudo, tab_ext, tab_outage, tab_changes, tab_models, tab_arch, tab_term, tab_know, tab_tutorials) = st.tabs(TAB_NAMES, default=_tab_default, key="tab", bind="query-params")
+     tab_audit, tab_sudo, tab_ext, tab_outage, tab_changes, tab_models, tab_arch, tab_term, tab_know, tab_tutorials, tab_system) = st.tabs(TAB_NAMES, default=_tab_default, key="tab", bind="query-params")
 
 # right-click / middle-click on a tab -> new browser tab with ?tab=<label> (left click unchanged)
 with st.sidebar:
@@ -3219,3 +3221,11 @@ except Exception as _qrl_panel_error:  # the panel must never break the dashboar
 if _tab_live(tab_tutorials):
     with tab_tutorials:
         tutorials_view.render(ROOT)
+
+
+if _tab_live(tab_system):
+    with tab_system:
+        try:
+            system_view.render(ROOT)
+        except Exception as _e:  # the view must never break the dashboard
+            st.error(f"Σύστημα: {type(_e).__name__}: {_e}")

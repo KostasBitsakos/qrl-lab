@@ -122,6 +122,17 @@ def route_request(req_model, req_effort):
     return provider, model, effort
 
 
+def claude_model_for(s, kind, sel_model=None):
+    """Claude model of one task -> (model, why). Single source for the dispatcher and the System tab."""
+    if sel_model:
+        return sel_model, "req_model"
+    if kind == "perm_answer":
+        return (s["events_model"], "events_model") if s["events_model"] else (s["peer_claude_model"], "peer_claude_model")
+    if kind == "run_event" and s["events_model"]:
+        return s["events_model"], "events_model"
+    return s["claude_model"], "claude_model"
+
+
 MENTION_RE = re.compile(r"^\s*@(claude|codex)\b[:,]?\s*", re.I)
 
 SCHEMA = """
@@ -979,10 +990,7 @@ class Dispatcher:
                    QRL_REPLY_TO=item["reply_to"] or "")
         budget = s["chat_budget_usd"] if lane_of(item) == "chat" else s["max_budget_usd"]
         if provider == "claude":
-            model = (s["events_model"] or s["peer_claude_model"]) if item["kind"] == "perm_answer" else (
-                s["events_model"] if item["kind"] == "run_event" and s["events_model"] else s["claude_model"])
-            if item.get("sel_model"):
-                model = item["sel_model"]
+            model, _why = claude_model_for(s, item["kind"], item.get("sel_model"))
             return run_claude(prompt, self.root, model, item.get("sel_effort") or s["claude_effort"], session_id=session_id,
                               system_append=self.static_prompt(), budget=budget, timeout_s=timeout_s,
                               env=env, job=job)
