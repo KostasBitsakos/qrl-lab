@@ -78,27 +78,88 @@ def test_over_pace_goes_to_other_provider_or_waits(tmp_path, monkeypatch):
     cool = wins(10, 5, 0.5)
     table = {"claude": hot, "codex": cool}
     with patch.object(G, "windows", side_effect=lambda p, *a, **k: table[p]):
-        assert d.provider_order(job(), running_local=0)[0] == ["codex"]       # unforced: switches provider
-        assert d.provider_order(job(forced="claude"), running_local=0) == ([], ["claude"])  # pinned: waits
-        assert d._startable(job(forced="claude")) is False and "7ημ" in d.gov_reason
+        assert d.provider_order(job())[0] == ["codex"]                        # unforced: switches provider
+        assert d.provider_order(job(forced="claude")) == ([], ["claude"])     # pinned: waits
+        assert d._admit(job(forced="claude")) is False and "7ημ" in d.gov_reason
+        # the governor never changes provider state: only a real limit error does
+        assert d.dd.provider("claude")["state"] == "ok" and d.dd.available("claude")
         table["codex"] = hot
-        assert d.provider_order(job(), running_local=0)[0] == []
-        assert d._startable(job()) is False                                   # silent wait, nothing posted
-        assert d.provider_order(job("message"), running_local=0)[0] == ["claude", "codex"]  # chat is never stranded
+        assert d.provider_order(job())[0] == []
+        assert d._admit(job()) is False                                       # silent wait, nothing posted
+        assert d.provider_order(job("message"))[0] == ["claude", "codex"]     # chat is never stranded
+        assert d.dd.available("claude") and d.dd.available("codex")
 
 
 def test_governor_off_switch(tmp_path, monkeypatch):
     d = make(tmp_path, monkeypatch)
     d.dd.set("governor_enabled", "0")
     with patch.object(G, "windows", return_value=wins(99, 99, 0.1)):
-        assert d.provider_order(job(), running_local=0)[0] == ["claude", "codex"]
+        assert d.provider_order(job())[0] == ["claude", "codex"]
 
 
-def test_unknown_usage_one_optional_job_at_a_time(tmp_path, monkeypatch):
+def test_unknown_usage_one_optional_job_per_provider(tmp_path, monkeypatch):
     d = make(tmp_path, monkeypatch)
     with patch.object(G, "windows", return_value={}):
-        assert d._startable(job(), 0) is True
-        assert d._startable(job(), 1) is False
+        assert d._admit(job(forced="claude")) is True       # reserves a 'starting' row
+        assert d._admit(job(forced="claude")) is False      # same provider: the slot is taken
+        assert d._admit(job(forced="codex")) is True        # the other provider is idle: per-provider rule
+        assert d._admit(job(forced="codex")) is False
+
+
+def test_reserve_counts_by_lane_not_by_kind(tmp_path, monkeypatch):
+    d = make(tmp_path, monkeypatch)
+    def row(lane, status, kind="x"):
+        d.dd.conn.execute("INSERT INTO tasks(started, kind, provider, status, lane) VALUES (?,?,?,?,?)",
+                          (D.now_iso(), kind, "claude", status, lane))
+    row("chat", "running", "message")                         # chat does not count
+    assert d.dd.reserve("job", "T", [], "claude", "worker", cap=1) is not None
+    row("worker", "running", "perm_answer")                   # any non-chat lane counts, whatever its kind
+    assert d.dd.reserve("job", "T", [], "claude", "worker", cap=1) is None
+    d.dd.conn.execute("DELETE FROM tasks WHERE lane='worker'")
+    row("peer", "running", "peer")
+    assert d.dd.reserve("job", "T", [], "claude", "worker", cap=1) is None
+    d.dd.conn.execute("DELETE FROM tasks WHERE lane='peer' OR status='starting'")
+    row(None, "running", "decision")                          # rows from before B2 (no lane) count as optional
+    assert d.dd.reserve("job", "T", [], "claude", "worker", cap=1) is None
+    assert d.dd.reserve("job", "T", [], "claude", "worker", cap=None) is not None   # no rule -> still recorded
+
+
+def test_two_threads_ask_for_the_last_slot_exactly_one_gets_it(tmp_path, monkeypatch):
+    import threading
+    make(tmp_path, monkeypatch)
+    for rnd in range(10):
+        got, barrier = [], threading.Barrier(2)
+        def worker(lane):
+            with D.DispatchDB(str(tmp_path / "dispatch.db")) as dd:   # its own connection, like worker and peer threads
+                barrier.wait()
+                got.append(dd.reserve("job", "T", [], f"p{rnd}", lane, cap=1))
+        ts = [threading.Thread(target=worker, args=(ln,)) for ln in ("worker", "peer")]
+        [t.start() for t in ts]
+        [t.join() for t in ts]
+        assert sorted(g is None for g in got) == [False, True], got
+    with D.DispatchDB(str(tmp_path / "dispatch.db")) as dd:
+        assert dd.conn.execute("SELECT COUNT(*) FROM tasks WHERE status='starting'").fetchone()[0] == 10
+
+
+def test_reservation_is_released_and_aged_out(tmp_path, monkeypatch):
+    d = make(tmp_path, monkeypatch)
+    tid = d.dd.reserve("job", "T", [], "claude", "worker", cap=1)
+    assert d.dd.reserve("job", "T", [], "claude", "worker", cap=1) is None
+    d.dd.release(tid)
+    assert d.dd.reserve("job", "T", [], "claude", "worker", cap=1) is not None
+    d.dd.conn.execute("UPDATE tasks SET started=? WHERE status='starting'", (D.iso_at(time.time() - 3600),))
+    assert d.dd.reserve("job", "T", [], "claude", "worker", cap=1) is not None   # an orphan 'starting' row expires
+
+
+def test_percentage_without_reset_pace_unknown_but_limits_apply():
+    no_reset = {"five_hour": w(10, NOW + 3600), "seven_day": dict(w(50, None))}
+    v, _, cap, daily = G.assess("optional", no_reset, NOW, S)
+    assert v == "go" and cap == 1 and daily == 40                    # conservative: pace cannot be computed
+    no_reset["seven_day"]["pct"] = 91
+    assert G.assess("optional", no_reset, NOW, S)[0] == "wait"       # 90 % hard limit still applies
+    no_reset["seven_day"]["pct"] = 50
+    no_reset["five_hour"]["pct"] = 85
+    assert G.assess("optional", no_reset, NOW, S)[0] == "wait"       # 85 % five-hour limit still applies
 
 
 def test_safety_refusal_is_never_retried(tmp_path, monkeypatch):
@@ -107,11 +168,16 @@ def test_safety_refusal_is_never_retried(tmp_path, monkeypatch):
     refusal = dict(D._empty_result(), transient=True, error="I can't help with that: safety policy")
     transient = dict(D._empty_result(), transient=True, error="overloaded")
     ok_ = dict(D._empty_result(), ok=True)
+    conn = dict(D._empty_result(), transient=True, error="connect ECONNREFUSED: connection refused")
+    assert not D.REFUSAL_RE.search(conn["error"]) and D.REFUSAL_RE.search("Permission denied by policy")
+    assert not D.REFUSAL_RE.search("EACCES: permission denied, open 'x'")
     monkeypatch.setenv("QRL_TRANSIENT_WAIT", "0")
     with patch.object(D.time, "sleep"), patch.object(d, "_run_provider", side_effect=[refusal, ok_]) as run:
         assert not d._attempt("claude", item, [], None)["ok"] and run.call_count == 1
     with patch.object(D.time, "sleep"), patch.object(d, "_run_provider", side_effect=[transient, ok_]) as run:
         assert d._attempt("claude", item, [], None)["ok"] and run.call_count == 2
+    with patch.object(D.time, "sleep"), patch.object(d, "_run_provider", side_effect=[conn, ok_]) as run:
+        assert d._attempt("claude", item, [], None)["ok"] and run.call_count == 2   # "connection refused" IS retried
     d.dd.set("max_retries", "0")
     with patch.object(D.time, "sleep"), patch.object(d, "_run_provider", side_effect=[transient, ok_]) as run:
         assert not d._attempt("claude", item, [], None)["ok"] and run.call_count == 1

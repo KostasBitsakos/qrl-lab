@@ -941,12 +941,46 @@ def test_governor_and_parallelism_with_reported_usage():
     ok("governor + parallelism: reported usage drives provider choice; unknown usage -> one job; fresh usage -> two")
 
 
+def test_held_job_does_not_block_the_queue_and_peer_requeues():
+    """A job pinned to an over-pace provider stays queued (nothing posted, provider state untouched) while the next
+    job, for the other provider, still starts in the same tick; a peer that loses the last slot goes back to queued."""
+    d = live(fresh_dispatcher())
+    d.dd.set("governor_enabled", "1")
+    d.dd.set("max_workers", "2")
+    shutil.rmtree(os.path.join(HOME, ".codex"), ignore_errors=True)
+    D.governor._codex_memo.clear()
+    d.dd.save_limits("claude", [{"rateLimitType": "seven_day", "utilization": 0.8, "status": "allowed",
+                                 "resetsAt": int(time.time()) + 6 * 86400},
+                                {"rateLimitType": "five_hour", "utilization": 0.1, "status": "allowed",
+                                 "resetsAt": int(time.time()) + 3600}])
+    tid = LabDB().researcher_send("δουλειές")
+    held = d.work.create("worker", "spawn", "Pinned Claude job", "x", thread_id=tid, reply_to=tid, provider="claude",
+                         status="queued")
+    free = d.work.create("worker", "spawn", "Codex job", "y", thread_id=tid, reply_to=tid, provider="codex",
+                         status="queued")
+    queue("codex", {"mode": "ok", "match": "Codex job", "sleep": 3, "text": "codex ok"})
+    d.tick()
+    wait_until(lambda: n_tasks(d, "codex") == 1, what="the second job starts although the first is held")
+    assert d.work.job(held)["status"] == "queued" and n_tasks(d, "claude") == 0 and not calls("claude")
+    assert d.dd.available("claude"), "the governor never marks a provider exhausted"
+    # a peer asks for codex while a worker holds its only slot (unknown usage -> cap 1): it is re-queued, not failed
+    d.dd.conn.execute("INSERT INTO peer_requests(id, ts, from_provider, to_provider, key, major, prompt, status)"
+                      " VALUES ('P-T','2026-11-05T00:00:00','claude','codex',NULL,0,'q','queued')")
+    req = d.dd.peer_claim()
+    assert req and d.dd.reserve("peer", "peer:x", [req["id"]], "codex", "peer", cap=1) is None
+    d.dd.peer_requeue(req["id"])
+    assert d.dd.conn.execute("SELECT status FROM peer_requests WHERE id='P-T'").fetchone()[0] == "queued"
+    d.dd.conn.execute("UPDATE jobs SET status='cancelled' WHERE id=?", (held,))
+    drain(d)
+    ok("a governor-held job stays queued and does not block later jobs; provider state untouched; peer re-queued")
+
+
 TESTS = [test_run_events_full_request_set, test_retry_attempt_accounting_and_resume_policy,
          test_resume_rejection_before_work_only, test_peer_context_and_ttl_limits, test_claude_reply_and_resume, test_failover_on_quota, test_both_exhausted_then_resume,
          test_choice_mention_status_and_errors, test_paid_credits_guard, test_decisions_and_run_events, test_peers,
          test_md_index, test_parse_reset, test_panel_and_installer, test_edit_freeze, test_headless_permission_roundtrip,
          test_work_board, test_parallel_lanes, test_max_workers_cancel_heartbeat, test_escalation_debounce,
-         test_governor_and_parallelism_with_reported_usage]
+         test_governor_and_parallelism_with_reported_usage, test_held_job_does_not_block_the_queue_and_peer_requeues]
 
 if __name__ == "__main__":
     print(f"QRL-Lab v0.3 tests in {TMP}")

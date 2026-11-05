@@ -8,10 +8,8 @@ measurement is «unknown»: conservative mode (one optional run at a time per pr
 
 Windows are dicts {pct (0-100|None), reset (epoch|None), as_of (epoch|None), source}."""
 import os
-import sqlite3
 import sys
 import time
-from contextlib import closing
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import usage_limits as U  # noqa: E402
@@ -96,8 +94,11 @@ def _known(w, now, stale_s):
     return now - w["as_of"] <= stale_s
 
 
-def decide(role, wins, now, s, running_optional=0, runs_today=None):
-    """-> (verdict, reason). verdict: 'go' | 'wait'. role: 'chat' | 'optional'. `s` = settings (strings ok)."""
+def assess(role, wins, now, s):
+    """Read-only admission verdict from usage alone -> (verdict, reason, cap, daily_cap).
+    verdict 'go'|'wait'. `cap` = max optional runs at once on this provider (None = no concurrency rule) and `daily_cap`
+    = max runs per 24 h (None = none); both apply only in conservative mode (usage unknown/stale, or no known weekly pace)
+    and are enforced by the caller inside its admission transaction (dispatcher.DispatchDB.reserve)."""
     stale_s = float(s["usage_stale_h"]) * 3600
     five, week = wins.get("five_hour"), wins.get("seven_day")
     k5, k7 = _known(five, now, stale_s), _known(week, now, stale_s)
@@ -105,35 +106,27 @@ def decide(role, wins, now, s, running_optional=0, runs_today=None):
         hard = float(s["chat_hard_pct"])
         for name, w, k in (("5ω", five, k5), ("7ημ", week, k7)):
             if k and w["pct"] >= hard:
-                return "wait", f"{name} {w['pct']:.0f}% ≥ chat_hard_pct {hard:.0f}%"
-        return "go", "ok"
+                return "wait", f"{name} {w['pct']:.0f}% ≥ chat_hard_pct {hard:.0f}%", None, None
+        return "go", "ok", None, None
     if k5 and five["pct"] >= float(s["five_hour_max_pct"]):
-        return "wait", f"5ω {five['pct']:.0f}% ≥ {float(s['five_hour_max_pct']):.0f}%"
+        return "wait", f"5ω {five['pct']:.0f}% ≥ {float(s['five_hour_max_pct']):.0f}%", None, None
+    pace = None
     if k7:
         pace = pace_pct(week.get("reset"), now)
         if week["pct"] >= float(s["optional_hard_pct"]):
-            return "wait", f"7ημ {week['pct']:.0f}% ≥ optional_hard_pct {float(s['optional_hard_pct']):.0f}%"
+            return "wait", f"7ημ {week['pct']:.0f}% ≥ optional_hard_pct {float(s['optional_hard_pct']):.0f}%", None, None
         if pace is not None and week["pct"] > pace + float(s["pace_margin_pct"]):
-            return "wait", (f"7ημ {week['pct']:.0f}% > ρυθμός {pace:.0f}% + {float(s['pace_margin_pct']):.0f}%")
-    if not (k5 and k7):
-        if running_optional >= 1:
-            return "wait", "άγνωστη/παλιά χρήση: ένα προαιρετικό job τη φορά"
-        cap = int(s["unknown_daily_runs"])
-        if runs_today is not None and runs_today >= cap:
-            return "wait", f"άγνωστη χρήση: {runs_today} εκτελέσεις σήμερα ≥ όριο {cap}"
-    return "go", "ok"
+            return "wait", (f"7ημ {week['pct']:.0f}% > ρυθμός {pace:.0f}% + {float(s['pace_margin_pct']):.0f}%"), None, None
+    if not (k5 and k7) or pace is None:   # a percentage without a known reset: pace unknown, limits above still apply
+        return "go", "συντηρητικά: άγνωστη/παλιά χρήση ή ρυθμός", 1, int(s["unknown_daily_runs"])
+    return "go", "ok", None, None
 
 
-def counts(dispatch_db, provider, now=None):
-    """-> (running optional runs, runs started in the last 24 h) for the provider, from dispatch.db.tasks (read-only)."""
-    import datetime as dt
-    now = time.time() if now is None else now
-    since = dt.datetime.fromtimestamp(now - 86400, dt.timezone.utc).isoformat()
-    try:
-        with closing(sqlite3.connect("file:" + os.path.abspath(dispatch_db) + "?mode=ro", uri=True, timeout=1)) as db:
-            running = db.execute("SELECT COUNT(*) FROM tasks WHERE provider=? AND status='running' AND kind IN"
-                                 " ('job','peer','run_event')", (provider,)).fetchone()[0]
-            today = db.execute("SELECT COUNT(*) FROM tasks WHERE provider=? AND started>=?", (provider, since)).fetchone()[0]
-            return running, today
-    except sqlite3.Error:
-        return 0, None
+def decide(role, wins, now, s, running_optional=0, runs_today=None):
+    """-> (verdict, reason): `assess` plus the concurrency/daily caps checked against the given counts (pure helper)."""
+    verdict, reason, cap, daily = assess(role, wins, now, s)
+    if verdict == "go" and cap is not None and running_optional >= cap:
+        return "wait", "άγνωστη/παλιά χρήση: ένα προαιρετικό job τη φορά"
+    if verdict == "go" and daily is not None and runs_today is not None and runs_today >= daily:
+        return "wait", f"άγνωστη χρήση: {runs_today} εκτελέσεις σήμερα ≥ όριο {daily}"
+    return verdict, reason

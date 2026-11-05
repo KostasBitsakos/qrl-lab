@@ -229,7 +229,7 @@ def rate_rows(db=DISPATCH_DB, now=None):
     for hours in (1, 24):
         since = dt.datetime.fromtimestamp(now - hours * 3600, dt.timezone.utc).isoformat()
         for r in _rows(db, "SELECT provider, COUNT(*) AS n, ROUND(COALESCE(SUM(cost_usd),0),2) AS usd FROM tasks"
-                           " WHERE started >= ? GROUP BY provider", (since,)):
+                           " WHERE started >= ? AND status!='released' GROUP BY provider", (since,)):
             out.append({"window": f"{hours} ω", "provider": r["provider"], "runs": r["n"],
                         "usd": r["usd"] if r["provider"] == "claude" else None})
     return out
