@@ -30,6 +30,12 @@ for sub in ("tools", "dashboard", "docs", ".streamlit", "prompts", "deploy", ".c
         shutil.copytree(os.path.join(KIT, sub), os.path.join(LAB, sub))
 for f in ("CLAUDE.md", "AGENTS.md"):
     shutil.copy(os.path.join(KIT, f), os.path.join(LAB, f))
+# Hermetic knowledge sources: convo_context.relevant() reads these; the real docs must not leak into prompts.
+os.makedirs(os.path.join(LAB, "docs"), exist_ok=True)
+for _f, _txt in (("DECISIONS.md", "# Decisions (test fixture)\n"), ("researcher_requirements.md", "# Requirements (test fixture)\n"),
+                 ("index.json", "[]")):
+    with open(os.path.join(LAB, "docs", _f), "w", encoding="utf-8") as _fh:
+        _fh.write(_txt)
 os.makedirs(FAKE)
 os.makedirs(HOME)
 for cli in ("claude", "codex"):
@@ -270,7 +276,8 @@ def test_choice_mention_status_and_errors():
     queue("claude", {"mode": "ok", "text": "Ζήτησα έγκριση.\nSTATUS: waiting_approval"})
     assert d.once() == "done"
     p = prompt_of(calls("claude")[0])
-    assert "ρώτα τον scholar" in p and "@claude" not in p and "asked for Claude" in p
+    new_input = p.split("## New input\n", 1)[1].split("\n\n## ", 1)[0]  # memory pointers may quote the raw message
+    assert "ρώτα τον scholar" in new_input and "@claude" not in new_input and "asked for Claude" in p
     assert db.message(m2)["status"] == "waiting_approval"
     assert "STATUS" not in thread_bodies(db, m2)[-1]
     # a non-quota failure is reported and does not spend the other model's quota
