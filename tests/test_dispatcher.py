@@ -883,11 +883,70 @@ def test_escalation_debounce():
     ok("escalation debounce: routine notes max 1 wake per window; urgent and final notes immediate")
 
 
+def n_tasks(d, provider):
+    return d.dd.conn.execute("SELECT COUNT(*) FROM tasks WHERE provider=?", (provider,)).fetchone()[0]
+
+
+def write_codex_rollout(primary, secondary, secondary_reset_in=6 * 86400):
+    """A Codex rollout record as the real CLI writes it (token_count with rate_limits), under the test HOME."""
+    d = os.path.join(HOME, ".codex", "sessions", "2026", "11")
+    os.makedirs(d, exist_ok=True)
+    now = time.time()
+    rec = {"timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(now)),
+           "payload": {"type": "token_count", "rate_limits": {
+               "primary": {"used_percent": primary, "window_minutes": 300, "resets_at": now + 3600},
+               "secondary": {"used_percent": secondary, "window_minutes": 10080, "resets_at": now + secondary_reset_in},
+               "plan_type": "pro"}}}
+    with open(os.path.join(d, "rollout-test.jsonl"), "w", encoding="utf-8") as f:
+        f.write(json.dumps(rec) + "\n")
+    D.governor._codex_memo.clear()
+
+
+def test_governor_and_parallelism_with_reported_usage():
+    """A rate_limit_event with a percentage (fake Claude CLI) drives the governor; with unknown Codex usage only one
+    optional job runs at a time; fresh Codex rollout usage releases the second worker (governor + max_workers together)."""
+    d = live(fresh_dispatcher())
+    d.dd.set("governor_enabled", "1")
+    d.dd.set("max_workers", "2")
+    db = LabDB()
+    shutil.rmtree(os.path.join(HOME, ".codex"), ignore_errors=True)
+    D.governor._codex_memo.clear()
+    root = db.researcher_send("Δύο δουλειές")
+    # Claude reports 80 % weekly use with 6 days to reset (pace ~14 %): over pace + 10. The chat answer is never held back.
+    queue("claude", {"mode": "ok", "text": "Ξεκινώ.", "window": "seven_day", "util": 0.8, "reset_in": 6 * 86400,
+                     "sh": f"{WORK} spawn --title 'Alpha job' --brief 'alpha' && {WORK} spawn --title 'Beta job' --brief 'beta'"})
+    d.tick()
+    wait_until(lambda: any(b.startswith("Κώστα,\n\nΞεκινώ.") for b in thread_bodies(db, root)), what="chat reply")
+    wait_until(lambda: alive_lanes(d) == [] and len(d.work.queued_spawns()) == 2, what="two queued spawns")
+    saved = {r["window"]: r for r in d.dd.limits("claude")}
+    assert abs(saved["seven_day"]["utilization"] - 0.8) < 1e-9                       # the reported percentage was stored
+    wins = D.governor.windows("claude", D.dispatch_db_path(LAB), os.path.join(LAB, ".lab", "usage", "claude.json"))
+    assert abs(wins["seven_day"]["pct"] - 80) < 1e-9
+    # Codex usage unknown -> conservative: exactly one of the two jobs runs (on Codex, Claude is over pace)
+    queue("codex", {"mode": "ok", "match": "Alpha job", "sleep": 4, "text": "alpha ok"},
+          {"mode": "ok", "match": "Beta job", "sleep": 1, "text": "beta ok"})
+    d.tick()
+    wait_until(lambda: alive_lanes(d) == ["worker"] and n_tasks(d, "codex") == 1, what="one worker on Codex")
+    d.tick()
+    time.sleep(0.5)
+    assert alive_lanes(d) == ["worker"] and len(d.work.queued_spawns()) == 1, "unknown Codex usage: one optional job"
+    assert n_tasks(d, "claude") == 1, "no job went to the over-pace Claude"
+    assert n_tasks(d, "codex") == 1
+    # fresh low Codex usage (5 h 5 %, weekly 10 % at 14 % pace) -> the second worker may start in parallel
+    write_codex_rollout(5.0, 10.0)
+    d.tick()
+    wait_until(lambda: n_tasks(d, "codex") == 2, what="second worker on Codex")
+    assert alive_lanes(d).count("worker") == 2 and n_tasks(d, "claude") == 1
+    drain(d)
+    ok("governor + parallelism: reported usage drives provider choice; unknown usage -> one job; fresh usage -> two")
+
+
 TESTS = [test_run_events_full_request_set, test_retry_attempt_accounting_and_resume_policy,
          test_resume_rejection_before_work_only, test_peer_context_and_ttl_limits, test_claude_reply_and_resume, test_failover_on_quota, test_both_exhausted_then_resume,
          test_choice_mention_status_and_errors, test_paid_credits_guard, test_decisions_and_run_events, test_peers,
          test_md_index, test_parse_reset, test_panel_and_installer, test_edit_freeze, test_headless_permission_roundtrip,
-         test_work_board, test_parallel_lanes, test_max_workers_cancel_heartbeat, test_escalation_debounce]
+         test_work_board, test_parallel_lanes, test_max_workers_cancel_heartbeat, test_escalation_debounce,
+         test_governor_and_parallelism_with_reported_usage]
 
 if __name__ == "__main__":
     print(f"QRL-Lab v0.3 tests in {TMP}")

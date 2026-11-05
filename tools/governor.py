@@ -20,6 +20,9 @@ WEEK_S = 7 * 86400
 FIVE_S = 5 * 3600
 KEYS = ("five_hour", "seven_day")
 CODEX_SLOT = {"primary": "five_hour", "secondary": "seven_day"}
+CODEX_GLOB = None          # tests may point this at fake rollouts; None = usage_limits.CODEX_GLOB (~/.codex/sessions)
+CODEX_TTL_S = 15.0         # the rollout scan reads files: do it at most this often (Claude's sources are cheap sqlite/json)
+_codex_memo = {}
 
 
 def pace_pct(reset, now, window_s=WEEK_S):
@@ -64,15 +67,22 @@ def codex_candidates(entries):
     return out
 
 
-def windows(provider, dispatch_db=None, claude_status=None, now=None):
-    """-> {'five_hour': w, 'seven_day': w} for the provider; missing windows are absent (= unknown)."""
+def windows(provider, dispatch_db=None, claude_status=None, now=None, ttl=None):
+    """-> {'five_hour': w, 'seven_day': w} for the provider; missing windows are absent (= unknown).
+    Codex usage comes from its rollout logs (the newest token_count record), so it is as fresh as the last Codex run."""
     now = time.time() if now is None else now
     try:
         if provider == "claude":
             status = U.load_claude_status(claude_status) or {}
             status = dict(status, _dispatcher=U.load_dispatcher_usage(dispatch_db))
             return claude_candidates(status, now)
-        return codex_candidates(U.latest_codex(now))
+        ttl = CODEX_TTL_S if ttl is None else ttl
+        hit = _codex_memo.get("v")
+        if hit and ttl > 0 and time.time() - hit[0] < ttl and hit[1] == CODEX_GLOB:
+            return hit[2]
+        out = codex_candidates(U.latest_codex(now, CODEX_GLOB or U.CODEX_GLOB))
+        _codex_memo["v"] = (time.time(), CODEX_GLOB, out)
+        return out
     except Exception:  # usage is advisory: a failing source means «unknown», never a crash
         return {}
 

@@ -60,7 +60,6 @@ SETTINGS_META = {
     "codex_resume_window_s": ("Context", "Παράθυρο resume Codex (s)", ""),
     "thread_messages": ("Context", "Μηνύματα νήματος στο πακέτο", ""),
     "state_max_lines": ("Context", "Μέγιστες γραμμές STATE", ""),
-    "state_max_bytes": ("Context", "Μέγιστο μέγεθος STATE (bytes)", "Πάνω από αυτό ο Πάρις ζητά συμπύκνωση."),
     "governor_enabled": ("Governor", "Governor ενεργός", "0 = χωρίς έλεγχο ρυθμού/ορίων (μόνο τα πραγματικά όρια του παρόχου)."),
     "pace_margin_pct": ("Governor", "Περιθώριο ρυθμού (%)", "Προαιρετική δουλειά αν η εβδομαδιαία χρήση ≤ ρυθμός + αυτό."),
     "optional_hard_pct": ("Governor", "Σκληρό όριο προαιρετικών (%)", "Εβδομαδιαία χρήση ≥ αυτό: καμία προαιρετική δουλειά."),

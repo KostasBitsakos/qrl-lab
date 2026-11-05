@@ -127,14 +127,26 @@ def test_peer_requests_of_held_provider_stay_queued(tmp_path, monkeypatch):
     assert d.dd.peer_claim()["id"] == "P1"
 
 
-def test_state_bytes_limit_is_a_note_in_the_pack(tmp_path, monkeypatch):
-    d = make(tmp_path, monkeypatch)
-    (tmp_path / "docs").mkdir()
-    (tmp_path / "docs" / "STATE.md").write_text("x" * 9000 + "\n", encoding="utf-8")
-    (tmp_path / "prompts").mkdir()
-    (tmp_path / "prompts" / "coordinator.md").write_text("rules", encoding="utf-8")
-    item = dict(job(), text="t", reply_to="M-1", job_id="J1", kind="job")
-    p = d.build_prompt("claude", item, True, [])
-    assert "STATE.md is 9001 bytes" in p and "8192" in p
-    (tmp_path / "docs" / "STATE.md").write_text("ok\n", encoding="utf-8")
-    assert "bytes: condense" not in d.build_prompt("claude", item, True, [])
+def test_codex_usage_is_read_from_rollout_logs(tmp_path, monkeypatch):
+    now = time.time()
+    d = tmp_path / "sessions" / "2026" / "11"
+    d.mkdir(parents=True)
+    rec = {"timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(now - 30)),
+           "payload": {"type": "token_count", "rate_limits": {
+               "primary": {"used_percent": 7.0, "window_minutes": 300, "resets_at": now + 3600},
+               "secondary": {"used_percent": 31.0, "window_minutes": 10080, "resets_at": now + 3.5 * 86400}}}}
+    (d / "rollout-x.jsonl").write_text(json.dumps(rec) + "\n", encoding="utf-8")
+    monkeypatch.setattr(G, "CODEX_GLOB", str(tmp_path / "sessions" / "**" / "rollout-*.jsonl"))
+    G._codex_memo.clear()
+    got = G.windows("codex", now=now, ttl=0)
+    assert got["five_hour"]["pct"] == 7.0 and got["seven_day"]["pct"] == 31.0
+    assert 49 < G.pace_pct(got["seven_day"]["reset"], now) < 51
+    assert G.decide("optional", got, now, S)[0] == "go"             # 31 <= 50 + 10
+    rec["payload"]["rate_limits"]["secondary"]["used_percent"] = 70.0       # a later Codex run reports more use
+    rec["timestamp"] = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(now - 5))
+    (d / "rollout-x.jsonl").write_text(json.dumps(rec) + "\n", encoding="utf-8")
+    assert G.windows("codex", now=now, ttl=0)["seven_day"]["pct"] == 70.0   # no restart needed: read at decision time
+    assert G.decide("optional", G.windows("codex", now=now, ttl=0), now, S)[0] == "wait"
+    monkeypatch.setattr(G, "CODEX_GLOB", str(tmp_path / "none" / "*.jsonl"))
+    G._codex_memo.clear()
+    assert G.windows("codex", now=now, ttl=0) == {}                          # no log -> unknown, never a guess

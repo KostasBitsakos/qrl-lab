@@ -88,7 +88,6 @@ DEFAULTS = {
     "codex_resume_window_s": "900",
     "thread_messages": "12",          # thread messages included in a fresh context pack
     "state_max_lines": "150",
-    "state_max_bytes": "8192",        # docs/STATE.md above this: the context pack asks to condense it (B2, D2)
     # governor (v0.5.1 §5): pace-based admission, see tools/governor.py
     "governor_enabled": "1",
     "pace_margin_pct": "10",          # optional run if weekly use <= pace + this
@@ -776,10 +775,6 @@ class Dispatcher:
                                                                               "in prompts/STATE.template.md)"))
             if n_lines > int(s["state_max_lines"]):
                 note_lines.append(f"docs/STATE.md has {n_lines} lines: condense it to ≤{s['state_max_lines']}.")
-            n_bytes = len(state.encode("utf-8")) if state else 0
-            if n_bytes > int(s["state_max_bytes"]):
-                note_lines.append(f"docs/STATE.md is {n_bytes} bytes: condense it to ≤{s['state_max_bytes']} "
-                                  f"(move detail to docs/journal/ or docs/DECISIONS.md, keep a pointer).")
             hist = self.lab.thread(item["thread_id"])
             hist = [m for m in hist if m["id"] not in item["msg_ids"]][-int(s["thread_messages"]):]
             in_pack |= {m["id"] for m in hist}
