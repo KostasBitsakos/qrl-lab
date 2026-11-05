@@ -906,80 +906,92 @@ def write_codex_rollout(primary, secondary, secondary_reset_in=6 * 86400):
 def test_governor_and_parallelism_with_reported_usage():
     """A rate_limit_event with a percentage (fake Claude CLI) drives the governor; with unknown Codex usage only one
     optional job runs at a time; fresh Codex rollout usage releases the second worker (governor + max_workers together)."""
+    saved = os.environ.get("QRL_LAB_DIR")
     os.environ["QRL_LAB_DIR"] = LAB   # other test modules overwrite this at import; LabDB() must open THIS lab
-    d = live(fresh_dispatcher())
-    d.dd.set("governor_enabled", "1")
-    d.dd.set("max_workers", "2")
-    db = LabDB()
-    shutil.rmtree(os.path.join(HOME, ".codex"), ignore_errors=True)
-    D.governor.CODEX_GLOB = os.path.join(HOME, ".codex", "sessions", "**", "rollout-*.jsonl")  # not the real ~/.codex, whatever imported usage_limits first
-    D.governor._codex_memo.clear()
-    root = db.researcher_send("Δύο δουλειές")
-    # Claude reports 80 % weekly use with 6 days to reset (pace ~14 %): over pace + 10. The chat answer is never held back.
-    queue("claude", {"mode": "ok", "text": "Ξεκινώ.", "window": "seven_day", "util": 0.8, "reset_in": 6 * 86400,
-                     "sh": f"{WORK} spawn --title 'Alpha job' --brief 'alpha' && {WORK} spawn --title 'Beta job' --brief 'beta'"})
-    d.tick()
-    wait_until(lambda: any(b.startswith("Κώστα,\n\nΞεκινώ.") for b in thread_bodies(db, root)), what="chat reply")
-    wait_until(lambda: alive_lanes(d) == [] and len(d.work.queued_spawns()) == 2, what="two queued spawns")
-    saved = {r["window"]: r for r in d.dd.limits("claude")}
-    assert abs(saved["seven_day"]["utilization"] - 0.8) < 1e-9                       # the reported percentage was stored
-    wins = D.governor.windows("claude", D.dispatch_db_path(LAB), os.path.join(LAB, ".lab", "usage", "claude.json"))
-    assert abs(wins["seven_day"]["pct"] - 80) < 1e-9
-    # Codex usage unknown -> conservative: exactly one of the two jobs runs (on Codex, Claude is over pace)
-    queue("codex", {"mode": "ok", "match": "Alpha job", "sleep": 4, "text": "alpha ok"},
-          {"mode": "ok", "match": "Beta job", "sleep": 1, "text": "beta ok"})
-    d.tick()
-    wait_until(lambda: alive_lanes(d) == ["worker"] and n_tasks(d, "codex") == 1, what="one worker on Codex")
-    d.tick()
-    time.sleep(0.5)
-    assert alive_lanes(d) == ["worker"] and len(d.work.queued_spawns()) == 1, "unknown Codex usage: one optional job"
-    assert n_tasks(d, "claude") == 1, "no job went to the over-pace Claude"
-    assert n_tasks(d, "codex") == 1
-    # fresh low Codex usage (5 h 5 %, weekly 10 % at 14 % pace) -> the second worker may start in parallel
-    write_codex_rollout(5.0, 10.0)
-    d.tick()
-    wait_until(lambda: n_tasks(d, "codex") == 2, what="second worker on Codex")
-    assert alive_lanes(d).count("worker") == 2 and n_tasks(d, "claude") == 1
-    drain(d)
-    D.governor.CODEX_GLOB = None
-    ok("governor + parallelism: reported usage drives provider choice; unknown usage -> one job; fresh usage -> two")
+    try:
+        d = live(fresh_dispatcher())
+        d.dd.set("governor_enabled", "1")
+        d.dd.set("max_workers", "2")
+        db = LabDB()
+        shutil.rmtree(os.path.join(HOME, ".codex"), ignore_errors=True)
+        D.governor.CODEX_GLOB = os.path.join(HOME, ".codex", "sessions", "**", "rollout-*.jsonl")  # not the real ~/.codex, whatever imported usage_limits first
+        D.governor._codex_memo.clear()
+        root = db.researcher_send("Δύο δουλειές")
+        # Claude reports 80 % weekly use with 6 days to reset (pace ~14 %): over pace + 10. The chat answer is never held back.
+        queue("claude", {"mode": "ok", "text": "Ξεκινώ.", "window": "seven_day", "util": 0.8, "reset_in": 6 * 86400,
+                         "sh": f"{WORK} spawn --title 'Alpha job' --brief 'alpha' && {WORK} spawn --title 'Beta job' --brief 'beta'"})
+        d.tick()
+        wait_until(lambda: any(b.startswith("Κώστα,\n\nΞεκινώ.") for b in thread_bodies(db, root)), what="chat reply")
+        wait_until(lambda: alive_lanes(d) == [] and len(d.work.queued_spawns()) == 2, what="two queued spawns")
+        saved = {r["window"]: r for r in d.dd.limits("claude")}
+        assert abs(saved["seven_day"]["utilization"] - 0.8) < 1e-9                       # the reported percentage was stored
+        wins = D.governor.windows("claude", D.dispatch_db_path(LAB), os.path.join(LAB, ".lab", "usage", "claude.json"))
+        assert abs(wins["seven_day"]["pct"] - 80) < 1e-9
+        # Codex usage unknown -> conservative: exactly one of the two jobs runs (on Codex, Claude is over pace)
+        queue("codex", {"mode": "ok", "match": "Alpha job", "sleep": 4, "text": "alpha ok"},
+              {"mode": "ok", "match": "Beta job", "sleep": 1, "text": "beta ok"})
+        d.tick()
+        wait_until(lambda: alive_lanes(d) == ["worker"] and n_tasks(d, "codex") == 1, what="one worker on Codex")
+        d.tick()
+        time.sleep(0.5)
+        assert alive_lanes(d) == ["worker"] and len(d.work.queued_spawns()) == 1, "unknown Codex usage: one optional job"
+        assert n_tasks(d, "claude") == 1, "no job went to the over-pace Claude"
+        assert n_tasks(d, "codex") == 1
+        # fresh low Codex usage (5 h 5 %, weekly 10 % at 14 % pace) -> the second worker may start in parallel
+        write_codex_rollout(5.0, 10.0)
+        d.tick()
+        wait_until(lambda: n_tasks(d, "codex") == 2, what="second worker on Codex")
+        assert alive_lanes(d).count("worker") == 2 and n_tasks(d, "claude") == 1
+        drain(d)
+        D.governor.CODEX_GLOB = None
+        ok("governor + parallelism: reported usage drives provider choice; unknown usage -> one job; fresh usage -> two")
+    finally:
+        D.governor.CODEX_GLOB = None
+        os.environ["QRL_LAB_DIR"] = saved if saved is not None else LAB
+
 
 
 def test_held_job_does_not_block_the_queue_and_peer_requeues():
     """A job pinned to an over-pace provider stays queued (nothing posted, provider state untouched) while the next
     job, for the other provider, still starts in the same tick; a peer that loses the last slot goes back to queued."""
+    saved = os.environ.get("QRL_LAB_DIR")
     os.environ["QRL_LAB_DIR"] = LAB   # other test modules overwrite this at import; LabDB() must open THIS lab
-    d = live(fresh_dispatcher())
-    d.dd.set("governor_enabled", "1")
-    d.dd.set("max_workers", "2")
-    shutil.rmtree(os.path.join(HOME, ".codex"), ignore_errors=True)
-    D.governor.CODEX_GLOB = os.path.join(HOME, ".codex", "sessions", "**", "rollout-*.jsonl")  # not the real ~/.codex, whatever imported usage_limits first
-    D.governor._codex_memo.clear()
-    d.dd.save_limits("claude", [{"rateLimitType": "seven_day", "utilization": 0.8, "status": "allowed",
-                                 "resetsAt": int(time.time()) + 6 * 86400},
-                                {"rateLimitType": "five_hour", "utilization": 0.1, "status": "allowed",
-                                 "resetsAt": int(time.time()) + 3600}])
-    tid = LabDB().researcher_send("δουλειές")
-    held = d.work.create("worker", "spawn", "Pinned Claude job", "x", thread_id=tid, reply_to=tid, provider="claude",
-                         status="queued")
-    free = d.work.create("worker", "spawn", "Codex job", "y", thread_id=tid, reply_to=tid, provider="codex",
-                         status="queued")
-    queue("codex", {"mode": "ok", "match": "Codex job", "sleep": 3, "text": "codex ok"})
-    d.tick()
-    wait_until(lambda: n_tasks(d, "codex") == 1, what="the second job starts although the first is held")
-    assert d.work.job(held)["status"] == "queued" and n_tasks(d, "claude") == 0 and not calls("claude")
-    assert d.dd.available("claude"), "the governor never marks a provider exhausted"
-    # a peer asks for codex while a worker holds its only slot (unknown usage -> cap 1): it is re-queued, not failed
-    d.dd.conn.execute("INSERT INTO peer_requests(id, ts, from_provider, to_provider, key, major, prompt, status)"
-                      " VALUES ('P-T','2026-11-05T00:00:00','claude','codex',NULL,0,'q','queued')")
-    req = d.dd.peer_claim()
-    assert req and d.dd.reserve("peer", "peer:x", [req["id"]], "codex", "peer", cap=1) is None
-    d.dd.peer_requeue(req["id"])
-    assert d.dd.conn.execute("SELECT status FROM peer_requests WHERE id='P-T'").fetchone()[0] == "queued"
-    d.dd.conn.execute("UPDATE jobs SET status='cancelled' WHERE id=?", (held,))
-    drain(d)
-    D.governor.CODEX_GLOB = None
-    ok("a governor-held job stays queued and does not block later jobs; provider state untouched; peer re-queued")
+    try:
+        d = live(fresh_dispatcher())
+        d.dd.set("governor_enabled", "1")
+        d.dd.set("max_workers", "2")
+        shutil.rmtree(os.path.join(HOME, ".codex"), ignore_errors=True)
+        D.governor.CODEX_GLOB = os.path.join(HOME, ".codex", "sessions", "**", "rollout-*.jsonl")  # not the real ~/.codex, whatever imported usage_limits first
+        D.governor._codex_memo.clear()
+        d.dd.save_limits("claude", [{"rateLimitType": "seven_day", "utilization": 0.8, "status": "allowed",
+                                     "resetsAt": int(time.time()) + 6 * 86400},
+                                    {"rateLimitType": "five_hour", "utilization": 0.1, "status": "allowed",
+                                     "resetsAt": int(time.time()) + 3600}])
+        tid = LabDB().researcher_send("δουλειές")
+        held = d.work.create("worker", "spawn", "Pinned Claude job", "x", thread_id=tid, reply_to=tid, provider="claude",
+                             status="queued")
+        free = d.work.create("worker", "spawn", "Codex job", "y", thread_id=tid, reply_to=tid, provider="codex",
+                             status="queued")
+        queue("codex", {"mode": "ok", "match": "Codex job", "sleep": 3, "text": "codex ok"})
+        d.tick()
+        wait_until(lambda: n_tasks(d, "codex") == 1, what="the second job starts although the first is held")
+        assert d.work.job(held)["status"] == "queued" and n_tasks(d, "claude") == 0 and not calls("claude")
+        assert d.dd.available("claude"), "the governor never marks a provider exhausted"
+        # a peer asks for codex while a worker holds its only slot (unknown usage -> cap 1): it is re-queued, not failed
+        d.dd.conn.execute("INSERT INTO peer_requests(id, ts, from_provider, to_provider, key, major, prompt, status)"
+                          " VALUES ('P-T','2026-11-05T00:00:00','claude','codex',NULL,0,'q','queued')")
+        req = d.dd.peer_claim()
+        assert req and d.dd.reserve("peer", "peer:x", [req["id"]], "codex", "peer", cap=1) is None
+        d.dd.peer_requeue(req["id"])
+        assert d.dd.conn.execute("SELECT status FROM peer_requests WHERE id='P-T'").fetchone()[0] == "queued"
+        d.dd.conn.execute("UPDATE jobs SET status='cancelled' WHERE id=?", (held,))
+        drain(d)
+        D.governor.CODEX_GLOB = None
+        ok("a governor-held job stays queued and does not block later jobs; provider state untouched; peer re-queued")
+    finally:
+        D.governor.CODEX_GLOB = None
+        os.environ["QRL_LAB_DIR"] = saved if saved is not None else LAB
+
 
 
 TESTS = [test_run_events_full_request_set, test_retry_attempt_accounting_and_resume_policy,
