@@ -96,6 +96,7 @@ DEFAULTS = {
     "chat_hard_pct": "97",            # the chat coordinator answers until this, then fails over
     "usage_stale_h": "6",             # older/unknown usage -> conservative mode (one optional run at a time)
     "unknown_daily_runs": "40",       # runs per 24 h per provider while its usage is unknown (assumption, tunable)
+    "peer_hold_max_min": "30",        # a peer request held back by the governor this long fails (the caller is not left waiting)
     "max_retries": "1",               # transient failures retried at most this many times; a safety refusal never
 }
 RESEARCHER_KEYS = set(DEFAULTS)
@@ -175,11 +176,6 @@ def lab_root():
 
 def now_iso():
     return dt.datetime.now(dt.timezone.utc).astimezone().isoformat(timespec="seconds")
-
-
-def iso_at(epoch):
-    """Same format as now_iso() for an epoch time (string-comparable with tasks.started)."""
-    return dt.datetime.fromtimestamp(epoch, dt.timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
 def dispatch_db_path(root=None):
@@ -335,15 +331,18 @@ class DispatchDB:
         (every lane except 'chat'; 'starting' rows younger than hold_s count) and, if allowed, insert the task row with
         status 'starting': the row IS the reservation. -> task id, or None if `cap` (concurrent) or `daily_cap`
         (per 24 h) would be exceeded. No file or network access happens inside the transaction."""
-        held, day = iso_at(time.time() - hold_s), iso_at(time.time() - 86400)
+        now = time.time()
+        held, day = now - hold_s, now - 86400   # compared as epochs: ISO strings with local offsets do not sort by time
         with self.tx() as c:
             if cap is not None:
                 n = c.execute("SELECT COUNT(*) FROM tasks WHERE provider=? AND COALESCE(lane,'worker')!='chat' AND"
-                              " (status='running' OR (status='starting' AND started>=?))", (provider, held)).fetchone()[0]
+                              " (status='running' OR (status='starting' AND CAST(strftime('%s', started) AS INTEGER)>=?))",
+                              (provider, held)).fetchone()[0]
                 if n >= cap:
                     return None
             if daily_cap is not None:
-                n = c.execute("SELECT COUNT(*) FROM tasks WHERE provider=? AND started>=? AND status!='released'",
+                n = c.execute("SELECT COUNT(*) FROM tasks WHERE provider=? AND status!='released' AND"
+                              " CAST(strftime('%s', started) AS INTEGER)>=?",
                               (provider, day)).fetchone()[0]
                 if n >= daily_cap:
                     return None
@@ -1195,6 +1194,9 @@ class Dispatcher:
                              f" check the thread, `git status` and docs/STATE.md before continuing.")
             session_id = self._session_for(item, provider)
             res = self._attempt(provider, item, notes, session_id)
+            if res.get("gov_denied"):   # a retry/failover slot was not granted: the item goes back to the queue, silently
+                self._journal(f"- {time.strftime('%H:%M')} {item['reply_to']} [{provider}] re-queued: governor denied the next attempt")
+                return "deferred"
             if self._cancelled(item):
                 self._post(item["reply_to"], f"⏹ Η εργασία {item['job_id']} σταμάτησε: ακυρώθηκε.")
                 self._set_status(item["msg_ids"], "done")
@@ -1273,20 +1275,35 @@ class Dispatcher:
         return provider == "claude" and bool(res.get("paid_credit")) and self.dd.get("allow_paid_credits") != "1"
 
     def _task_begin(self, item, provider, refs, model, session_id):
-        """The task row of the first attempt: the reservation made at admission, turned into 'running'."""
+        """Task row of one attempt -> id, or None if the governor/slot rule denies it (the caller re-queues the item).
+        The first attempt turns the reservation made at admission into 'running' (only if the row is still ours:
+        the sweeper may have released it); every other optional attempt (retry, failover) is admitted the same way."""
         r = item.get("reserved")
         if r and r["provider"] == provider and not r.get("used"):
             r["used"] = True
             if self.dd.claim_start(r["task"], refs, session_id, bool(session_id)):
                 return r["task"]
-        return self.dd.task_start(item["kind"], item["thread_id"], refs, provider, model, session_id, bool(session_id),
-                                  lane_of(item))
+            # swept meanwhile: ask again below
+        if lane_of(item) == "chat":
+            return self.dd.task_start(item["kind"], item["thread_id"], refs, provider, model, session_id,
+                                      bool(session_id), "chat")
+        cap = daily = None
+        if self.dd.get("governor_enabled") == "1":
+            verdict, _, cap, daily = self.governed(provider, item, self.dd.settings())   # one assessment per decision
+            if verdict != "go":
+                return None
+        tid = self.dd.reserve(item["kind"], item["thread_id"], refs, provider, lane_of(item), cap, daily)
+        if tid is not None and not self.dd.claim_start(tid, refs, session_id, bool(session_id)):
+            return None
+        return tid
 
     def _attempt(self, provider, item, notes, session_id):
         model = None
         t0 = time.time()
         refs = item["msg_ids"] + item["req_ids"] + ([item["job_id"]] if item.get("job_id") else [])
         task_id = self._task_begin(item, provider, refs, model, session_id)
+        if task_id is None:
+            return dict(_empty_result(), error="admission denied", gov_denied=True)
         res = self._run_provider(provider, item, notes, session_id)
         if (not res["ok"] and session_id and res.get("resume_rejected")
                 and not res["quota"] and not self._cancelled(item)):
@@ -1296,8 +1313,9 @@ class Dispatcher:
             self.dd.task_end(task_id, "retry_fresh", res, time.time() - t0, res["error"])
             self.dd.save_limits(provider, res.get("limits"))
             t0 = time.time()
-            task_id = self.dd.task_start(item["kind"], item["thread_id"], refs, provider, model, None, False,
-                                         lane_of(item))
+            task_id = self._task_begin(item, provider, refs, model, None)
+            if task_id is None:
+                return dict(res, gov_denied=True)
             session_id = None
             res = self._run_provider(provider, item, notes, None)
         if (not res["ok"] and res["transient"] and not session_id and not self._cancelled(item)
@@ -1307,8 +1325,9 @@ class Dispatcher:
             self.dd.save_limits(provider, res.get("limits"))
             time.sleep(float(os.environ.get("QRL_TRANSIENT_WAIT", "60")))
             t0 = time.time()
-            task_id = self.dd.task_start(item["kind"], item["thread_id"], refs, provider, model, None, False,
-                                         lane_of(item))
+            task_id = self._task_begin(item, provider, refs, model, None)
+            if task_id is None:
+                return dict(res, gov_denied=True)
             res = self._run_provider(provider, item, notes, None)
         status = "done" if res["ok"] else ("quota" if res["quota"] else "failed")
         self.dd.conn.execute("UPDATE tasks SET model=? WHERE id=?", (res.get("model"), task_id))
@@ -1436,8 +1455,61 @@ class Dispatcher:
             self.heartbeat()
             time.sleep(every)
 
+    def sweep(self, now=None):
+        """Free what has no living owner (v0.5.1 B2): a 'starting' task older than 5 min, a 'running' task older than its
+        timeout + 5 min (tasks), a peer request claimed but never served (peer_requests). Their jobs go back to the queue.
+        Epoch arithmetic only (SQLite strftime), no provider calls. -> number of rows freed."""
+        now = time.time() if now is None else now
+        s = self.dd.settings()
+        limits = {"peer": float(s["peer_timeout_min"]) * 60 + 300}
+        default = float(s["task_timeout_min"]) * 60 + 300
+        freed = 0
+        c = self.dd.conn
+        for t in [dict(r) for r in c.execute(
+                "SELECT id, refs, status, lane, CAST(strftime('%s', started) AS INTEGER) AS ts FROM tasks"
+                " WHERE status IN ('starting','running')")]:
+            age = now - (t["ts"] or 0)
+            if t["status"] == "starting" and age > 300:
+                c.execute("UPDATE tasks SET status='released', ended=? WHERE id=? AND status='starting'", (now_iso(), t["id"]))
+            elif t["status"] == "running" and age > limits.get(t["lane"], default):
+                c.execute("UPDATE tasks SET status='interrupted', ended=? WHERE id=? AND status='running'", (now_iso(), t["id"]))
+            else:
+                continue
+            freed += 1
+            for ref in json.loads(t["refs"] or "[]"):
+                if str(ref).startswith("J"):   # the job is not running any more: queue it again
+                    c.execute("UPDATE jobs SET status='queued', started=NULL, result='interrupted' WHERE id=? AND"
+                              " status='running' AND origin='spawn' AND cancel=0", (ref,))
+        for r in [dict(x) for x in c.execute(
+                "SELECT id, CAST(strftime('%s', ts) AS INTEGER) AS ts FROM peer_requests WHERE status='running'")]:
+            age = now - (r["ts"] or 0)
+            live = c.execute("SELECT status FROM tasks WHERE lane='peer' AND refs LIKE ? ORDER BY id DESC LIMIT 1",
+                             (f'%"{r["id"]}"%',)).fetchone()
+            if live is None or live[0] in ("released", "starting"):
+                if age > 300:   # claimed, then the worker died before it started the run
+                    c.execute("UPDATE peer_requests SET status='queued' WHERE id=? AND status='running'", (r["id"],))
+                    freed += 1
+            elif live[0] == "interrupted":   # its run was lost: do not run it twice, tell the caller
+                c.execute("UPDATE peer_requests SET status='failed', error=?, ts_done=? WHERE id=? AND status='running'",
+                          ("interrupted: the dispatcher lost this run (swept)", now_iso(), r["id"]))
+                freed += 1
+        for r in [dict(x) for x in c.execute(
+                "SELECT id, CAST(strftime('%s', ts) AS INTEGER) AS ts FROM peer_requests WHERE status='queued'")]:
+            if now - (r["ts"] or now) > float(s["peer_hold_max_min"]) * 60:   # every wait has a time limit
+                c.execute("UPDATE peer_requests SET status='failed', error=?, ts_done=? WHERE id=? AND status='queued'",
+                          (f"held back more than {s['peer_hold_max_min']} min (usage above pace or no free slot): "
+                           "ask again later or ask the other model", now_iso(), r["id"]))
+                freed += 1
+        return freed
+
     def tick(self):
         """Start what may start now: one chat run if none is running, workers up to max_workers. Never blocks."""
+        if time.time() - getattr(self, "_last_sweep", 0) >= 30:
+            self._last_sweep = time.time()
+            try:
+                self.sweep()
+            except sqlite3.Error as e:
+                print(f"dispatcher warning: sweep: {e}", file=sys.stderr, flush=True)
         for jid in self.work.cancel_requested():
             stop_job(jid)
         if self.dd.get("paused") == "1":
@@ -1482,6 +1554,10 @@ class Dispatcher:
 
 # ---------------------------------------------------------------- peers (ask the other model)
 
+class ReservationLost(Exception):
+    """The reserved task row was released (swept) before its launcher claimed it."""
+
+
 def serve_peer(root, req, task_id=None):
     with DispatchDB(dispatch_db_path(root)) as dd:
         return _serve_peer(root, req, dd, task_id)
@@ -1500,7 +1576,10 @@ def _serve_peer(root, req, dd, task_id=None):
         peer_rules = f.read()
     prompt = peer_rules + "\n\n## Request from the coordinator\n" + req["prompt"]
     t0 = time.time()
-    if not (task_id and dd.claim_start(task_id, [req["id"]], session_id, bool(session_id))):  # reserved by peer_worker
+    if task_id is not None:   # reserved by _peer_cycle: only if the row is still ours (the sweeper may have released it)
+        if not dd.claim_start(task_id, [req["id"]], session_id, bool(session_id)):
+            raise ReservationLost(req["id"])
+    else:   # inline path (ask_peer without a dispatcher)
         task_id = dd.task_start("peer", "peer:" + (key or req["id"]), [req["id"]], to, None, session_id,
                                 bool(session_id), "peer")
     if to == "claude":
@@ -1538,32 +1617,50 @@ def _peer_usage(root, dd, to):
     return verdict, cap, daily
 
 
-def _peer_held(root, dd):
-    """Providers whose peer requests wait because the governor says so (pace/limits); a peer is pinned to its target."""
-    return tuple(p for p in ("claude", "codex") if _peer_usage(root, dd, p)[0] != "go")
+def _peer_cycle(root, dd):
+    """Serve at most one queued peer request. -> True if one was handled. A request blocked by the governor or a full
+    slot goes back to the queue and is skipped (the poll looks at later requests, for other providers); one usage
+    assessment per provider and cycle."""
+    usage = {p: _peer_usage(root, dd, p) for p in ("claude", "codex")}
+    skip = {p for p, u in usage.items() if u[0] != "go"}
+    while True:
+        req = dd.peer_claim(skip=tuple(skip))
+        if req is None:
+            return False
+        to, tid, claimed = req["to_provider"], None, True
+        try:
+            if not dd.available(to):
+                p = dd.provider(to)
+                dd.peer_finish(req["id"], "failed",
+                               error=f"{LABEL[to]} is at its usage limit until {fmt_ts(p['until_ts'])}")
+                return True
+            _, cap, daily = usage[to]
+            tid = dd.reserve("peer", "peer:" + (req["key"] or req["id"]), [req["id"]], to, "peer", cap, daily)
+            if tid is None:   # the last slot was taken in the meantime: stays queued, other providers are still served
+                dd.peer_requeue(req["id"])
+                skip.add(to)
+                continue
+            claimed = False
+            serve_peer(root, req, tid)
+            return True
+        except BaseException as e:
+            # never leave a stranded request or a 'starting'/'running' row that blocks admission
+            if tid is not None:
+                dd.conn.execute("UPDATE tasks SET status='interrupted', ended=? WHERE id=? AND status IN"
+                                " ('starting','running')", (now_iso(), tid))
+            if claimed or isinstance(e, ReservationLost):
+                dd.peer_requeue(req["id"])
+            else:
+                dd.peer_finish(req["id"], "failed", error=f"internal error: {type(e).__name__}: {e}"[:300])
+            raise
 
 
 def peer_worker(root, poll=2.0):
     dd = DispatchDB(dispatch_db_path(root))
     while True:
         try:
-            req = dd.peer_claim(skip=_peer_held(root, dd))
-            if req is None:
+            if not _peer_cycle(root, dd):
                 time.sleep(poll)
-                continue
-            if not dd.available(req["to_provider"]):
-                p = dd.provider(req["to_provider"])
-                dd.peer_finish(req["id"], "failed",
-                               error=f"{LABEL[req['to_provider']]} is at its usage limit until {fmt_ts(p['until_ts'])}")
-                continue
-            _, cap, daily = _peer_usage(root, dd, req["to_provider"])
-            tid = dd.reserve("peer", "peer:" + (req["key"] or req["id"]), [req["id"]], req["to_provider"], "peer",
-                             cap, daily)
-            if tid is None:   # a worker took the last slot between the check and now: stays queued
-                dd.peer_requeue(req["id"])
-                time.sleep(poll)
-                continue
-            serve_peer(root, req, tid)
         except Exception as e:
             print(f"peer worker warning: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
             time.sleep(poll * 5)

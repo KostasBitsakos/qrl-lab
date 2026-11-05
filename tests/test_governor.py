@@ -147,7 +147,7 @@ def test_reservation_is_released_and_aged_out(tmp_path, monkeypatch):
     assert d.dd.reserve("job", "T", [], "claude", "worker", cap=1) is None
     d.dd.release(tid)
     assert d.dd.reserve("job", "T", [], "claude", "worker", cap=1) is not None
-    d.dd.conn.execute("UPDATE tasks SET started=? WHERE status='starting'", (D.iso_at(time.time() - 3600),))
+    d.dd.conn.execute("UPDATE tasks SET started=? WHERE status='starting'", ((D.dt.datetime.now().astimezone() - D.dt.timedelta(hours=1)).isoformat(timespec="seconds"),))
     assert d.dd.reserve("job", "T", [], "claude", "worker", cap=1) is not None   # an orphan 'starting' row expires
 
 
@@ -216,3 +216,138 @@ def test_codex_usage_is_read_from_rollout_logs(tmp_path, monkeypatch):
     monkeypatch.setattr(G, "CODEX_GLOB", str(tmp_path / "none" / "*.jsonl"))
     G._codex_memo.clear()
     assert G.windows("codex", now=now, ttl=0) == {}                          # no log -> unknown, never a guess
+
+
+# ---- review round 2: epochs, sweeper, admission of retries/failover, peer cleanup, one assessment, off switch
+def _iso_epoch(epoch, offset_h):
+    tz = D.dt.timezone(D.dt.timedelta(hours=offset_h))
+    return D.dt.datetime.fromtimestamp(epoch, tz).isoformat(timespec="seconds")
+
+
+def test_time_comparisons_use_epochs_not_strings(tmp_path, monkeypatch):
+    d = make(tmp_path, monkeypatch)
+    now = time.time()
+    # 100 s ago written at UTC-12 and 1000 s ago written at UTC+14: as STRINGS the second sorts "later" than the first
+    for age, off in ((100, -12), (1000, 14)):
+        d.dd.conn.execute("INSERT INTO tasks(started, kind, provider, status, lane) VALUES (?,?,?,?,?)",
+                          (_iso_epoch(now - age, off), "job", "claude", "starting", "worker"))
+    assert _iso_epoch(now - 1000, 14) > _iso_epoch(now - 100, -12)            # the trap
+    # hold 300 s: only the 100 s row is young enough to count -> one slot taken, cap 2 admits, cap 1 refuses
+    assert d.dd.reserve("job", "T", [], "claude", "worker", cap=1) is None
+    assert d.dd.reserve("job", "T", [], "claude", "worker", cap=2) is not None
+    # daily cap: both rows are < 24 h old, whatever their offset
+    assert d.dd.reserve("job", "T", [], "claude", "worker", daily_cap=3) is None
+
+
+def test_sweeper_frees_dead_rows_and_launcher_cannot_claim_a_swept_row(tmp_path, monkeypatch):
+    d = make(tmp_path, monkeypatch)
+    now = time.time()
+    jid = d.work.create("worker", "spawn", "J", "b", status="running")
+    stale = _iso_epoch(now - 4000, 2)
+    c = d.dd.conn
+    c.execute("INSERT INTO tasks(started, kind, refs, provider, status, lane) VALUES (?,?,?,?,?,?)",
+              (stale, "job", json.dumps([jid]), "claude", "starting", "worker"))                 # 1: starting, dead
+    c.execute("INSERT INTO tasks(started, kind, refs, provider, status, lane) VALUES (?,?,?,?,?,?)",
+              (stale, "job", json.dumps([jid]), "claude", "running", "worker"))                  # 2: running past timeout
+    c.execute("INSERT INTO tasks(started, kind, refs, provider, status, lane) VALUES (?,?,?,?,?,?)",
+              (_iso_epoch(now - 30, 2), "job", "[]", "claude", "running", "worker"))              # 3: alive, young
+    for pid, age, status in (("P-run", 400, "running"), ("P-old", 4000, "queued"), ("P-new", 30, "queued")):
+        c.execute("INSERT INTO peer_requests(id, ts, from_provider, to_provider, prompt, status) VALUES (?,?,?,?,?,?)",
+                  (pid, _iso_epoch(now - age, -5), "x", "codex", "q", status))
+    assert d.sweep(now) == 4
+    st = {r["id"]: r["status"] for r in c.execute("SELECT id, status FROM tasks")}
+    assert st == {1: "released", 2: "interrupted", 3: "running"}
+    assert d.work.job(jid)["status"] == "queued"                                    # the job is back in the queue
+    ps = {r["id"]: r["status"] for r in c.execute("SELECT id, status FROM peer_requests")}
+    assert ps == {"P-run": "queued", "P-old": "failed", "P-new": "queued"}          # claimed-never-served re-queued; hold limit
+    assert "held back" in c.execute("SELECT error FROM peer_requests WHERE id='P-old'").fetchone()[0]
+    assert d.dd.claim_start(1, [], None, False) is False                            # a launcher cannot take a swept row
+    assert d.dd.conn.execute("SELECT status FROM tasks WHERE id=1").fetchone()[0] == "released"
+
+
+def _busy_row(d, provider):
+    d.dd.conn.execute("INSERT INTO tasks(started, kind, provider, status, lane) VALUES (?,?,?,?,?)",
+                      (D.now_iso(), "job", provider, "running", "worker"))
+
+
+def test_retry_and_failover_attempts_are_admitted(tmp_path, monkeypatch):
+    d = make(tmp_path, monkeypatch)
+    item = {"kind": "job", "thread_id": "T", "msg_ids": [], "req_ids": [], "reply_to": "T", "job_id": "J9", "forced": None}
+    transient = dict(D._empty_result(), transient=True, error="overloaded")
+    with patch.object(G, "windows", return_value={}):       # unknown usage: cap 1 per provider
+        # retry: during the backoff another job takes the freed slot -> the retry is denied, the item re-queued
+        with patch.object(D.time, "sleep", side_effect=lambda *_: _busy_row(d, "claude")), \
+                patch.object(d, "_run_provider", return_value=transient) as run:
+            res = d._attempt("claude", item, [], None)
+        assert res.get("gov_denied") and run.call_count == 1
+        # failover: the other provider's slot is occupied -> not run at all
+        _busy_row(d, "codex")
+        with patch.object(d, "_run_provider") as run:
+            assert d._attempt("codex", item, [], None).get("gov_denied") and run.call_count == 0
+    # _process turns a denied attempt into a silent re-queue
+    with patch.object(d, "_attempt", return_value=dict(D._empty_result(), gov_denied=True)):
+        item["reserved"] = {"provider": "claude", "task": d.dd.reserve("job", "T", [], "claude", "worker")}
+        assert d._process(item) == "deferred"
+
+
+def test_peer_exception_after_claim_frees_the_slot_and_the_request(tmp_path, monkeypatch):
+    d = make(tmp_path, monkeypatch)
+    def req(pid, to):
+        d.dd.conn.execute("INSERT INTO peer_requests(id, ts, from_provider, to_provider, prompt, status)"
+                          " VALUES (?,?,?,?,?,?)", (pid, D.now_iso(), "x", to, "q", "queued"))
+    req("P1", "codex")
+    def boom(root, r, tid=None):                          # the run starts (row 'running'), then something breaks
+        assert d.dd.claim_start(tid, [r["id"]], None, False)
+        raise RuntimeError("boom")
+    with patch.object(G, "windows", return_value={}), patch.object(D, "serve_peer", boom):
+        try:
+            D._peer_cycle(str(tmp_path), d.dd)
+            assert False, "must re-raise"
+        except RuntimeError:
+            pass
+        assert d.dd.conn.execute("SELECT status FROM tasks WHERE lane='peer'").fetchone()[0] == "interrupted"
+        row = d.dd.conn.execute("SELECT status, error FROM peer_requests WHERE id='P1'").fetchone()
+        assert row[0] == "failed" and "boom" in row[1]
+        assert d.dd.reserve("peer", "T", [], "codex", "peer", cap=1) is not None      # the slot is free again
+        # an exception between claim and reservation re-queues the request
+        d.dd.conn.execute("DELETE FROM tasks")
+        req("P2", "codex")
+        with patch.object(d.dd, "reserve", side_effect=sqlite3.OperationalError("locked")):
+            try:
+                D._peer_cycle(str(tmp_path), d.dd)
+            except sqlite3.OperationalError:
+                pass
+        assert d.dd.conn.execute("SELECT status FROM peer_requests WHERE id='P2'").fetchone()[0] == "queued"
+
+
+def test_blocked_peer_is_skipped_and_later_requests_are_served(tmp_path, monkeypatch):
+    d = make(tmp_path, monkeypatch)
+    for i, (pid, to) in enumerate((("P1", "codex"), ("P2", "claude"))):
+        d.dd.conn.execute("INSERT INTO peer_requests(id, ts, from_provider, to_provider, prompt, status)"
+                          " VALUES (?,?,?,?,?,?)", (pid, f"2026-11-05T00:00:0{i}Z", "x", to, "q", "queued"))
+    _busy_row(d, "codex")                                 # codex has its one slot taken (unknown usage -> cap 1)
+    served = []
+    with patch.object(G, "windows", return_value={}), \
+            patch.object(D, "serve_peer", lambda root, r, tid=None: served.append(r["id"])):
+        assert D._peer_cycle(str(tmp_path), d.dd) is True
+    assert served == ["P2"]                               # the claude request behind the blocked codex one was served
+    assert d.dd.conn.execute("SELECT status FROM peer_requests WHERE id='P1'").fetchone()[0] == "queued"
+
+
+def test_one_usage_assessment_per_decision_and_off_switch(tmp_path, monkeypatch):
+    d = make(tmp_path, monkeypatch)
+    with patch.object(G, "windows", return_value={}) as win:
+        assert d._admit(job()) is True
+        assert win.call_count <= 2                        # one per provider considered, none repeated
+        win.reset_mock()
+        D._peer_cycle(str(tmp_path), d.dd)
+        assert win.call_count == 2                        # peers: one per provider per cycle
+    d.dd.set("governor_enabled", "0")
+    with patch.object(G, "windows", side_effect=AssertionError("governor must not be consulted")):
+        assert d._admit(job()) is True and d._admit(job()) is True      # no cap with the governor off
+        item = dict(job(), reply_to="T", job_id="J1")
+        assert d._task_begin(item, "claude", [], None, None) is not None
+        d.dd.conn.execute("INSERT INTO peer_requests(id, ts, from_provider, to_provider, prompt, status)"
+                          " VALUES ('P9', ?, 'x', 'codex', 'q', 'queued')", (D.now_iso(),))
+        with patch.object(D, "serve_peer", lambda root, r, tid=None: None):
+            assert D._peer_cycle(str(tmp_path), d.dd) is True

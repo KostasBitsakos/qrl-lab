@@ -67,6 +67,7 @@ SETTINGS_META = {
     "chat_hard_pct": ("Governor", "Όριο Πάρη (%)", "Ο Πάρις απαντά μέχρι εδώ, μετά εναλλαγή παρόχου."),
     "usage_stale_h": ("Governor", "Παλιά μέτρηση (ώρες)", "Παλιότερη/άγνωστη χρήση: συντηρητικά, ένα προαιρετικό job τη φορά."),
     "unknown_daily_runs": ("Governor", "Εκτελέσεις/24ω με άγνωστη χρήση", "Παραδοχή, ρυθμίζεται."),
+    "peer_hold_max_min": ("Governor", "Μέγιστη αναμονή peer (λεπτά)", "Αίτημα peer που κρατιέται τόσο, αποτυγχάνει με σαφές μήνυμα."),
     "max_retries": ("Governor", "Μέγιστες επαναλήψεις", "Παροδικό σφάλμα: τόσες φορές· άρνηση ασφαλείας: ποτέ."),
     "task_timeout_min": ("Χρόνοι", "Timeout δουλειάς (λεπτά)", ""),
     "peer_timeout_min": ("Χρόνοι", "Timeout peer (λεπτά)", ""),
@@ -227,9 +228,9 @@ def rate_rows(db=DISPATCH_DB, now=None):
     now = now or time.time()
     out = []
     for hours in (1, 24):
-        since = dt.datetime.fromtimestamp(now - hours * 3600, dt.timezone.utc).isoformat()
         for r in _rows(db, "SELECT provider, COUNT(*) AS n, ROUND(COALESCE(SUM(cost_usd),0),2) AS usd FROM tasks"
-                           " WHERE started >= ? AND status!='released' GROUP BY provider", (since,)):
+                           " WHERE CAST(strftime('%s', started) AS INTEGER) >= ? AND status!='released' GROUP BY provider",
+                       (int(now - hours * 3600),)):
             out.append({"window": f"{hours} ω", "provider": r["provider"], "runs": r["n"],
                         "usd": r["usd"] if r["provider"] == "claude" else None})
     return out
