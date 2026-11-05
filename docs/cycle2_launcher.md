@@ -73,3 +73,40 @@ Exact seed ranges, stage allocation, retry policy, checkpoint rule, scaling rule
 Engineering evidence: focused tests in `tests/test_cycle2_sandbox.py` and `tests/test_sandbox_worktrees.py`;
 legacy regression `tests/test_lab.py::test_sandbox`. All use temporary fixtures, no experiment. Review transcripts
 and handoff: `.lab/cycle2-launcher/` (key `cycle2-launcher`).
+
+## Frozen amendment του ίδιου sandbox (J109 — εκκρεμεί Claude review)
+
+Το `R-20261029-009` εγκρίνει την επιλογή σχεδιασμού, χωρίς frozen spec/hash· δεν εξουσιοδοτεί runs.
+Το νέο `kind: sandbox-amendment` υποβάλλεται ως ξεχωριστό **approval**, χωρίς `entries`, `cwd` ή dummy command.
+Το envelope έχει ακριβώς `kind`, `name`, `scope: sim`, `parent_request`, `parent_spec_hash`, `changes`, `review`.
+Το `review` παγώνει ledger, stage stop rules, όρια και concrete screening manifests. Το `changes` επιτρέπει
+ακριβώς `per_run_wall_clock_hours` (θετικό, έως 2.5h) και `cpu_hours_budget` (θετικό, έως136 και όχι μεγαλύτερο
+του αρχικού). Όλα τα υπόλοιπα πεδία του αρχικού sandbox αντιγράφονται χωρίς αλλαγή. Δεν δημιουργείται δεύτερο
+λογιστικό sandbox και δεν αλλάζουν αρχικό approval/spec, seeds, pins, expiry, affinity ή parallelism.
+
+Workflow μετά τον ανεξάρτητο Claude έλεγχο του launcher, του ledger και του static RPPO audit:
+
+1. Επαλήθευση draft με `taskset -c 4-7 .venv/bin/python .lab/j109/verify_draft.py`, έλεγχος pending για διπλό αίτημα,
+   και υποβολή του συγκεκριμένου `.lab/j109/amendment-spec.json` με `labq.py ask --kind approval --scope sim --spec ...`.
+   Η υποβολή παγώνει νέο hash. Καμία εκκίνηση/ενεργοποίηση πριν από την έγκριση του ερευνητή.
+2. Με το πραγματικό νέο εγκεκριμένο request id: `python3 tools/launch_run.py sandbox-activate-amendment
+   --request R-20261029-006 --amendment <new-approved-request-id>`. Η εντολή είναι μία γραμμή. Επανελέγχει και τα δύο
+   frozen approvals/hash, protected bytes, expiry, μηδενικά starting/running runs και ήδη χρεωμένο κόστος ≤ νέο budget.
+   Αποτυχία δεν καταγράφει μερική ενεργοποίηση. Δεν εφαρμόζει νέα όρια σε ήδη ενεργά runs.
+3. Η ενεργοποίηση προσθέτει μόνο μία εγγραφή audit `sandbox-amendment`, με original parent hash και νέο request/hash.
+   Επόμενα `sandbox-start` **και** `sandbox-status` χρησιμοποιούν πάντα `--request R-20261029-006` και επιλύουν αυτόματα
+   το effective sandbox. Δεν υπάρχει flag παράκαμψης. Άμεσο `start` ή `sandbox-start` στο amendment απορρίπτεται.
+4. Κάθε νέα κράτηση καταγράφεται αποκλειστικά στο αρχικό request. Μετρημένα παλιά κόστη, άγνωστα failed-run κόστη
+   και πλήρεις active reservations συνυπολογίζονται στην ίδια `BEGIN IMMEDIATE` συναλλαγή με effective-spec resolution,
+   budget check και insert. Το νέο run metadata κρατά parent hash, amendment request/hash και effective sandbox hash.
+   Ο supervisor επανελέγχει το frozen effective sandbox πριν spawn.
+
+Περιορισμοί: η υλοποίηση επιτρέπει μόνο ένα amendment ανά parent. Δεν υποστηρίζει chaining, rollback ή αλλαγές
+ορίων ενώ υπάρχουν ενεργά runs. Αλλοιωμένο/άγνωστο/διπλό activation, αλλαγμένο hash ή μη εγκεκριμένο request
+μπλοκάρει νέες εκκινήσεις. Τα ανά arm/stage όρια και τα scientific release gates είναι χειροκίνητη πολιτική,
+όπως το smoke gate J64· ο launcher επιβάλλει συνολικό budget/parallelism, global per-run cap, pins/seeds/expiry.
+Τα tests παραμένουν κλειδωμένα. Extension/final, original-HPA/probes και evaluators απαιτούν concrete manifest
+και κοινό stage release· άγνωστα κόστη δεν γίνονται μετρήσεις επειδή έχουν δεσμευμένο pool.
+
+Κατάσταση και στοιχεία: `.lab/j109/{GATES.md,gates.log,amendment-spec.json,snapshot.json,handoff.md}`.
+Η τεκμηρίωση περιγράφει τον μηχανισμό· δεν αποτελεί έγκριση ή καταγραφή ενεργοποίησης.

@@ -40,3 +40,40 @@ All arms use identical info, reward, 19 968 training ticks, 7 features, window 1
 - Total nominal 99.1 CPU-h, with 1.25 margin 123.8 CPU-h (worst case). The R-20261029-006 budget has 22.5 of 136 CPU-h left (113.49 used), so a NEW sandbox budget is needed. MLP rates are assumed equal to derp_hist10 (unknown).
 - Primary contrast: paired Dinos − derp_hist10 on F (traces independent of tuning) (seed-paired, bootstrap CI over seeds, same traces). Margin: "Dinos beats derp" only if CI excludes 0 and mean ≥ 5k. Power: paired sd ~24k ⇒ 8 seeds detects only ~25k gaps; smaller gaps will be reported as "not distinguishable". Secondary: V.2 vs MLP controls for the architecture claim. test13 stays locked until the researcher approves a confirmation.
 - Stop rules: ≥3 failed runs or overrun of the reservation → stop both; no retries with raised caps. Reward unchanged. No speed-up/quantum claims.
+
+## 5. Εκτελέσιμο πακέτο Σταδίου 1 (J299· M-20261101-035)
+- Κάρτα **R-20261101-005**, OPEN: `.lab/specs/R-20261101-005.json`, canonical hash
+  `47c92e56a78d637db0b24df495c6ed68a99d217fca549fc266ff039318a875d0`.
+  Η R-004 είναι εγκεκριμένη πρόταση χωρίς frozen spec. Κανένα run δεν ξεκίνησε στο J299.
+- Το `tools/spiky_stage1/build.py` παράγει το αυτοτελές `.lab/j299/parent-spec.json`·
+  το `driver.py validate` δεν εκτελεί πείραμα. Ο προηγούμενος cycle3 driver δεν άλλαξε.
+- 67 εντολές: μία P0 με τέσσερα πλήρη grids, A=9 arms×6 κοινά seeds και Dinos shuffle/newest=2×6.
+  Το ιστορικό όνομα `derp_hist10` κρατά την επιλεγμένη ρύθμιση H=3. Οι επτά υπάρχουσες ρυθμίσεις προέρχονται
+  από τα πραγματικά F child specs (`.lab/j269/children/c3-opus-F-*-s15100.json`). Τα νέα matched MLP κρατούν
+  τα optimizer flags του αντίστοιχου Dinos/V.2 με αλλαγή μόνο της τοπολογίας· δεν έχουν δικό τους tuning.
+- ΝΕΟ όριο 46,7 CPU-h, ανεξάρτητο από R-006. Οι αναλυτικές εκτιμήσεις δίνουν nominal37,40843155·
+  το 1,25× δίνει46,76053944, πάνω από τη στρογγυλοποιημένη πρόταση. Οι δεσμεύσεις κατανέμονται αναλογικά με
+  συντελεστή46,7/37,40843155 και στρογγυλοποιούνται προς τα κάτω: σύνολο46,699966 (`build.py`, spec).
+  Δεν μειώθηκαν arms/seeds. Rates από `.lab/j291/plan.py`· MLP/reference/shuffle μη μετρημένα· πρόωρο STOP πιθανό.
+- Target19968 ticks, source9984 επιπλέον σε ΚΑΘΕ transfer run (σύνολο29952). Τα transfer checkpoints μετρούν
+  target ticks: `c5_protocol.py:445-490,965,986` περνά το target `t` στο `on_ck(t)`· το P καταγράφεται χωριστά
+  (`:773-781`). Οι έλεγχοι parser/validators διακόπτονται πριν από εκπαίδευση.
+- Ο guard δεσμεύει το περιβάλλον στο7748887 και όλα τα tuning Python imports στοa4302c0, με ίδιο wrapper digest.
+  Τα προηγούμενα sandbox profiles κρατούν τα παλιά pins. Επιτρέπονται μόνο τα ακριβή hashes του manifest.
+- Εκκίνηση μόνο μετά την APPROVED συγκεκριμένη κάρτα και ταύτιση hashes, μοναδικό receipt και READY και των
+  δύο διεργασιών (driver/watchdog). Κάθε intent γράφεται πριν από το `launch_run.py`. Σειρά P0→A→ablation·
+  χωρίς L/F ή test13. Ασυμφωνία intent/DB απαιτεί audit, όχι retry.
+- Τρεις αποτυχίες, stopped/overrun run, cap/hash παράβαση ή STOP αρχείο σταματούν όλο το parent.
+  Η κατάσταση μένει STOPPING μέχρι επιβεβαίωση μηδενικών ενεργών payloads. Σφάλμα ειδοποίησης δεν διακόπτει
+  την επιτήρηση. Ελέγχονται τελικό/checkpoint JSON, endpoint/selected weights και μεταδεδομένα.
+- Ερμηνεία: εξερευνητικό val-only. Ήττα untuned MLP δεν αποδεικνύει όφελος επαναληπτικής αρχιτεκτονικής.
+  Transfer έναντι scratch αλλάζει και τη συνολική εμπειρία. Το shuffle είναι στοχαστικό στην αξιολόγηση· ήττα του
+  δεν αποδεικνύει μόνη της αξιοποίηση χρονικής σειράς. Χωρίς claim νικητή/αρχιτεκτονικής ή quantum speed-up.
+- 34 guard/regression +27 offline driver/parser/artifact tests PASS (`.lab/j299/tests-{guard,driver}.log`).
+  Έγινε έλεγχος schema με υπάρχοντα artifacts επτά arms, μόνο ως προσωρινά fixtures, χωρίς νέα αποτελέσματα.
+  Codex guard/driver και Claude APPROVE: M-20261101-040/041/042· τελικά reviews `.lab/j299/*-review.md`.
+- Μετά την έγκριση: `.venv/bin/python tools/spiky_stage1/driver.py start --request R-20261101-005`.
+  Αρχεία ελέγχου: `.lab/j299/{receipt.json,state.json,drive.log,watch.log,STOP}`. Watch heartbeat>90s σταματά
+  συντηρητικά τον driver· driver heartbeat>300s ενεργοποιεί επιτήρηση διακοπής. Όχι χειροκίνητο `drive` ή retry.
+- Τεκμηρίωση πρακτικής για locks/detached processes: https://docs.python.org/3/library/fcntl.html και
+  https://docs.python.org/3/library/subprocess.html (`flock(LOCK_EX|LOCK_NB)`, `Popen(start_new_session=True)`).

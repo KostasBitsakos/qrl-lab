@@ -2,7 +2,7 @@
 <!-- Read first by every coordinator (Claude or Codex). At most 150 lines. Facts only, each with a pointer
      (M-/R-/run id, path, URL). Update it at the end of every task that changed something. Older detail goes to
      docs/DECISIONS.md, docs/journal/ or a topic file listed in docs/INDEX.md. -->
-Last update: 2026-11-02 · by: Claude (J314) · task: knowledge base kb.py / M-20261102-020
+Last update: 2026-11-05 · by: Claude · task: v0.5.1 Β0 (`docs/QRL-Lab_v0.5.1_final_plan.md` §4)
 ## 1. Goal now
 - PhD paper: hybrid quantum–classical extension of the DInos autoscaler; simulation first, then real cluster;
   conference submission end of Nov 2026 (`docs/PLAN.md` §1, §11). Quantum work is PAUSED (`docs/rules/paused.md`).
@@ -14,6 +14,8 @@ Last update: 2026-11-02 · by: Claude (J314) · task: knowledge base kb.py / M-2
   file the sandbox request when runs start. Plan: `docs/cycle2_plan.md`, expert pack `docs/expert/` (J12, d6cfa11).
 
 ## 2. In progress (what · id · owner · next check)
+- v0.5.1 Β0 (5/11): backups `.lab/backup-v051-20261105/` (integrity ok σε αντίγραφο)· βάση κόστους `tools/cost_report.py` (28/10–2/11: 390 εκτελέσεις, ≈$148 Claude· Codex χωρίς κόστος)· crontab `cycle2_daily` σβήστηκε· Codex sandbox ΜΠΟΡΕΙ να γράψει `.claude/` και `.lab/` (v0.5 §5.3, δοκιμή με ψεύτικα αρχεία). Επόμενο: έγκριση commits ανά κατηγορία → worktree `v05` → Β1.
+- J332 (2/11, M-20261102-042/C330): ανεξάρτητη πρόταση Codex 24ωρου στο αρχικό poisson_ms, όλα9 arms/ίση συνολική εμπειρία, 10 paired confirmation seeds· draft μόνο, καμία κάρτα/εκκίνηση. ΝΕΟ budget160 CPU-h, reservations154,35+υπό όρους test5, offline guards PASS· υπάρχων driver ασύμβατος, test12/test13 κλειστά. Council/υλοποίηση πριν freeze (`.lab/c330/codex/{proposal.md,spec-draft.json,conditional-test-draft.json,sanity.json,budget-snapshot.json}`).
 - C326 (2/11, M-20261102-035): αριστερή μπάρα απλοποιήθηκε — δακτύλιοι, κάρτες «πού πάνε» και κείμενα «why» αφαιρέθηκαν· μένει μία κάρτα ανά πάροχο (μπάρες υπολοίπου 5ω/7ημ, reset, ~tokens) + κάρτα εξοικονόμησης (`dashboard/app.py:usage_rings`, `token_metrics.with_token_estimates`). Ενεργό μετά restart `qrl-dashboard`.
 - J322 (2/11, M-20261102-026 items 2,3,5,7,8): (8) `labdb.post` αρνείται απαντήσεις σε μήνυμα `editing`, ο editor του dashboard βγαίνει από το status στη DB (επιβιώνει reload)· (3) ο dispatcher τιμά πλέον τον selector `req_model/req_effort` (`route_request`, `tools/dispatcher.py`) — πριν αγνοούνταν (το διάβαζε μόνο ο παλιός deputy)· (5) `kb.py` γράφει `.lab/kb/queries.jsonl` (μόνο bytes) και η κάρτα δείχνει ΕΚΤΙΜΗΣΗ n×760−out tokens (baseline `docs/kb_eval.md`)· (7) καρτέλα Γνώση = γράφος αρχείων `tools/kb_graph_view.py`· (2) άγνωστο % δείχνει μελλοντικό reset. Ενεργά μετά restart `qrl-dashboard` + `qrl-dispatcher` (ερευνητής)· tests `tests/test_edit_hold.py`, `tests/test_kb_graph_view.py`.
 - J314 (2/11, M-20261102-020): βάση γνώσης `tools/kb.py` (`query|callers|refresh|stats|scan`, ευρετήριο FTS5 + graphify AST, χωρίς LLM, `.lab/kb/` ~62 MB, refresh ~30 s)· οδηγίες `docs/rules/kb.md`, μέτρηση 15 ερωτήσεων `docs/kb_eval.md` (KB ≈4,6k vs grep ≈11,4k tokens, bytes/4 εκτίμηση, dev-set, ο grep κερδίζει στα exact-symbol). Codex review εφαρμόστηκε εν μέρει· οδηγία «Retrieval first» προστέθηκε στο AGENTS.md:19 (R-20261102-002 εγκρίθηκε, commit 1e65a30).
