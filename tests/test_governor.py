@@ -65,6 +65,7 @@ def make(tmp_path, monkeypatch):
     monkeypatch.setenv("QRL_DISPATCH_DB", str(tmp_path / "dispatch.db"))
     (tmp_path / ".lab").mkdir()
     d = D.Dispatcher(str(tmp_path))
+    d.dd.set("governor_enabled", "1")   # ships closed (default 0); these tests exercise it open
     return d
 
 
@@ -243,7 +244,7 @@ def test_sweeper_frees_dead_rows_and_launcher_cannot_claim_a_swept_row(tmp_path,
     d = make(tmp_path, monkeypatch)
     now = time.time()
     jid = d.work.create("worker", "spawn", "J", "b", status="running")
-    stale = _iso_epoch(now - 4000, 2)
+    stale = _iso_epoch(now - 8 * 3600, 2)           # older than the 6 h floor
     c = d.dd.conn
     c.execute("INSERT INTO tasks(started, kind, refs, provider, status, lane) VALUES (?,?,?,?,?,?)",
               (stale, "job", json.dumps([jid]), "claude", "starting", "worker"))                 # 1: starting, dead
@@ -351,3 +352,35 @@ def test_one_usage_assessment_per_decision_and_off_switch(tmp_path, monkeypatch)
                           " VALUES ('P9', ?, 'x', 'codex', 'q', 'queued')", (D.now_iso(),))
         with patch.object(D, "serve_peer", lambda root, r, tid=None: None):
             assert D._peer_cycle(str(tmp_path), d.dd) is True
+
+
+def test_governor_ships_closed_and_sweep_is_part_of_it(tmp_path, monkeypatch):
+    monkeypatch.setenv("QRL_LAB_DIR", str(tmp_path))
+    monkeypatch.setenv("QRL_DISPATCH_DB", str(tmp_path / "d2.db"))
+    (tmp_path / ".lab").mkdir(exist_ok=True)
+    d = D.Dispatcher(str(tmp_path))
+    assert D.DEFAULTS["governor_enabled"] == "0" and d.dd.get("governor_enabled") in (None, "0", "")
+    d.dd.conn.execute("INSERT INTO tasks(started, kind, provider, status, lane) VALUES (?,?,?,?,?)",
+                      (D.now_iso(), "job", "claude", "starting", "worker"))
+    d.dd.conn.execute("UPDATE tasks SET started='2000-01-01T00:00:00+00:00'")
+    import threading
+    d._busy, d._busy_lock = {}, threading.Lock()
+    d.tick()                                                       # closed: the sweeper does not run
+    assert d.dd.conn.execute("SELECT status FROM tasks").fetchone()[0] == "starting"
+    with patch.object(G, "windows", side_effect=AssertionError("closed governor must not read usage")):
+        assert d._admit(job()) is True                              # entry path: no assessment, no cap
+
+
+def test_sweep_never_judges_a_run_dead_before_six_hours_and_survives_bad_settings(tmp_path, monkeypatch):
+    d = make(tmp_path, monkeypatch)
+    now = time.time()
+    d.dd.set("peer_timeout_min", "1")                               # lowered while a long peer run is alive
+    d.dd.conn.execute("INSERT INTO peer_requests(id, ts, from_provider, to_provider, prompt, status) VALUES"
+                      " ('P1', ?, 'x', 'codex', 'q', 'running')", (_iso_epoch(now - 1800, 2),))
+    d.dd.conn.execute("INSERT INTO tasks(started, kind, refs, provider, status, lane) VALUES (?,?,?,?,?,?)",
+                      (_iso_epoch(now - 1800, 2), "peer", json.dumps(["P1"]), "codex", "running", "peer"))
+    assert d.sweep(now) == 0
+    assert d.dd.conn.execute("SELECT status FROM peer_requests").fetchone()[0] == "running"
+    d.dd.conn.execute("INSERT OR REPLACE INTO settings(key, value) VALUES ('task_timeout_min', 'abc')")   # malformed
+    d.dd.conn.execute("INSERT OR REPLACE INTO settings(key, value) VALUES ('peer_hold_max_min', 'nan')")
+    d.sweep(now)                                                    # must not raise

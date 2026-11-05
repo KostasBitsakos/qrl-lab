@@ -89,7 +89,7 @@ DEFAULTS = {
     "thread_messages": "12",          # thread messages included in a fresh context pack
     "state_max_lines": "150",
     # governor (v0.5.1 §5): pace-based admission, see tools/governor.py
-    "governor_enabled": "1",
+    "governor_enabled": "0",          # B2 ships closed (review 3): the researcher opens it after watching one day of traffic
     "pace_margin_pct": "10",          # optional run if weekly use <= pace + this
     "optional_hard_pct": "90",        # ... and weekly use < this
     "five_hour_max_pct": "85",        # ... and the 5 h window < this
@@ -540,6 +540,21 @@ def which(name, configured=None):
 
 
 # ---------------------------------------------------------------- providers
+
+SWEEP_MIN_RUNNING_S = 6 * 3600
+
+
+def _num(value, fallback):
+    """A positive finite number from a stored setting; malformed values fall back to the default (never raise)."""
+    for v in (value, fallback):
+        try:
+            x = float(v)
+            if 0 < x < float("inf"):
+                return x
+        except (TypeError, ValueError):
+            pass
+    return 1.0
+
 
 def _empty_result():
     return {"ok": False, "quota": False, "transient": False, "text": "", "error": "", "session_id": None,
@@ -1461,8 +1476,11 @@ class Dispatcher:
         Epoch arithmetic only (SQLite strftime), no provider calls. -> number of rows freed."""
         now = time.time() if now is None else now
         s = self.dd.settings()
-        limits = {"peer": float(s["peer_timeout_min"]) * 60 + 300}
-        default = float(s["task_timeout_min"]) * 60 + 300
+        # A run keeps the timeout it was launched with, but settings can change while it runs: never judge a run dead
+        # earlier than SWEEP_MIN_RUNNING_S (6 h), whatever the current setting says.
+        limits = {"peer": max(SWEEP_MIN_RUNNING_S, _num(s["peer_timeout_min"], DEFAULTS["peer_timeout_min"]) * 60 + 300)}
+        default = max(SWEEP_MIN_RUNNING_S, _num(s["task_timeout_min"], DEFAULTS["task_timeout_min"]) * 60 + 300)
+        hold_max = _num(s["peer_hold_max_min"], DEFAULTS["peer_hold_max_min"]) * 60
         freed = 0
         c = self.dd.conn
         for t in [dict(r) for r in c.execute(
@@ -1495,7 +1513,7 @@ class Dispatcher:
                 freed += 1
         for r in [dict(x) for x in c.execute(
                 "SELECT id, CAST(strftime('%s', ts) AS INTEGER) AS ts FROM peer_requests WHERE status='queued'")]:
-            if now - (r["ts"] or now) > float(s["peer_hold_max_min"]) * 60:   # every wait has a time limit
+            if now - (r["ts"] or now) > hold_max:   # every wait has a time limit
                 c.execute("UPDATE peer_requests SET status='failed', error=?, ts_done=? WHERE id=? AND status='queued'",
                           (f"held back more than {s['peer_hold_max_min']} min (usage above pace or no free slot): "
                            "ask again later or ask the other model", now_iso(), r["id"]))
@@ -1504,7 +1522,7 @@ class Dispatcher:
 
     def tick(self):
         """Start what may start now: one chat run if none is running, workers up to max_workers. Never blocks."""
-        if time.time() - getattr(self, "_last_sweep", 0) >= 30:
+        if self.dd.get("governor_enabled") == "1" and time.time() - getattr(self, "_last_sweep", 0) >= 30:
             self._last_sweep = time.time()
             try:
                 self.sweep()
