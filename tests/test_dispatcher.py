@@ -906,6 +906,7 @@ def write_codex_rollout(primary, secondary, secondary_reset_in=6 * 86400):
 def test_governor_and_parallelism_with_reported_usage():
     """A rate_limit_event with a percentage (fake Claude CLI) drives the governor; with unknown Codex usage only one
     optional job runs at a time; fresh Codex rollout usage releases the second worker (governor + max_workers together)."""
+    os.environ["QRL_LAB_DIR"] = LAB   # other test modules overwrite this at import; LabDB() must open THIS lab
     d = live(fresh_dispatcher())
     d.dd.set("governor_enabled", "1")
     d.dd.set("max_workers", "2")
@@ -947,6 +948,7 @@ def test_governor_and_parallelism_with_reported_usage():
 def test_held_job_does_not_block_the_queue_and_peer_requeues():
     """A job pinned to an over-pace provider stays queued (nothing posted, provider state untouched) while the next
     job, for the other provider, still starts in the same tick; a peer that loses the last slot goes back to queued."""
+    os.environ["QRL_LAB_DIR"] = LAB   # other test modules overwrite this at import; LabDB() must open THIS lab
     d = live(fresh_dispatcher())
     d.dd.set("governor_enabled", "1")
     d.dd.set("max_workers", "2")
