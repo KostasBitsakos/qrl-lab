@@ -64,6 +64,9 @@ def claude(argv):
     code = 0
     limit = {"status": "allowed", "rateLimitType": "five_hour", "utilization": 0.42,
              "resetsAt": int(time.time()) + 3 * 3600, "isUsingOverage": False}
+    if step.get("window"):  # usage knobs for governor tests: {"window": "seven_day", "util": 0.8, "reset_in": 518400}
+        limit.update(rateLimitType=step["window"], utilization=step.get("util", 0.42),
+                     resetsAt=int(time.time()) + int(step.get("reset_in", 3 * 3600)))
     if step["mode"] == "quota":
         out.update(is_error=True, result=step.get("text", "You've hit your session limit · resets 3:50pm "
                                                          "(Europe/Athens)"))

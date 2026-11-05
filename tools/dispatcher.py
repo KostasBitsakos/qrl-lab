@@ -56,6 +56,7 @@ from labdb import LabDB, LabError  # noqa: E402
 import perm_store  # noqa: E402
 import work as W  # noqa: E402
 from researcher_text import researcher_text  # noqa: E402
+import governor  # noqa: E402
 
 PROVIDERS = ("claude", "codex")
 OTHER = {"claude": "codex", "codex": "claude"}
@@ -87,6 +88,16 @@ DEFAULTS = {
     "codex_resume_window_s": "900",
     "thread_messages": "12",          # thread messages included in a fresh context pack
     "state_max_lines": "150",
+    # governor (v0.5.1 §5): pace-based admission, see tools/governor.py
+    "governor_enabled": "0",          # B2 ships closed (review 3): the researcher opens it after watching one day of traffic
+    "pace_margin_pct": "10",          # optional run if weekly use <= pace + this
+    "optional_hard_pct": "90",        # ... and weekly use < this
+    "five_hour_max_pct": "85",        # ... and the 5 h window < this
+    "chat_hard_pct": "97",            # the chat coordinator answers until this, then fails over
+    "usage_stale_h": "6",             # older/unknown usage -> conservative mode (one optional run at a time)
+    "unknown_daily_runs": "40",       # runs per 24 h per provider while its usage is unknown (assumption, tunable)
+    "peer_hold_max_min": "30",        # a peer request held back by the governor this long fails (the caller is not left waiting)
+    "max_retries": "1",               # transient failures retried at most this many times; a safety refusal never
 }
 RESEARCHER_KEYS = set(DEFAULTS)
 
@@ -94,6 +105,10 @@ QUOTA_RE = re.compile(
     r"(hit your (?:[\w']+ ){0,3}(?:limit|budget)|usage limit|limit reached|out of (?:extra )?usage|"
     r"out of usage credits|credit balance (?:is )?too low|usage credits are required|insufficient_quota|"
     r"exceeded your current quota|upgrade to (?:pro|plus|max))", re.I)
+REFUSAL_RE = re.compile(  # safety/permission/policy refusals only; "connection refused" and OS errors are not refusals
+    r"(safety (?:polic|filter|system|reason|block)|usage polic|content polic|against (?:our|the|anthropic's|openai's) polic|"
+    r"violat\w* (?:\w+ ){0,2}polic|denied by (?:the )?(?:policy|permission|safety)|(?:policy|permission rule)[ -]denied|"
+    r"(?:can't|cannot|can not|won't) (?:help|assist) with that)", re.I)
 TRANSIENT_RE = re.compile(r"(rate limit|overloaded|temporarily unavailable|timed? ?out|connection|503|529)", re.I)
 STATUS_LINE_RE = re.compile(r"\n?\s*STATUS:\s*(done|failed|waiting_approval)\s*$", re.I)
 CLAUDE_ALIASES = ("haiku", "sonnet", "opus")
@@ -144,7 +159,7 @@ CREATE TABLE IF NOT EXISTS sessions(thread_id TEXT NOT NULL, provider TEXT NOT N
 CREATE TABLE IF NOT EXISTS tasks(id INTEGER PRIMARY KEY AUTOINCREMENT, started TEXT, ended TEXT, kind TEXT,
   thread_id TEXT, refs TEXT, provider TEXT, model TEXT, session_id TEXT, resumed INTEGER, status TEXT,
   cost_usd REAL, input_tokens INTEGER, cached_tokens INTEGER, cache_write_tokens INTEGER, output_tokens INTEGER,
-  duration_s REAL, note TEXT);
+  duration_s REAL, note TEXT, lane TEXT);
 CREATE TABLE IF NOT EXISTS deferred(msg_id TEXT PRIMARY KEY, ts TEXT);
 CREATE TABLE IF NOT EXISTS notified(kind TEXT NOT NULL, ref TEXT NOT NULL, ts TEXT, PRIMARY KEY(kind, ref));
 CREATE TABLE IF NOT EXISTS peer_requests(id TEXT PRIMARY KEY, ts TEXT, from_provider TEXT, to_provider TEXT,
@@ -180,6 +195,11 @@ class DispatchDB:
         self.conn.execute("PRAGMA busy_timeout=30000")
         self.journal_mode = self.conn.execute("PRAGMA journal_mode=WAL").fetchone()[0]
         self.conn.executescript(SCHEMA)
+        try:  # databases created before B2 have no tasks.lane
+            if "lane" not in {r[1] for r in self.conn.execute("PRAGMA table_info(tasks)")}:
+                self.conn.execute("ALTER TABLE tasks ADD COLUMN lane TEXT")
+        except sqlite3.OperationalError:
+            pass  # another process added it first
 
     def close(self):
         try:
@@ -299,12 +319,51 @@ class DispatchDB:
         self.conn.execute("DELETE FROM sessions WHERE thread_id=? AND provider=?", (thread_id, provider))
 
     # tasks
-    def task_start(self, kind, thread_id, refs, provider, model, session_id, resumed):
+    def task_start(self, kind, thread_id, refs, provider, model, session_id, resumed, lane=None):
         cur = self.conn.execute(
-            "INSERT INTO tasks(started, kind, thread_id, refs, provider, model, session_id, resumed, status)"
-            " VALUES (?,?,?,?,?,?,?,?,?)",
-            (now_iso(), kind, thread_id, json.dumps(refs), provider, model, session_id, int(resumed), "running"))
+            "INSERT INTO tasks(started, kind, thread_id, refs, provider, model, session_id, resumed, status, lane)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (now_iso(), kind, thread_id, json.dumps(refs), provider, model, session_id, int(resumed), "running", lane))
         return cur.lastrowid
+
+    def reserve(self, kind, thread_id, refs, provider, lane, cap=None, daily_cap=None, hold_s=300):
+        """Atomic admission (v0.5.1 B2): in ONE short BEGIN IMMEDIATE transaction count the provider's optional runs
+        (every lane except 'chat'; 'starting' rows younger than hold_s count) and, if allowed, insert the task row with
+        status 'starting': the row IS the reservation. -> task id, or None if `cap` (concurrent) or `daily_cap`
+        (per 24 h) would be exceeded. No file or network access happens inside the transaction."""
+        now = time.time()
+        held, day = now - hold_s, now - 86400   # compared as epochs: ISO strings with local offsets do not sort by time
+        with self.tx() as c:
+            if cap is not None:
+                n = c.execute("SELECT COUNT(*) FROM tasks WHERE provider=? AND COALESCE(lane,'worker')!='chat' AND"
+                              " (status='running' OR (status='starting' AND CAST(strftime('%s', started) AS INTEGER)>=?))",
+                              (provider, held)).fetchone()[0]
+                if n >= cap:
+                    return None
+            if daily_cap is not None:
+                n = c.execute("SELECT COUNT(*) FROM tasks WHERE provider=? AND status!='released' AND"
+                              " CAST(strftime('%s', started) AS INTEGER)>=?",
+                              (provider, day)).fetchone()[0]
+                if n >= daily_cap:
+                    return None
+            cur = c.execute("INSERT INTO tasks(started, kind, thread_id, refs, provider, resumed, status, lane)"
+                            " VALUES (?,?,?,?,?,?,?,?)",
+                            (now_iso(), kind, thread_id, json.dumps(refs), provider, 0, "starting", lane))
+            return cur.lastrowid
+
+    def claim_start(self, task_id, refs, session_id, resumed):
+        """starting -> running for a reserved task row. False if the row is no longer 'starting'."""
+        cur = self.conn.execute("UPDATE tasks SET status='running', started=?, refs=?, session_id=?, resumed=?"
+                                " WHERE id=? AND status='starting'",
+                                (now_iso(), json.dumps(refs), session_id, int(resumed), task_id))
+        return cur.rowcount == 1
+
+    def release(self, task_id):
+        self.conn.execute("UPDATE tasks SET status='released', ended=? WHERE id=? AND status='starting'",
+                          (now_iso(), task_id))
+
+    def peer_requeue(self, pid):
+        self.conn.execute("UPDATE peer_requests SET status='queued' WHERE id=? AND status='running'", (pid,))
 
     def task_end(self, task_id, status, res, duration_s, note=""):
         u = res.get("usage", {}) if res else {}
@@ -355,12 +414,16 @@ class DispatchDB:
                           (pid, now_iso(), from_provider, to_provider, key, int(bool(major)), prompt, "queued"))
         return pid
 
-    def peer_claim(self, pid=None):
+    def peer_claim(self, pid=None, skip=()):
+        """Claim a queued peer request; `skip` = target providers the governor holds back (their requests stay queued)."""
         with self.tx() as c:
             if pid:
                 r = c.execute("SELECT * FROM peer_requests WHERE status='queued' AND id=?", (pid,)).fetchone()
             else:
-                r = c.execute("SELECT * FROM peer_requests WHERE status='queued' ORDER BY ts LIMIT 1").fetchone()
+                marks = ",".join("?" * len(skip))
+                r = c.execute("SELECT * FROM peer_requests WHERE status='queued'"
+                              + (f" AND to_provider NOT IN ({marks})" if skip else "") + " ORDER BY ts LIMIT 1",
+                              tuple(skip)).fetchone()
             if r is None:
                 return None
             c.execute("UPDATE peer_requests SET status='running' WHERE id=?", (r["id"],))
@@ -477,6 +540,21 @@ def which(name, configured=None):
 
 
 # ---------------------------------------------------------------- providers
+
+SWEEP_MIN_RUNNING_S = 6 * 3600
+
+
+def _num(value, fallback):
+    """A positive finite number from a stored setting; malformed values fall back to the default (never raise)."""
+    for v in (value, fallback):
+        try:
+            x = float(v)
+            if 0 < x < float("inf"):
+                return x
+        except (TypeError, ValueError):
+            pass
+    return 1.0
+
 
 def _empty_result():
     return {"ok": False, "quota": False, "transient": False, "text": "", "error": "", "session_id": None,
@@ -721,6 +799,7 @@ class Dispatcher:
         self.work = W.Work(self.dd.conn, self.root)
         self.prompts = os.path.join(self.root, "prompts")
         self._last_index = 0.0
+        self.gov_reason = None
 
     def close(self):
         self.dd.close()
@@ -749,6 +828,7 @@ class Dispatcher:
         head = (f"[QRL-Lab task · you are {role} ({LABEL[provider]}) · job {job or '-'} · thread {item['thread_id']} · "
                 f"reply-to {reply_id} · author for your posts: coordinator · co-researcher: {OTHER[provider]}]")
         parts = [head]
+        in_pack = set(item["msg_ids"])  # message ids already in this prompt: never echoed back as «memory»
         if provider == "codex":  # Codex has no system-prompt flag: the static part goes first (stable prefix)
             parts.insert(0, self.static_prompt())
         if fresh:
@@ -760,6 +840,7 @@ class Dispatcher:
                 note_lines.append(f"docs/STATE.md has {n_lines} lines: condense it to ≤{s['state_max_lines']}.")
             hist = self.lab.thread(item["thread_id"])
             hist = [m for m in hist if m["id"] not in item["msg_ids"]][-int(s["thread_messages"]):]
+            in_pack |= {m["id"] for m in hist}
             if hist:
                 lines = [f"- {m['id']} · {m['author']} · {m['kind']}: {clip(m['body'], 700)}" for m in hist]
                 parts.append("## Thread so far (latest messages, clipped; full text: python3 tools/labq.py show <id>"
@@ -767,7 +848,7 @@ class Dispatcher:
         if lane_of(item) == "chat":
             try:  # bounded memory lookup (J261): pointers only; failures never block the run
                 import convo_context
-                mem = convo_context.relevant(item["text"], self.root, max_chars=1500)
+                mem = convo_context.relevant(item["text"], self.root, max_chars=1500, exclude_ids=in_pack)
             except Exception:
                 mem = ""
             if mem:
@@ -937,12 +1018,66 @@ class Dispatcher:
 
     # ---- one task
     def provider_order(self, item):
+        """-> (providers that may take the item now, wanted order). Read-only: the governor only filters; it never changes
+        a provider's state (that comes from real limit errors). Fills `self.caps[p] = (cap, daily_cap)` for `_admit`."""
         s = self.dd.settings()
         first = item.get("forced") or s["coordinator"]
         order = [first]
         if s["failover"] == "1" and not item.get("forced"):
             order.append(OTHER[first])
-        return [p for p in order if self.dd.available(p)], order
+        avail = [p for p in order if self.dd.available(p)]
+        self.gov_reason, self.caps = None, {p: (None, None) for p in avail}
+        if s["governor_enabled"] != "1" or not avail:
+            return avail, order
+        ok, why = [], []
+        for p in avail:
+            verdict, reason, cap, daily = self.governed(p, item, s)
+            if verdict == "go":
+                ok.append(p)
+                self.caps[p] = (cap, daily)
+            else:
+                why.append(f"{LABEL[p]}: {reason}")
+        if ok or lane_of(item) == "chat":
+            # The researcher's chat is never held back when no provider is below chat_hard_pct (real limits fail over).
+            return (ok or avail), order
+        self.gov_reason = "; ".join(why)
+        return [], order
+
+    def governed(self, provider, item, s):
+        role = "chat" if lane_of(item) == "chat" else "optional"
+        now = time.time()
+        wins = governor.windows(provider, dispatch_db_path(self.root),
+                                os.path.join(self.root, ".lab", "usage", "claude.json"), now)
+        return governor.assess(role, wins, now, s)
+
+    def _admit(self, item):
+        """May this item start now? Chat items: yes if a provider is available. Others also RESERVE their task row
+        (DispatchDB.reserve: count + insert in one transaction), so concurrent workers and peers cannot both pass."""
+        avail, wanted = self.provider_order(item)
+        if not avail:
+            if self.gov_reason and any(self.dd.available(p) for p in wanted):
+                return False  # governor: the item stays queued, silently; the caller goes on to the next item
+            deferred = set(self.dd.deferred_ids())
+            if not item["msg_ids"] or all(m in deferred for m in item["msg_ids"]):
+                return False  # waiting for a reset; nothing new to say (decisions and events stay queued)
+            return True  # process() posts the "nobody available" notice once and defers the messages
+        if lane_of(item) == "chat":
+            return True
+        refs = item["msg_ids"] + item["req_ids"] + ([item["job_id"]] if item.get("job_id") else [])
+        for p in avail:
+            cap, daily = self.caps.get(p, (None, None))
+            tid = self.dd.reserve(item["kind"], item["thread_id"], refs, p, lane_of(item), cap, daily)
+            if tid:
+                item["reserved"] = {"provider": p, "task": tid}
+                return True
+        self.gov_reason = "όριο ταυτόχρονων/ημερήσιων εκτελέσεων"
+        return False
+
+    def _release_reservation(self, item):
+        r = item.get("reserved")
+        if r and not r.get("used"):
+            r["used"] = True
+            self.dd.release(r["task"])
 
     def _post(self, reply_to, body, kind="status", author="coordinator"):
         try:
@@ -1030,6 +1165,7 @@ class Dispatcher:
             result = self._process(item)
         finally:
             # a locked database must not leave a ghost job/task marked running (30/10: J171/J172 stalled 4 h)
+            self._release_reservation(item)
             _retry_locked(lambda: self._close_job(item, jid, result))
             parents = item.get("parent_msgs") or []
             if lane == "worker" and parents and result != "deferred" and not self._active_children(parents):
@@ -1049,6 +1185,9 @@ class Dispatcher:
 
     def _process(self, item):
         available, wanted = self.provider_order(item)
+        r = item.get("reserved")
+        if r:  # admitted on r["provider"]; the others only take over after a real limit error (failover)
+            available = [r["provider"]] + [p for p in wanted if p != r["provider"] and self.dd.available(p)]
         if item["msg_ids"]:
             for mid in item["msg_ids"]:
                 try:
@@ -1070,6 +1209,9 @@ class Dispatcher:
                              f" check the thread, `git status` and docs/STATE.md before continuing.")
             session_id = self._session_for(item, provider)
             res = self._attempt(provider, item, notes, session_id)
+            if res.get("gov_denied"):   # a retry/failover slot was not granted: the item goes back to the queue, silently
+                self._journal(f"- {time.strftime('%H:%M')} {item['reply_to']} [{provider}] re-queued: governor denied the next attempt")
+                return "deferred"
             if self._cancelled(item):
                 self._post(item["reply_to"], f"⏹ Η εργασία {item['job_id']} σταμάτησε: ακυρώθηκε.")
                 self._set_status(item["msg_ids"], "done")
@@ -1147,12 +1289,36 @@ class Dispatcher:
     def _paid_credit_stop(self, provider, res):
         return provider == "claude" and bool(res.get("paid_credit")) and self.dd.get("allow_paid_credits") != "1"
 
+    def _task_begin(self, item, provider, refs, model, session_id):
+        """Task row of one attempt -> id, or None if the governor/slot rule denies it (the caller re-queues the item).
+        The first attempt turns the reservation made at admission into 'running' (only if the row is still ours:
+        the sweeper may have released it); every other optional attempt (retry, failover) is admitted the same way."""
+        r = item.get("reserved")
+        if r and r["provider"] == provider and not r.get("used"):
+            r["used"] = True
+            if self.dd.claim_start(r["task"], refs, session_id, bool(session_id)):
+                return r["task"]
+            # swept meanwhile: ask again below
+        if lane_of(item) == "chat":
+            return self.dd.task_start(item["kind"], item["thread_id"], refs, provider, model, session_id,
+                                      bool(session_id), "chat")
+        cap = daily = None
+        if self.dd.get("governor_enabled") == "1":
+            verdict, _, cap, daily = self.governed(provider, item, self.dd.settings())   # one assessment per decision
+            if verdict != "go":
+                return None
+        tid = self.dd.reserve(item["kind"], item["thread_id"], refs, provider, lane_of(item), cap, daily)
+        if tid is not None and not self.dd.claim_start(tid, refs, session_id, bool(session_id)):
+            return None
+        return tid
+
     def _attempt(self, provider, item, notes, session_id):
         model = None
         t0 = time.time()
         refs = item["msg_ids"] + item["req_ids"] + ([item["job_id"]] if item.get("job_id") else [])
-        task_id = self.dd.task_start(item["kind"], item["thread_id"], refs, provider, model, session_id,
-                                     bool(session_id))
+        task_id = self._task_begin(item, provider, refs, model, session_id)
+        if task_id is None:
+            return dict(_empty_result(), error="admission denied", gov_denied=True)
         res = self._run_provider(provider, item, notes, session_id)
         if (not res["ok"] and session_id and res.get("resume_rejected")
                 and not res["quota"] and not self._cancelled(item)):
@@ -1162,16 +1328,21 @@ class Dispatcher:
             self.dd.task_end(task_id, "retry_fresh", res, time.time() - t0, res["error"])
             self.dd.save_limits(provider, res.get("limits"))
             t0 = time.time()
-            task_id = self.dd.task_start(item["kind"], item["thread_id"], refs, provider, model, None, False)
+            task_id = self._task_begin(item, provider, refs, model, None)
+            if task_id is None:
+                return dict(res, gov_denied=True)
             session_id = None
             res = self._run_provider(provider, item, notes, None)
-        if not res["ok"] and res["transient"] and not session_id and not self._cancelled(item):
+        if (not res["ok"] and res["transient"] and not session_id and not self._cancelled(item)
+                and int(self.dd.get("max_retries") or 0) >= 1 and not REFUSAL_RE.search(res.get("error") or "")):
             self.dd.conn.execute("UPDATE tasks SET model=? WHERE id=?", (res.get("model"), task_id))
             self.dd.task_end(task_id, "retry_transient", res, time.time() - t0, res["error"])
             self.dd.save_limits(provider, res.get("limits"))
             time.sleep(float(os.environ.get("QRL_TRANSIENT_WAIT", "60")))
             t0 = time.time()
-            task_id = self.dd.task_start(item["kind"], item["thread_id"], refs, provider, model, None, False)
+            task_id = self._task_begin(item, provider, refs, model, None)
+            if task_id is None:
+                return dict(res, gov_denied=True)
             res = self._run_provider(provider, item, notes, None)
         status = "done" if res["ok"] else ("quota" if res["quota"] else "failed")
         self.dd.conn.execute("UPDATE tasks SET model=? WHERE id=?", (res.get("model"), task_id))
@@ -1254,7 +1425,7 @@ class Dispatcher:
     def recover(self):
         """After a crash: tasks left 'running' and their messages are retried; spawned jobs are queued again."""
         perm_store.withdraw_deny_rules(self.root)
-        for t in [dict(r) for r in self.dd.conn.execute("SELECT * FROM tasks WHERE status='running'")]:
+        for t in [dict(r) for r in self.dd.conn.execute("SELECT * FROM tasks WHERE status IN ('running','starting')")]:
             self.dd.conn.execute("UPDATE tasks SET status='interrupted', ended=? WHERE id=?", (now_iso(), t["id"]))
             ids = [i for i in json.loads(t["refs"] or "[]") if i.startswith("M-")]
             self.dd.defer(ids)
@@ -1273,11 +1444,8 @@ class Dispatcher:
         item = self.find_work()
         if item is None:
             return None
-        available, _ = self.provider_order(item)
-        if not available:
-            deferred = set(self.dd.deferred_ids())
-            if not item["msg_ids"] or all(m in deferred for m in item["msg_ids"]):
-                return None  # waiting for a reset; nothing new to say (decisions and events stay queued)
+        if not self._admit(item):
+            return None
         return self.process(item)
 
     def run_forever(self, poll=2.0):
@@ -1302,8 +1470,64 @@ class Dispatcher:
             self.heartbeat()
             time.sleep(every)
 
+    def sweep(self, now=None):
+        """Free what has no living owner (v0.5.1 B2): a 'starting' task older than 5 min, a 'running' task older than its
+        timeout + 5 min (tasks), a peer request claimed but never served (peer_requests). Their jobs go back to the queue.
+        Epoch arithmetic only (SQLite strftime), no provider calls. -> number of rows freed."""
+        now = time.time() if now is None else now
+        s = self.dd.settings()
+        # A run keeps the timeout it was launched with, but settings can change while it runs: never judge a run dead
+        # earlier than SWEEP_MIN_RUNNING_S (6 h), whatever the current setting says.
+        limits = {"peer": max(SWEEP_MIN_RUNNING_S, _num(s["peer_timeout_min"], DEFAULTS["peer_timeout_min"]) * 60 + 300)}
+        default = max(SWEEP_MIN_RUNNING_S, _num(s["task_timeout_min"], DEFAULTS["task_timeout_min"]) * 60 + 300)
+        hold_max = _num(s["peer_hold_max_min"], DEFAULTS["peer_hold_max_min"]) * 60
+        freed = 0
+        c = self.dd.conn
+        for t in [dict(r) for r in c.execute(
+                "SELECT id, refs, status, lane, CAST(strftime('%s', started) AS INTEGER) AS ts FROM tasks"
+                " WHERE status IN ('starting','running')")]:
+            age = now - (t["ts"] or 0)
+            if t["status"] == "starting" and age > 300:
+                c.execute("UPDATE tasks SET status='released', ended=? WHERE id=? AND status='starting'", (now_iso(), t["id"]))
+            elif t["status"] == "running" and age > limits.get(t["lane"], default):
+                c.execute("UPDATE tasks SET status='interrupted', ended=? WHERE id=? AND status='running'", (now_iso(), t["id"]))
+            else:
+                continue
+            freed += 1
+            for ref in json.loads(t["refs"] or "[]"):
+                if str(ref).startswith("J"):   # the job is not running any more: queue it again
+                    c.execute("UPDATE jobs SET status='queued', started=NULL, result='interrupted' WHERE id=? AND"
+                              " status='running' AND origin='spawn' AND cancel=0", (ref,))
+        for r in [dict(x) for x in c.execute(
+                "SELECT id, CAST(strftime('%s', ts) AS INTEGER) AS ts FROM peer_requests WHERE status='running'")]:
+            age = now - (r["ts"] or 0)
+            live = c.execute("SELECT status FROM tasks WHERE lane='peer' AND refs LIKE ? ORDER BY id DESC LIMIT 1",
+                             (f'%"{r["id"]}"%',)).fetchone()
+            if live is None or live[0] in ("released", "starting"):
+                if age > 300:   # claimed, then the worker died before it started the run
+                    c.execute("UPDATE peer_requests SET status='queued' WHERE id=? AND status='running'", (r["id"],))
+                    freed += 1
+            elif live[0] == "interrupted":   # its run was lost: do not run it twice, tell the caller
+                c.execute("UPDATE peer_requests SET status='failed', error=?, ts_done=? WHERE id=? AND status='running'",
+                          ("interrupted: the dispatcher lost this run (swept)", now_iso(), r["id"]))
+                freed += 1
+        for r in [dict(x) for x in c.execute(
+                "SELECT id, CAST(strftime('%s', ts) AS INTEGER) AS ts FROM peer_requests WHERE status='queued'")]:
+            if now - (r["ts"] or now) > hold_max:   # every wait has a time limit
+                c.execute("UPDATE peer_requests SET status='failed', error=?, ts_done=? WHERE id=? AND status='queued'",
+                          (f"held back more than {s['peer_hold_max_min']} min (usage above pace or no free slot): "
+                           "ask again later or ask the other model", now_iso(), r["id"]))
+                freed += 1
+        return freed
+
     def tick(self):
         """Start what may start now: one chat run if none is running, workers up to max_workers. Never blocks."""
+        if self.dd.get("governor_enabled") == "1" and time.time() - getattr(self, "_last_sweep", 0) >= 30:
+            self._last_sweep = time.time()
+            try:
+                self.sweep()
+            except sqlite3.Error as e:
+                print(f"dispatcher warning: sweep: {e}", file=sys.stderr, flush=True)
         for jid in self.work.cancel_requested():
             stop_job(jid)
         if self.dd.get("paused") == "1":
@@ -1315,26 +1539,19 @@ class Dispatcher:
             lanes = [lane for lane, _ in self._busy.values()]
         if "chat" not in lanes:
             item = self.find_work("chat", busy)
-            if item is not None and self._startable(item):
+            if item is not None and self._admit(item):
                 self._spawn_thread("chat", item)
                 busy.add(item_key(item))
         free = max(1, int(self.dd.get("max_workers") or 1)) - lanes.count("worker")
         while free > 0:
             item = self.find_work("worker", busy)
-            if item is None or not self._startable(item):
+            if item is None:
                 break
+            busy.add(item_key(item))   # either started below, or held back by the governor: not looked at again this tick
+            if not self._admit(item):
+                continue               # held items stay queued; the next ones are still considered
             self._spawn_thread("worker", item)
-            busy.add(item_key(item))
             free -= 1
-
-    def _startable(self, item):
-        available, _ = self.provider_order(item)
-        if available:
-            return True
-        deferred = set(self.dd.deferred_ids())
-        if not item["msg_ids"] or all(m in deferred for m in item["msg_ids"]):
-            return False  # waiting for a reset; nothing new to say (decisions and events stay queued)
-        return True  # process() posts the "nobody available" notice once and defers the messages
 
     def _spawn_thread(self, lane, item):
         def run():
@@ -1345,6 +1562,7 @@ class Dispatcher:
                 print(f"dispatcher warning ({lane} {item_key(item)}): {type(e).__name__}: {e}", file=sys.stderr,
                       flush=True)
             finally:
+                d._release_reservation(item)
                 d.close()
         t = threading.Thread(target=run, daemon=True, name=f"{lane}:{item_key(item)}")
         with self._busy_lock:
@@ -1354,12 +1572,16 @@ class Dispatcher:
 
 # ---------------------------------------------------------------- peers (ask the other model)
 
-def serve_peer(root, req):
+class ReservationLost(Exception):
+    """The reserved task row was released (swept) before its launcher claimed it."""
+
+
+def serve_peer(root, req, task_id=None):
     with DispatchDB(dispatch_db_path(root)) as dd:
-        return _serve_peer(root, req, dd)
+        return _serve_peer(root, req, dd, task_id)
 
 
-def _serve_peer(root, req, dd):
+def _serve_peer(root, req, dd, task_id=None):
     s = dd.settings()
     to = req["to_provider"]
     key = req["key"]
@@ -1372,7 +1594,12 @@ def _serve_peer(root, req, dd):
         peer_rules = f.read()
     prompt = peer_rules + "\n\n## Request from the coordinator\n" + req["prompt"]
     t0 = time.time()
-    task_id = dd.task_start("peer", "peer:" + (key or req["id"]), [req["id"]], to, None, session_id, bool(session_id))
+    if task_id is not None:   # reserved by _peer_cycle: only if the row is still ours (the sweeper may have released it)
+        if not dd.claim_start(task_id, [req["id"]], session_id, bool(session_id)):
+            raise ReservationLost(req["id"])
+    else:   # inline path (ask_peer without a dispatcher)
+        task_id = dd.task_start("peer", "peer:" + (key or req["id"]), [req["id"]], to, None, session_id,
+                                bool(session_id), "peer")
     if to == "claude":
         model = s["peer_claude_major_model"] if req["major"] else s["peer_claude_model"]
         res = run_claude(prompt, root, model, "high" if req["major"] else "medium", session_id=session_id,
@@ -1397,20 +1624,61 @@ def _serve_peer(root, req, dd):
     return res
 
 
+def _peer_usage(root, dd, to):
+    """-> (verdict, cap, daily_cap) for an optional run on provider `to` (usage read outside any transaction)."""
+    s = dd.settings()
+    if s["governor_enabled"] != "1":
+        return "go", None, None
+    now = time.time()
+    wins = governor.windows(to, dispatch_db_path(root), os.path.join(root, ".lab", "usage", "claude.json"), now)
+    verdict, _, cap, daily = governor.assess("optional", wins, now, s)
+    return verdict, cap, daily
+
+
+def _peer_cycle(root, dd):
+    """Serve at most one queued peer request. -> True if one was handled. A request blocked by the governor or a full
+    slot goes back to the queue and is skipped (the poll looks at later requests, for other providers); one usage
+    assessment per provider and cycle."""
+    usage = {p: _peer_usage(root, dd, p) for p in ("claude", "codex")}
+    skip = {p for p, u in usage.items() if u[0] != "go"}
+    while True:
+        req = dd.peer_claim(skip=tuple(skip))
+        if req is None:
+            return False
+        to, tid, claimed = req["to_provider"], None, True
+        try:
+            if not dd.available(to):
+                p = dd.provider(to)
+                dd.peer_finish(req["id"], "failed",
+                               error=f"{LABEL[to]} is at its usage limit until {fmt_ts(p['until_ts'])}")
+                return True
+            _, cap, daily = usage[to]
+            tid = dd.reserve("peer", "peer:" + (req["key"] or req["id"]), [req["id"]], to, "peer", cap, daily)
+            if tid is None:   # the last slot was taken in the meantime: stays queued, other providers are still served
+                dd.peer_requeue(req["id"])
+                skip.add(to)
+                continue
+            claimed = False
+            serve_peer(root, req, tid)
+            return True
+        except BaseException as e:
+            # never leave a stranded request or a 'starting'/'running' row that blocks admission
+            if tid is not None:
+                dd.conn.execute("UPDATE tasks SET status='interrupted', ended=? WHERE id=? AND status IN"
+                                " ('starting','running')", (now_iso(), tid))
+            if claimed or isinstance(e, ReservationLost):
+                dd.peer_requeue(req["id"])
+            else:
+                dd.peer_finish(req["id"], "failed", error=f"internal error: {type(e).__name__}: {e}"[:300])
+            raise
+
+
 def peer_worker(root, poll=2.0):
     dd = DispatchDB(dispatch_db_path(root))
     while True:
         try:
-            req = dd.peer_claim()
-            if req is None:
+            if not _peer_cycle(root, dd):
                 time.sleep(poll)
-                continue
-            if not dd.available(req["to_provider"]):
-                p = dd.provider(req["to_provider"])
-                dd.peer_finish(req["id"], "failed",
-                               error=f"{LABEL[req['to_provider']]} is at its usage limit until {fmt_ts(p['until_ts'])}")
-                continue
-            serve_peer(root, req)
         except Exception as e:
             print(f"peer worker warning: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
             time.sleep(poll * 5)
