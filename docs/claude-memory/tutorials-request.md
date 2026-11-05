@@ -12,3 +12,7 @@ metadata:
 **Why:** to understand and share the research; no plugin helps materially (docs/tutorial_tools_2026-10-22.md).
 **How to apply:** when he asks, write docs/tutorial_style.md (audience, goals, intuition before formulas, one diagram per idea, real examples with run-id pointers, sources), use the writer agent on a strong model, then a fresh-agent "beginner" read test + Codex technical check; format pending his answer (proposed: shareable HTML page). Related: [[next-cycle-baseline-poisson]].
 - tutorial Q&A file: ~/qrl-lab/docs/tutorial.md — append every conceptual question the researcher asks (M-20261023-023).
+
+Update 2026-10-29 (M-20261029-159): tutorials are now OWNED BY CODEX (spawn with `work.py spawn --to codex`). Codex
+first writes `docs/tutorials/PLAYBOOK.md` (best practices) — every future tutorial job must read it first. Output:
+short, non-tiring PDFs, downloadable from the dashboard «📚 Tutorials» tab (J97).

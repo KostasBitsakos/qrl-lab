@@ -4,7 +4,7 @@ description: Active research and paper rules - claims discipline, focus on repro
 # Research and paper — active rules
 
 Claims discipline (no speed-up from simulator timings; parameter savings only next to a parameter-matched control;
-no invented numbers or citations): see CLAUDE.md golden rules 2 and 7, AGENTS.md.
+no invented numbers or citations): see AGENTS.md «Rules».
 
 - Focus now: find model + env + input that reproduce results similar to the DInos paper with the sinusoidal input with noise and spike; quantum work is out of scope until that is reached ("και μετά πάμε για περισσότερα"). (2026-10-19, M-20261019-048; quantum items in paused.md)
 - The paper does not mention the old simulator's issue (F1) at all, and the DInos claims are not changed; Sim v2 is presented simply as the simulator used here. (2026-10-17, R-20261017-007; PLAN §13 D8)

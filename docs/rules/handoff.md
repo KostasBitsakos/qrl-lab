@@ -18,3 +18,13 @@ The deputy request (tools/deputy.py BODY) states these rules; the sleeping side 
 5. Same rules for both: when Codex coordinates it works under exactly the same rules and information as Claude
    (AGENTS.md, prompts/coordinator.md, docs/STATE.md, docs/rules/*, docs/DECISIONS.md, skills in .claude/skills) and in every
    role Claude takes. Every solo action goes to the notes of rule 2; on Claude's return both review them and agree what stays. (2026-10-29, M-20261029-028)
+
+6. Μόνιμη διευκρίνιση ερευνητή (M-20261029-196): όταν ένας πάροχος κοιμάται, ο διαθέσιμος αναλαμβάνει αμέσως.
+   Στα πειράματα διατηρούνται ΔΥΟ ανεξάρτητοι ανταγωνιστικοί πράκτορες/κλάδοι: τώρα Codex στον δικό του κλάδο και
+   δεύτερος Codex ως προσωρινός αναπληρωτής Claude. Ο ανεξάρτητος έλεγχος γίνεται από άλλο πράκτορα του διαθέσιμου
+   παρόχου· η απουσία του άλλου μοντέλου δεν αποτελεί λόγο παύσης. Αυτή είναι η ρητή εξαίρεση στον κανόνα
+   «review by the other model» του AGENTS.md για την περίοδο αναπλήρωσης. Οι αλλαγές του αναπληρωτή μένουν σε
+   χωριστούς προσωρινούς κλάδους/παραδόσεις και καταγράφεται ποιος τις έκανε, τι ελέγχθηκε και ποια runs προέκυψαν.
+   Μόλις επιστρέψει ο άλλος πάροχος, γίνεται συμβούλιο Claude+Codex για όσα έκανε ο αναπληρωτής και επιλέγουν τι
+   κρατούν πριν από ενσωμάτωση στους αρχικούς κλάδους. Η διαδικασία ισχύει σε κάθε επόμενη αντίστοιχη περίπτωση.
+   Οι εγκρίσεις frozen spec, όρια, launcher, κλειδωμένα tests και η κοινή έγκριση πριν από push παραμένουν υποχρεωτικά.

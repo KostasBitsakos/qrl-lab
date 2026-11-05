@@ -1,13 +1,9 @@
 ---
 name: parallel-branches
-description: Two parallel engineer branches (Opus vs astra) only for the current loop; ask before reusing
+description: Every experiment cycle runs on competing Claude/Codex branches with periodic exchange of helpful changes (standing since 29/10)
 metadata:
-  node_type: memory
   type: feedback
-  originSessionId: 7456dd5b-8481-4276-adb4-14c4f6ae5690
-  modified: 2026-10-21T17:56:00.801Z
 ---
-
-Κώστας, 2026-10-21: idea of two identical repos/branches with different engineers (Opus and Codex gpt-6-astra) exploring different versions in parallel and comparing numbers — "αυτό μόνο για τώρα. μελλοντικά αν θέλω να το χρησιμοποιήσουμε ξανά σαν ιδέα να με ρωτάς".
-**Why:** he has spare Codex astra capacity; wants faster exploration toward the DInos paper numbers.
-**How to apply:** use only within the current tuning loop (end date: protocols.md latest P line); in any later work, ask him before splitting work into parallel branches/engineers. Council: .lab/council/C-20261021-03/. Related: [[tuning-engineer-opus]], [[experiment-loop]].
+Κώστας, 2026-10-29 (M-20261029-028): in ALL experiments for his work, Claude and Codex work in parallel on two branches/repos that compete for better results and periodically share the changes that helped. Replaces the 21/10 «only for this loop, ask before reusing».
+**Why:** faster exploration and better performance through competition plus exchange.
+**How to apply:** every new cycle: branches `<topic>` (Claude) and `<topic>-astra` (Codex); exchange at least at each daily report; rule text in docs/rules/experiments.md. Related: [[deputy-codex]], [[tuning-engineer-opus]].

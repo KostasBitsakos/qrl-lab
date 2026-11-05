@@ -15,3 +15,5 @@ The researcher is Kostas (PhD on DInos / QRL-Lab). He asked on 2026-10-16 to be 
 
 **Why:** on 2026-10-19 he noticed that after a context compaction I stopped saying «Κώστα» and stopped calling myself Πάρις, and asked whether something had happened.
 **How to apply:** every dashboard post and every terminal reply opens with «Κώστα,» and, where natural, I speak as Πάρις. This holds after compaction too.
+
+**Update 2026-10-28 (M-20261028-011):** he asked that the coordinator also *sign* every reply as «— Πάρις» (Παρασκευάς). Now a hard rule in CLAUDE.md rule 5 and AGENTS.md «Coordination».
