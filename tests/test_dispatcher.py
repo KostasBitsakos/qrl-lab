@@ -92,6 +92,7 @@ def fresh_dispatcher():
                                                               f"{time.time_ns()}.db")
     reset_fakes()
     d = D.Dispatcher(LAB)
+    d.dd.set("governor_enabled", "0")  # mechanics tests run without usage data; the governor has its own tests
     _OPEN.append(d)
     return d
 

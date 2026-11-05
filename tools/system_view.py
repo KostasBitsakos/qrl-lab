@@ -16,6 +16,7 @@ import time
 from contextlib import closing
 
 import dispatcher as D
+import governor as G
 import usage_limits as U
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -59,6 +60,15 @@ SETTINGS_META = {
     "codex_resume_window_s": ("Context", "Παράθυρο resume Codex (s)", ""),
     "thread_messages": ("Context", "Μηνύματα νήματος στο πακέτο", ""),
     "state_max_lines": ("Context", "Μέγιστες γραμμές STATE", ""),
+    "state_max_bytes": ("Context", "Μέγιστο μέγεθος STATE (bytes)", "Πάνω από αυτό ο Πάρις ζητά συμπύκνωση."),
+    "governor_enabled": ("Governor", "Governor ενεργός", "0 = χωρίς έλεγχο ρυθμού/ορίων (μόνο τα πραγματικά όρια του παρόχου)."),
+    "pace_margin_pct": ("Governor", "Περιθώριο ρυθμού (%)", "Προαιρετική δουλειά αν η εβδομαδιαία χρήση ≤ ρυθμός + αυτό."),
+    "optional_hard_pct": ("Governor", "Σκληρό όριο προαιρετικών (%)", "Εβδομαδιαία χρήση ≥ αυτό: καμία προαιρετική δουλειά."),
+    "five_hour_max_pct": ("Governor", "Όριο 5ωρου (%)", "5ωρη χρήση ≥ αυτό: οι προαιρετικές δουλειές περιμένουν."),
+    "chat_hard_pct": ("Governor", "Όριο Πάρη (%)", "Ο Πάρις απαντά μέχρι εδώ, μετά εναλλαγή παρόχου."),
+    "usage_stale_h": ("Governor", "Παλιά μέτρηση (ώρες)", "Παλιότερη/άγνωστη χρήση: συντηρητικά, ένα προαιρετικό job τη φορά."),
+    "unknown_daily_runs": ("Governor", "Εκτελέσεις/24ω με άγνωστη χρήση", "Παραδοχή, ρυθμίζεται."),
+    "max_retries": ("Governor", "Μέγιστες επαναλήψεις", "Παροδικό σφάλμα: τόσες φορές· άρνηση ασφαλείας: ποτέ."),
     "task_timeout_min": ("Χρόνοι", "Timeout δουλειάς (λεπτά)", ""),
     "peer_timeout_min": ("Χρόνοι", "Timeout peer (λεπτά)", ""),
     "escalation_debounce_s": ("Χρόνοι", "Αραίωση κλιμακώσεων (s)", "Ο Πάρις ξυπνά για κλιμακώσεις το πολύ μία φορά ανά τόσο."),
@@ -189,26 +199,7 @@ def _fmt_ts(ts):
 
 def claude_usage(status, now):
     """Freshest value per window from statusline/limits; expired window -> unknown (never 100 %)."""
-    status = status if isinstance(status, dict) else {}
-    events = status.get("_dispatcher") or {}
-    cands = {}
-    obs = U._measurement_time(status.get("as_of"))
-    for key in ("five_hour", "seven_day"):
-        w = status.get(key)
-        if isinstance(w, dict) and isinstance(w.get("used_percentage"), (int, float)):
-            cands[key] = dict(pct=float(w["used_percentage"]), reset=U._measurement_time(w.get("resets_at")),
-                              as_of=obs, source="statusline")
-    for row in events.get("limits") or []:
-        key = row.get("window")
-        if key not in ("five_hour", "seven_day"):
-            continue
-        ts = U._measurement_time(row.get("updated_at"))
-        prev = cands.get(key)
-        if prev and (prev["as_of"] or 0) >= (ts or 0):
-            continue
-        util = row.get("utilization")
-        cands[key] = dict(pct=float(util) * 100 if isinstance(util, (int, float)) else None,
-                          reset=U._measurement_time(row.get("resets_at")), as_of=ts, source="dispatch.db.limits")
+    cands = G.claude_candidates(status, now)
     missing = dict(pct=None, reset=None, as_of=None, source="καμία μέτρηση")
     return [_usage_row("claude", key, cands.get(key, missing), now) for key in ("five_hour", "seven_day")]
 
@@ -217,7 +208,7 @@ def codex_usage(entries, now):
     rows = [_usage_row("codex", e.get("slot") or e.get("window"),
                        dict(pct=e.get("used_percent"), reset=e.get("resets_at"), as_of=e.get("as_of"),
                             source="codex rollout"), now) for e in entries or [] if e]
-    return rows or [{"provider": "codex", "window": "—", "pct": UNKNOWN, "reset": "—", "measured": "—",
+    return rows or [{"provider": "codex", "window": "—", "pct": UNKNOWN, "pace": "—", "reset": "—", "measured": "—",
                      "age": "καμία μέτρηση", "source": "—"}]
 
 
@@ -225,7 +216,9 @@ def _usage_row(provider, key, c, now):
     expired = c.get("reset") is not None and c["reset"] <= now
     pct = UNKNOWN if expired or c.get("pct") is None else f"{c['pct']:.0f}%"
     label = {"five_hour": "5ω", "seven_day": "7ημ", "primary": "5ω", "secondary": "7ημ"}.get(key, key)
+    pace = G.pace_pct(c.get("reset"), now) if key in ("seven_day", "secondary") else None
     return {"provider": provider, "window": label, "pct": pct,
+            "pace": "—" if pace is None else f"{pace:.0f}%",
             "reset": _fmt_ts(c.get("reset")) + (" (έληξε)" if expired else ""),
             "measured": _fmt_ts(c.get("as_of")), "age": _age(c.get("as_of"), now), "source": c.get("source")}
 
@@ -303,7 +296,7 @@ def render(root=ROOT):
     except Exception as e:  # never break the dashboard
         usage = [{"provider": "?", "window": "?", "pct": UNKNOWN, "source": f"σφάλμα {type(e).__name__}"}]
     st.dataframe(pd.DataFrame(usage), hide_index=True, width="stretch")
-    st.caption("Τιμή «άγνωστη» = το παράθυρο έληξε ή δεν υπάρχει μέτρηση. Ρυθμός από τον πίνακα tasks (≈$ μόνο Claude):")
+    st.caption("«Ρυθμός» = ποσοστό της εβδομάδας που έχει περάσει: οι προαιρετικές δουλειές ξεκινούν όσο η 7ημ χρήση ≤ ρυθμός + περιθώριο. Τιμή «άγνωστη» = το παράθυρο έληξε ή δεν υπάρχει μέτρηση. Ρυθμός από τον πίνακα tasks (≈$ μόνο Claude):")
     st.dataframe(pd.DataFrame(rate_rows(P["dispatch"], now=now)), hide_index=True, width="stretch")
 
     st.subheader("Δρομολόγηση: ποιος απαντά σε τι, και γιατί")

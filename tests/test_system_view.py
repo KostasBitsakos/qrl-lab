@@ -129,3 +129,15 @@ def test_failed_commands_are_not_counted(tmp_path, monkeypatch):
     monkeypatch.setattr(sv, "_cmd", lambda args, timeout=5: (False, "boom"))
     st = {r["name"]: r["state"] for r in sv.services(NOW, heartbeat=str(tmp_path / "none"), db=d)}
     assert st["crontab"].startswith("μη διαθέσιμο") and st["systemd timers (user)"].startswith("μη διαθέσιμο")
+
+
+def test_usage_shows_pace_next_to_weekly_use():
+    reset = NOW + 3.5 * 86400                                   # half of the week has passed
+    status = {"as_of": NOW - 60, "seven_day": {"used_percentage": 30.0, "resets_at": reset},
+              "five_hour": {"used_percentage": 5.0, "resets_at": NOW + 3600}}
+    rows = {r["window"]: r for r in sv.claude_usage(status, NOW)}
+    assert rows["7ημ"]["pace"] == "50%" and rows["7ημ"]["pct"] == "30%"
+    assert rows["5ω"]["pace"] == "—"                            # the pace rule is weekly only
+    cx = sv.codex_usage([{"slot": "secondary", "used_percent": 12.0, "resets_at": reset, "as_of": NOW - 60}], NOW)
+    assert cx[0]["pace"] == "50%"
+    assert sv.claude_usage(None, NOW)[1]["pace"] == "—"         # unknown reset -> no pace, never a guess
