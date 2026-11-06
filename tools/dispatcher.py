@@ -100,6 +100,13 @@ DEFAULTS = {
     "unknown_daily_runs": "40",       # runs per 24 h per provider while its usage is unknown (assumption, tunable)
     "peer_hold_max_min": "30",        # a peer request held back by the governor this long fails (the caller is not left waiting)
     "max_retries": "1",               # transient failures retried at most this many times; a safety refusal never
+    # roles (v0.5.1 §5): a worker spawned with `work.py spawn --role R` uses these; jobs without a role keep claude_model.
+    # Codex models are empty = the ~/.codex/config.toml default until the researcher sets them (names are not guessed here)
+    "role_research_claude": "opus", "role_work_claude": "sonnet", "role_light_claude": "sonnet", "role_quick_claude": "haiku",
+    "role_research_codex": "", "role_work_codex": "", "role_light_codex": "", "role_quick_codex": "",
+    "role_research_codex_effort": "high", "role_work_codex_effort": "", "role_light_codex_effort": "low",
+    "role_quick_codex_effort": "low", "role_light_claude_effort": "low",
+    "codex_commit": "1",              # the dispatcher commits a finished Codex job's claimed files (Codex cannot write .git)
 }
 RESEARCHER_KEYS = set(DEFAULTS)
 
@@ -120,6 +127,13 @@ SETTING_RULES = {
     "pace_margin_pct": ("float", 0, 100), "optional_hard_pct": ("float", 1, 100), "five_hour_max_pct": ("float", 1, 100),
     "chat_hard_pct": ("float", 1, 100), "usage_stale_h": ("float", 0.1, 168), "unknown_daily_runs": ("int", 1, 10000),
     "peer_hold_max_min": ("int", 1, 1440), "max_retries": ("int", 0, 5),
+    "role_research_claude": ("text", _MODEL_RE), "role_work_claude": ("text", _MODEL_RE),
+    "role_light_claude": ("text", _MODEL_RE), "role_quick_claude": ("text", _MODEL_RE),
+    "role_research_codex": ("text", _MODEL_RE), "role_work_codex": ("text", _MODEL_RE),
+    "role_light_codex": ("text", _MODEL_RE), "role_quick_codex": ("text", _MODEL_RE),
+    "role_research_codex_effort": ("text", r"[a-z]{0,12}"), "role_work_codex_effort": ("text", r"[a-z]{0,12}"),
+    "role_light_codex_effort": ("text", r"[a-z]{0,12}"), "role_quick_codex_effort": ("text", r"[a-z]{0,12}"),
+    "role_light_claude_effort": ("text", r"[a-z]{0,12}"), "codex_commit": ("bool",),
     "chat_budget_usd": ("float", 0.01, 100), "max_budget_usd": ("float", 0.01, 100), "peer_budget_usd": ("float", 0.01, 100),
 }
 
@@ -187,10 +201,12 @@ def route_request(req_model, req_effort):
     return provider, model, effort
 
 
-def claude_model_for(s, kind, sel_model=None):
+def claude_model_for(s, kind, sel_model=None, role=None):
     """Claude model of one task -> (model, why). Single source for the dispatcher and the System tab."""
     if sel_model:
         return sel_model, "req_model"
+    if role and s.get(f"role_{role}_claude"):
+        return s[f"role_{role}_claude"], f"role_{role}_claude"
     if kind == "perm_answer":
         return (s["events_model"], "events_model") if s["events_model"] else (s["peer_claude_model"], "peer_claude_model")
     if kind == "run_event" and s["events_model"]:
@@ -217,6 +233,7 @@ CREATE TABLE IF NOT EXISTS peer_requests(id TEXT PRIMARY KEY, ts TEXT, from_prov
 CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, actor TEXT, action TEXT, detail TEXT);
 CREATE TABLE IF NOT EXISTS config_proposals(request_id TEXT PRIMARY KEY, key TEXT NOT NULL, value TEXT NOT NULL,
   old TEXT, reason TEXT, proposed_by TEXT, ts TEXT, applied INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS solo_jobs(job TEXT PRIMARY KEY, ran_on TEXT, ts TEXT, commit_info TEXT, review_peer TEXT);
 CREATE TABLE IF NOT EXISTS limits(provider TEXT NOT NULL, window TEXT NOT NULL, status TEXT, utilization REAL,
   resets_at REAL, overage INTEGER, updated_at TEXT, PRIMARY KEY(provider, window));
 """
@@ -1206,7 +1223,8 @@ class Dispatcher:
                 text += ("\n\n(An earlier attempt of this job was interrupted by a dispatcher restart: check "
                          "`git status` and the files it may have touched before you continue.)")
             yield {"kind": "job", "thread_id": tid, "msg_ids": [], "reply_to": j["reply_to"] or tid,
-                   "forced": j["provider"], "text": text, "req_ids": [], "job_id": j["id"], "title": j["title"],
+                   "forced": j["provider"], "role": j.get("role"), "text": text, "req_ids": [], "job_id": j["id"],
+                   "title": j["title"],
                    "parent_msgs": json.loads(j["parent_msgs"] or "[]")}
 
     # ---- one task
@@ -1318,12 +1336,16 @@ class Dispatcher:
                    QRL_REPLY_TO=item["reply_to"] or "")
         budget = s["chat_budget_usd"] if lane_of(item) == "chat" else s["max_budget_usd"]
         if provider == "claude":
-            model, _why = claude_model_for(s, item["kind"], item.get("sel_model"))
-            return run_claude(prompt, self.root, model, item.get("sel_effort") or s["claude_effort"], session_id=session_id,
+            role = item.get("role")
+            model, _why = claude_model_for(s, item["kind"], item.get("sel_model"), role)
+            effort = item.get("sel_effort") or (role and s.get(f"role_{role}_claude_effort")) or s["claude_effort"]
+            return run_claude(prompt, self.root, model, effort, session_id=session_id,
                               system_append=self.static_prompt(), budget=budget, timeout_s=timeout_s,
                               env=env, job=job)
-        return run_codex(prompt, self.root, item.get("sel_model") or s["codex_model"] or None,
-                         item.get("sel_effort") or s["codex_effort"] or None,
+        role = item.get("role")
+        return run_codex(prompt, self.root,
+                         item.get("sel_model") or (role and s.get(f"role_{role}_codex")) or s["codex_model"] or None,
+                         item.get("sel_effort") or (role and s.get(f"role_{role}_codex_effort")) or s["codex_effort"] or None,
                          session_id=session_id, timeout_s=timeout_s, env=env, job=job)
 
     def _cancelled(self, item):
@@ -1413,6 +1435,7 @@ class Dispatcher:
                 return "cancelled"
             if res["ok"] and not self._paid_credit_stop(provider, res):
                 self._finish_ok(provider, item, res)
+                self._after_job_ok(provider, item, tried)
                 return "done"
             tried.append((provider, res))
             if res["ok"]:  # answered, but on paid credits: post the answer, then stop using Claude for a while
@@ -1449,6 +1472,56 @@ class Dispatcher:
             self._post(item["reply_to"], f"⏸ Κανένας διαθέσιμος συντονιστής τώρα ({', '.join(LABEL[p] for p in wanted)}"
                                          f" σε όριο). Το αίτημα περιμένει· συνεχίζει αυτόματα περίπου {when}.")
         return "deferred"
+
+    def _after_job_ok(self, provider, item, tried):
+        """B5, still holding the job's claims: (1) a Codex job's claimed files are committed by the dispatcher, only
+        those, with a blob-hash check; (2) a job that ran on the other provider because the first one hit its limit is
+        marked solo, and gets a joint review when that provider is back (`_solo_reviews`)."""
+        jid = item.get("job_id")
+        if not jid or item["kind"] != "job":
+            return
+        info = ""
+        try:
+            if provider == "codex" and self.dd.get("codex_commit") == "1":
+                paths = [c["path"] for c in self.work.claims(jid)]
+                if paths:
+                    r = W.commit_claimed(self.root, paths, f"{jid}: {clip(item.get('title') or '', 100)} (committed by the "
+                                         f"dispatcher for the Codex job; claimed files only)")
+                    info = f"commit {r['out']}: {', '.join(r['files']) or '-'}"
+                    if r["mismatch"]:
+                        info += f" · HASH MISMATCH {r['mismatch']}"
+                        self.dd.audit("dispatcher", "commit_mismatch", f"{jid}: {r['mismatch']}")
+                    self.dd.audit("dispatcher", "codex_commit", f"{jid}: {info}")
+                    if r["files"]:
+                        self._post(item["reply_to"], f"Κώστα, ο dispatcher έκανε commit για το {jid} (Codex), μόνο τα claimed "
+                                   f"αρχεία: {', '.join(r['files'])}" + (f" · ΠΡΟΣΟΧΗ: το hash δεν ταιριάζει {r['mismatch']}"
+                                                                         if r["mismatch"] else "") + ".")
+        except (LabError, OSError) as e:
+            info = f"commit refused: {e}"
+            self.dd.audit("dispatcher", "codex_commit_refused", f"{jid}: {e}"[:300])
+            self._post(item["reply_to"], f"⚠️ Δεν έγινε commit για το {jid}: {clip(str(e), 300)}. Τα αρχεία μένουν στο working tree.")
+        if tried and not item.get("forced"):
+            self.dd.conn.execute("INSERT OR IGNORE INTO solo_jobs(job, ran_on, ts, commit_info) VALUES (?,?,?,?)",
+                                 (jid, provider, now_iso(), info))
+            self.dd.audit("dispatcher", "solo_job", f"{jid} ran only on {provider} ({tried[0][0]} was at its limit)")
+
+    def _solo_reviews(self):
+        """When the provider that was at its limit is available again, ask it for one read-only review of each solo job."""
+        for row in self.dd.conn.execute("SELECT * FROM solo_jobs WHERE review_peer IS NULL").fetchall():
+            other = OTHER.get(row["ran_on"])
+            if not other or not self.dd.available(other):
+                continue
+            job = self.work.job(row["job"]) or {}
+            files = ", ".join(c["path"] for c in self.work.claims(row["job"])) or "(claims already released: see the commit)"
+            prompt = (f"Read-only joint review (v0.5.1 B5). Job {row['job']} «{job.get('title', '')}» ran only on "
+                      f"{LABEL[row['ran_on']]} while you were at your limit. {row['commit_info'] or ''}\n"
+                      f"Files: {files}. Inspect with git (git log -3 --stat, git show) and the thread. Review for correctness, "
+                      "leakage, unfair baselines and overclaiming; say OK or list blocking issues. English, <300 words.")
+            pid = self.dd.peer_submit(other, prompt, key=f"solo-{row['job']}", from_provider=row["ran_on"])
+            self.dd.conn.execute("UPDATE solo_jobs SET review_peer=? WHERE job=?", (pid, row["job"]))
+            if job.get("reply_to") and self.lab.message(job["reply_to"]):
+                self._post(job["reply_to"], f"Κώστα, το {row['job']} έτρεξε μόνο στον {LABEL[row['ran_on']]} (ο {LABEL[other]} "
+                                            f"ήταν σε όριο). Ζήτησα έναν read-only κοινό έλεγχο από τον {LABEL[other]} ({pid}).")
 
     def _escalations_due(self, esc):
         """Debounce (R-20261029-012): urgent notes (work.py say --urgent) and notes from jobs that already ended wake
@@ -1723,6 +1796,10 @@ class Dispatcher:
                 print(f"dispatcher warning: sweep: {e}", file=sys.stderr, flush=True)
         for jid in self.work.cancel_requested():
             stop_job(jid)
+        try:
+            self._solo_reviews()
+        except sqlite3.Error as e:
+            print(f"dispatcher warning: solo reviews: {e}", file=sys.stderr, flush=True)
         if self.dd.get("paused") == "1":
             return
         with self._busy_lock:

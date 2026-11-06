@@ -50,6 +50,7 @@ sys.path.insert(0, os.path.join(LAB, "tools"))
 
 from labdb import LabDB, LabError  # noqa: E402
 import dispatcher as D  # noqa: E402
+import work as W  # noqa: E402
 import build_md_index  # noqa: E402
 
 PASSED = []
@@ -728,6 +729,56 @@ def test_max_workers_cancel_heartbeat():
     ok("max_workers cap, cancel stops the run, heartbeat thread, restart re-queues spawned jobs")
 
 
+def test_roles_commit_claimed_and_solo_review():
+    d = fresh_dispatcher()
+    db = LabDB()
+    d.dd.set("claude_model", "sonnet")
+    root = db.researcher_send("δουλειά")
+    db.conn.execute("UPDATE messages SET status='done' WHERE id=?", (root,))
+    # role: a research worker runs on the role's model, an unroled one keeps claude_model
+    d.work.create("worker", "spawn", "R job", "x", reply_to=root, thread_id=root, status="queued", role="research")
+    queue("claude", {"mode": "ok", "text": "ok"})
+    assert d.once() == "done"
+    argv = calls("claude")[-1]["argv"]
+    assert "opus" in argv and "sonnet" not in argv, argv
+    d.work.create("worker", "spawn", "plain", "x", reply_to=root, thread_id=root, status="queued")
+    queue("claude", {"mode": "ok", "text": "ok"})
+    assert d.once() == "done" and "sonnet" in calls("claude")[-1]["argv"]
+    # commit_claimed: only the claimed file, blobs verified; an unclaimed modified file stays out
+    repo = tempfile.mkdtemp(prefix="b5repo-")
+    os.makedirs(os.path.join(repo, ".lab"))
+    run = lambda *a: subprocess.run(["git", *a], cwd=repo, capture_output=True, text=True, check=True)
+    run("init", "-q"); run("config", "user.email", "t@t"); run("config", "user.name", "t")
+    open(os.path.join(repo, "seed.txt"), "w").write("0"); run("add", "-A"); run("commit", "-qm", "seed")
+    open(os.path.join(repo, "mine.py"), "w").write("print(1)\n")
+    open(os.path.join(repo, "other.py"), "w").write("print(2)\n")
+    r = W.commit_claimed(repo, ["mine.py"], "J1: test")
+    assert r["files"] == ["mine.py"] and r["mismatch"] == [], r
+    assert "other.py" in run("status", "--porcelain").stdout and "mine.py" not in run("status", "--porcelain").stdout
+    assert W.commit_claimed(repo, ["mine.py"], "J1: again")["files"] == [], "nothing new: no empty commit"
+    shutil.rmtree(repo, ignore_errors=True)
+    # solo: Claude at its limit -> the job runs on Codex only; when Claude is back, one read-only review is requested
+    j = d.work.create("worker", "spawn", "Solo job", "x", reply_to=root, thread_id=root, status="queued")
+    queue("claude", {"mode": "quota"})
+    queue("codex", {"mode": "ok", "text": "έτοιμο"})
+    assert d.once() == "done"
+    row = d.dd.conn.execute("SELECT * FROM solo_jobs WHERE job=?", (j,)).fetchone()
+    assert row and row["ran_on"] == "codex" and row["review_peer"] is None
+    d._solo_reviews()
+    assert d.dd.conn.execute("SELECT review_peer FROM solo_jobs WHERE job=?", (j,)).fetchone()[0] is None, "Claude still out"
+    d.dd.clear("claude")
+    d._solo_reviews(); d._solo_reviews()
+    pid = d.dd.conn.execute("SELECT review_peer FROM solo_jobs WHERE job=?", (j,)).fetchone()[0]
+    reqs = d.dd.conn.execute("SELECT * FROM peer_requests WHERE key=?", (f"solo-{j}",)).fetchall()
+    assert pid and len(reqs) == 1 and reqs[0]["to_provider"] == "claude", "exactly one joint review"
+    d.dd.conn.execute("UPDATE peer_requests SET status='done' WHERE key=?", (f"solo-{j}",))
+    # a job pinned to a provider is not solo
+    j2 = d.work.create("worker", "spawn", "Pinned", "x", reply_to=root, thread_id=root, provider="codex", status="queued")
+    queue("codex", {"mode": "ok", "text": "ok"})
+    assert d.once() == "done" and not d.dd.conn.execute("SELECT 1 FROM solo_jobs WHERE job=?", (j2,)).fetchone()
+    ok("B5: role models for workers, dispatcher commit of claimed files only (blob check), solo jobs get one joint review")
+
+
 def test_config_card_applies_on_approval_by_script():
     d = fresh_dispatcher()
     d.lab.close()
@@ -1098,7 +1149,7 @@ def test_held_job_does_not_block_the_queue_and_peer_requeues():
 
 
 
-TESTS = [test_config_card_applies_on_approval_by_script, test_approved_sim_spec_is_launched_by_script, test_clean_batch_summary_by_script_exactly_once, test_run_events_full_request_set, test_retry_attempt_accounting_and_resume_policy,
+TESTS = [test_roles_commit_claimed_and_solo_review, test_config_card_applies_on_approval_by_script, test_approved_sim_spec_is_launched_by_script, test_clean_batch_summary_by_script_exactly_once, test_run_events_full_request_set, test_retry_attempt_accounting_and_resume_policy,
          test_resume_rejection_before_work_only, test_peer_context_and_ttl_limits, test_claude_reply_and_resume, test_failover_on_quota, test_both_exhausted_then_resume,
          test_choice_mention_status_and_errors, test_paid_credits_guard, test_decisions_and_run_events, test_peers,
          test_md_index, test_parse_reset, test_panel_and_installer, test_edit_freeze, test_headless_permission_roundtrip,
