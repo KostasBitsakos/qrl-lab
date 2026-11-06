@@ -1,0 +1,11 @@
+# DRAFT ONLY — calibration PAUSED. Ποτέ εφαρμογή των copied/ αυτούσιων.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: qrl-calib
+resources:
+  - isolated/namespace.yaml
+  - copied/redis-autoscale-cluster-deployment.yaml
+  - copied/redis-autoscale-all-service.yaml
+  - copied/redis-autoscale-cluster-hpa.yaml
+  - copied/redis-cluster-coordinator-deployment.yaml
+  - isolated/network-policy.yaml

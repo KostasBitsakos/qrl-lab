@@ -1,0 +1,27 @@
+[
+  {
+    "source": "code/real/redis-autoscale-cluster-deployment.yaml",
+    "destination": "real/infra-draft/manifests/copied/redis-autoscale-cluster-deployment.yaml",
+    "sha256": "ff3bf2028974c0ba2690f331067d338d16328124413387d9e77df40bb5e2362c"
+  },
+  {
+    "source": "code/real/redis-autoscale-all-service.yaml",
+    "destination": "real/infra-draft/manifests/copied/redis-autoscale-all-service.yaml",
+    "sha256": "8ac88d9cd00b1ea3d0ea7527717850bd57ea2d63b5655a1728392621f71e94ee"
+  },
+  {
+    "source": "code/real/redis-autoscale-cluster-hpa.yaml",
+    "destination": "real/infra-draft/manifests/copied/redis-autoscale-cluster-hpa.yaml",
+    "sha256": "85d2db6d70d63e9d9dfa385be1d251a298f19b64e462480cc51b14f689cec9c4"
+  },
+  {
+    "source": "code/real/redis-cluster-coordinator-deployment.yaml",
+    "destination": "real/infra-draft/manifests/copied/redis-cluster-coordinator-deployment.yaml",
+    "sha256": "02c50f997f1c45c29bdc6ea29063ce906d616625eda932e315ee7d21db652ffe"
+  },
+  {
+    "source": "code-poisson-c345/tuning/poisson_ms.py",
+    "destination": "real/infra-draft/loadgen/sim_poisson_ms.py",
+    "sha256": "188b7fcebe016ca8589d1df73553b3f4e2d3478b3511d8d3ae84ed7e146d9020"
+  }
+]

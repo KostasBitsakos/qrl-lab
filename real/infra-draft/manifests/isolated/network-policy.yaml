@@ -1,0 +1,16 @@
+# DRAFT: εσωτερική επικοινωνία μόνο. Χρειάζεται CNI με NetworkPolicy enforcement.
+# Δεν επιτρέπεται DNS/Internet/API egress: το legacy go install θα αποτύχει.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: namespace-internal-only
+  namespace: qrl-calib
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {}
+  egress:
+    - to:
+        - podSelector: {}
