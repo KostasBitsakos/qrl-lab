@@ -20,9 +20,11 @@ from labdb import LabError, lab_dir, lab_root
 # (C-20261021-03: a second, parallel tuning worktree for the Codex branch; each sandbox names its repo and branch, and
 # the worktree's checked-out branch must equal the sandbox branch)
 WORKTREES = {"code": "code-tuning", "code-astra": "code-tuning-astra",
-             "code-poisson": "code-poisson", "code-poisson-astra": "code-poisson-astra", "code-poisson-spiky": "code-poisson-spiky"}
+             "code-poisson": "code-poisson", "code-poisson-astra": "code-poisson-astra", "code-poisson-spiky": "code-poisson-spiky",
+             "code-poisson-c345": "code-poisson-c345"}
 CYCLE2_BRANCHES = {"code-poisson": "dinos-poisson", "code-poisson-astra": "dinos-poisson-astra"}
-SANDBOX_BRANCHES = dict(CYCLE2_BRANCHES, **{"code-poisson-spiky": "dinos-poisson-spiky"})
+SANDBOX_BRANCHES = dict(CYCLE2_BRANCHES, **{"code-poisson-spiky": "dinos-poisson-spiky",
+                                            "code-poisson-c345": "dinos-poisson-c345"})
 # Peeled reviewed cycle2-env-v1 commit, never a movable tag/branch.
 CYCLE2_ENV_COMMIT = "238003f58a7ae547c9ff03b05f5484ea5a1c342b"
 # Peeled reviewed cycle2-harness-v1 commit (J40, Codex APPROVE r3) and the shared harness files pinned to it.
@@ -40,12 +42,23 @@ SPIKY_REPO = "code-poisson-spiky"
 SPIKY_ENV_COMMIT = "7748887e47db735bf8bfb098bdbdf16ca5c9434d"
 SPIKY_HARNESS_COMMIT = "a4302c096d52ee80ac7bc38b5f7daf7d515a23c5"
 SPIKY_ENTRY_SHA256 = CYCLE2_ENTRY_SHA256  # wrapper unchanged, verified independently
+# C345 profile (R-20261106-002, J350): original poisson_ms + derp_ddqn. Env = the spiky env commit (poisson_ms bytes
+# unchanged); harness = dinos-poisson-c345 reviewed commit. Same manifest-whitelist rule as spiky.
+C345_REPO = "code-poisson-c345"
+C345_ENV_COMMIT = SPIKY_ENV_COMMIT
+C345_HARNESS_COMMIT = "d9357d4bc3866bf186a04f23856616a4f3391aae"
+C345_ENTRY_SHA256 = CYCLE2_ENTRY_SHA256
+MANIFEST_REPOS = (SPIKY_REPO, C345_REPO)   # children must be in the frozen allowed_children list; full tuning tree pinned
 
 
 def profile(sb):
-    spiky = sb.get("repo") == SPIKY_REPO
-    return (SPIKY_ENV_COMMIT, SPIKY_HARNESS_COMMIT, SPIKY_ENTRY_SHA256) if spiky else (
-        CYCLE2_ENV_COMMIT, CYCLE2_HARNESS_COMMIT, CYCLE2_ENTRY_SHA256)
+    # module constants are read at call time (tests patch them)
+    repo = sb.get("repo")
+    if repo == SPIKY_REPO:
+        return SPIKY_ENV_COMMIT, SPIKY_HARNESS_COMMIT, SPIKY_ENTRY_SHA256
+    if repo == C345_REPO:
+        return C345_ENV_COMMIT, C345_HARNESS_COMMIT, C345_ENTRY_SHA256
+    return CYCLE2_ENV_COMMIT, CYCLE2_HARNESS_COMMIT, CYCLE2_ENTRY_SHA256
 
 
 FORBIDDEN_WORDS = ("kubectl", "qiskit_ibm", "ibm_quantum", "ibmq", "qiskit-ibm", "helm", "kube")
@@ -203,7 +216,7 @@ def verify_sandbox_protected(sb, root=None):
             raise LabError("Protected wrapper is missing or unreadable. Nothing was started.") from exc
         if entry_hash != entry_pin:
             raise LabError("Protected wrapper differs from reviewed digest. Nothing was started.")
-        if sb.get("repo") == SPIKY_REPO:
+        if sb.get("repo") in MANIFEST_REPOS:
             # Pin all tuning Python imports, not merely the entry point and a few harness helpers.
             out = subprocess.run(["git", "-C", wt, "ls-tree", "-rz", "--name-only", harness_pin,
                                   "--", "tuning"], capture_output=True, timeout=30)
@@ -420,7 +433,7 @@ def check_child(child, parent, root=None, now=None):
     check_env(child.get("env"), "child")
     check_env(child.get("env_threads"), "child")
     selected = select_worktree(sb, child)
-    if selected.get("repo") == SPIKY_REPO:
+    if selected.get("repo") in MANIFEST_REPOS:
         from labdb import canonical_hash
         allowed = sb.get("allowed_children")
         if not isinstance(allowed, list) or canonical_hash(child) not in allowed:
