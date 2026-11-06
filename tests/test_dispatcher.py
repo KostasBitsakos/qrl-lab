@@ -728,6 +728,48 @@ def test_max_workers_cancel_heartbeat():
     ok("max_workers cap, cancel stops the run, heartbeat thread, restart re-queues spawned jobs")
 
 
+def test_approved_sim_spec_is_launched_by_script():
+    d = fresh_dispatcher()
+    d.lab.close()
+    d.lab = LabDB(os.path.join(LAB, ".lab", "lab.db"))
+    db = d.lab
+    root = db.researcher_send("Τρέξε τρία seeds")
+    db.conn.execute("UPDATE messages SET status='done' WHERE id=?", (root,))
+    cmd = [sys.executable, "-c", "import time; time.sleep(2)"]
+    spec = {"name": "tri", "scope": "sim", "cwd": ".", "max_attempts": 1, "max_parallel": 2,
+            "entries": [{"name": f"seed{i}", "seed": i, "cmd": cmd} for i in range(3)],
+            "limits": {"wall_clock_hours": 1.0}}
+    rid = db.ask("approval", "tri", "σώμα", scope="sim", spec=spec, thread_id=root)
+    n0 = len(calls("claude")) + len(calls("codex"))
+    db.decide(rid, "approve", "οκ")
+    assert d.once() is None, "approved sim spec: launched by script, no coordinator task"
+    assert len(calls("claude")) + len(calls("codex")) == n0
+    runs = lambda: [dict(r) for r in db.conn.execute("SELECT entry, status FROM runs WHERE request_id=?", (rid,))]
+    assert sorted(r["entry"] for r in runs()) == [0, 1], runs()           # max_parallel 2
+    assert db.request(rid)["decision_delivered"] == 1
+    assert any("ξεκίνησε 2 από 3" in b for b in thread_bodies(db, root))
+    d.once()
+    assert len(runs()) == 2, "no duplicate start while both slots are busy"
+    t0 = time.time()
+    while time.time() - t0 < 30 and len(runs()) < 3:
+        time.sleep(0.5)
+        d._candidates().close() if False else list(d._candidates())
+    assert sorted(r["entry"] for r in runs()) == [0, 1, 2], runs()          # slot freed -> entry 2 started once
+    time.sleep(0.5); list(d._candidates())
+    assert len(runs()) == 3
+    # a real-scope approval is never launched by script
+    rid2 = db.ask("approval", "real", "σώμα", scope="real", thread_id=root,
+                  spec={"name": "r", "scope": "real", "cwd": ".", "max_attempts": 1,
+                        "entries": [{"name": "e", "cmd": cmd}], "limits": {"wall_clock_hours": 1.0},
+                        "real": {"kube_context": "x", "namespace": "n", "rollback": "r"}})
+    db.decide(rid2, "approve", "οκ")
+    items = [x for x in d._candidates() if x["kind"] == "decision"]
+    assert items and rid2 in items[0]["req_ids"] and not db.conn.execute(
+        "SELECT 1 FROM runs WHERE request_id=?", (rid2,)).fetchone()
+    db.mark_delivered(req_ids=[rid2])   # leave no pending decision for the next test
+    ok("approved sim spec -> launched by script (max_parallel, once, no model); real scope stays with the coordinator")
+
+
 def test_clean_batch_summary_by_script_exactly_once():
     d = fresh_dispatcher()
     d.lab.close()
@@ -1017,7 +1059,7 @@ def test_held_job_does_not_block_the_queue_and_peer_requeues():
 
 
 
-TESTS = [test_clean_batch_summary_by_script_exactly_once, test_run_events_full_request_set, test_retry_attempt_accounting_and_resume_policy,
+TESTS = [test_approved_sim_spec_is_launched_by_script, test_clean_batch_summary_by_script_exactly_once, test_run_events_full_request_set, test_retry_attempt_accounting_and_resume_policy,
          test_resume_rejection_before_work_only, test_peer_context_and_ttl_limits, test_claude_reply_and_resume, test_failover_on_quota, test_both_exhausted_then_resume,
          test_choice_mention_status_and_errors, test_paid_credits_guard, test_decisions_and_run_events, test_peers,
          test_md_index, test_parse_reset, test_panel_and_installer, test_edit_freeze, test_headless_permission_roundtrip,

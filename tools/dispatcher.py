@@ -58,6 +58,7 @@ import work as W  # noqa: E402
 from researcher_text import researcher_text  # noqa: E402
 import governor  # noqa: E402
 import run_events  # noqa: E402
+import launch_run  # noqa: E402
 
 PROVIDERS = ("claude", "codex")
 OTHER = {"claude": "codex", "codex": "claude"}
@@ -864,6 +865,59 @@ class Dispatcher:
         return "\n\n".join(p for p in parts if p)
 
     # ---- work discovery
+    def _launch_ready(self, rid):
+        """Start the not-yet-started entries of approved request `rid` up to spec.max_parallel (what
+        `launch_run.py start --all` does) -> (started run ids, entries still waiting). launch_run re-checks approval,
+        hash and attempts, and refuses an entry that is already running, so repeating this never duplicates a run."""
+        _, spec = launch_run.load_approved_spec(self.lab, rid)
+        runs = [dict(x) for x in self.lab.conn.execute("SELECT entry, status FROM runs WHERE request_id=?", (rid,))]
+        running = sum(1 for x in runs if x["status"] in ("starting", "running"))
+        todo = [i for i in range(len(spec["entries"])) if i not in {x["entry"] for x in runs}]
+        started = []
+        for i in list(todo):
+            if running >= int(spec.get("max_parallel", 1)):
+                break
+            started.append(launch_run.start_entry(self.lab, rid, i))
+            todo.remove(i)
+            running += 1
+        return started, len(todo)
+
+    def _launch_approved(self, r, tid):
+        """None = handled by script (decision delivered); "" = not eligible, the coordinator gets it as before;
+        otherwise the refusal text (the coordinator gets the decision with that note). Only approved, frozen,
+        scope 'sim' specs that are not sandbox specs; real/qpu approvals keep going through the coordinator."""
+        if not (r["kind"] == "approval" and r["state"] == "approved" and r["scope"] == "sim"
+                and r["spec_path"] and r["spec_hash"]):
+            return ""
+        try:
+            _, spec = launch_run.load_approved_spec(self.lab, r["id"])
+            if spec.get("kind") in ("sandbox", "sandbox-amendment"):
+                return ""
+            first = not self.dd.is_notified("launch", r["id"])
+            started, left = self._launch_ready(r["id"])
+            self.dd.mark_notified("launch", r["id"])        # later ticks keep filling slots as runs finish
+        except (LabError, OSError, ValueError) as e:
+            return str(e)[:300]
+        if first:
+            root = tid if self.lab.message(tid) else self._system_thread()
+            self.lab.post("dispatcher", f"Κώστα, εγκρίθηκε το {r['id']} («{r['title']}»). Ο dispatcher ξεκίνησε "
+                          f"{len(started)} από {len(spec['entries'])} entries με script, χωρίς μοντέλο"
+                          + (f" ({left} περιμένουν θέση, max_parallel {spec.get('max_parallel', 1)})" if left else "")
+                          + ":\n" + "\n".join(f"- {x}" for x in started), root, kind="status")
+        self.lab.mark_delivered(req_ids=[r["id"]])
+        return None
+
+    def _launch_pending(self):
+        """Fill free slots for requests the script launched earlier (entries beyond max_parallel)."""
+        for row in self.dd.conn.execute("SELECT ref FROM notified WHERE kind='launch'").fetchall():
+            req = self.lab.request(row["ref"])
+            if not req or req["state"] != "approved":
+                continue
+            try:
+                self._launch_ready(row["ref"])
+            except (LabError, OSError, ValueError):
+                continue
+
     def _post_batch_summary(self, rid, runs, ref, tid):
         """Exactly once: the marker in the body is the idempotency key (a crash between post and mark_notified must not
         post twice), mark_notified keeps the candidate scan from revisiting the batch."""
@@ -943,9 +997,15 @@ class Dispatcher:
                            "\"...\"; ask the researcher only if it is the researcher's call):\n" + "\n".join(lines)}
         # 2. decisions
         _, decs = self.lab.undelivered()
+        self._launch_pending()
         for r in decs:
             tid = r["thread_id"] if r["thread_id"] and self.lab.message(r["thread_id"]) else self._system_thread()
+            err = self._launch_approved(r, tid)       # B3: an approved frozen sim spec is launched by a script
+            if err is None:
+                continue
             note = f' Researcher note: "{r["decision_text"]}"' if r["decision_text"] else ""
+            if err:
+                note += f" The script launch was refused ({err}); handle it yourself, within the approval."
             text = (f"Researcher decision on {r['id']} [{r['kind']}/{r['scope']}] \"{r['title']}\": {r['state']}."
                     f"{note}\nAct only within what this decision allows (python3 tools/labq.py request {r['id']}),"
                     f" then report in this thread.")
