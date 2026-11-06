@@ -865,6 +865,35 @@ class Dispatcher:
         return "\n\n".join(p for p in parts if p)
 
     # ---- work discovery
+    def _post_escalations(self, esc):
+        """Exactly once per note: the ids in the body are the idempotency key (post/ask, then mark read)."""
+        groups = {}
+        for m in esc:
+            groups.setdefault(m["from_job"], []).append(m)
+        for job, msgs in groups.items():
+            src = self.work.job(job) or {}
+            tid = src.get("thread_id") if src.get("thread_id") and self.lab.message(src["thread_id"]) \
+                else self._system_thread()
+            title = (src.get("title") or job)[:80]
+            for urgent, ms in ((True, [m for m in msgs if m["kind"] == "urgent"]),
+                               (False, [m for m in msgs if m["kind"] != "urgent"])):
+                if not ms:
+                    continue
+                mark = "[esc " + ",".join(str(m["id"]) for m in ms) + "]"
+                lines = "\n".join(f"- {m['body']}" for m in ms)
+                if urgent:
+                    if not self.lab.conn.execute("SELECT 1 FROM requests WHERE instr(body, ?)>0", (mark,)).fetchone():
+                        self.lab.ask("question", f"{job}: χρειάζεται απόφαση — {title}",
+                                     f"Ο worker {job} («{title}») ζητά απόφαση:\n{lines}\n\n{mark}",
+                                     author="dispatcher", scope="other", thread_id=tid)
+                elif not self.lab.conn.execute("SELECT 1 FROM messages WHERE thread_id=? AND instr(body, ?)>0",
+                                               (tid, mark)).fetchone():
+                    self.lab.post("dispatcher", f"Σημείωση από {job} («{title}»):\n{lines}\n\n{mark}", tid,
+                                  kind="status")
+            self.work.mark_read([m["id"] for m in msgs])
+        self.dd.conn.execute("INSERT OR REPLACE INTO settings(key, value, updated_at, updated_by)"
+                             " VALUES ('escalation_last_wake',?,?,'dispatcher')", (str(time.time()), now_iso()))
+
     def _launch_ready(self, rid):
         """Start the not-yet-started entries of approved request `rid` up to spec.max_parallel (what
         `launch_run.py start --all` does) -> (started run ids, entries still waiting). launch_run re-checks approval,
@@ -984,17 +1013,11 @@ class Dispatcher:
             yield {"kind": "message", "thread_id": tid, "msg_ids": [m["id"] for m in batch],
                    "reply_to": batch[-1]["id"], "forced": forced or sel_provider, "sel_model": sel_model,
                    "sel_effort": sel_effort, "text": "\n\n".join(texts), "req_ids": []}
-        # 1b. agents' escalations to the chat coordinator (could not agree, or need the researcher)
+        # 1b. agents' escalations: by script (B3) - urgent notes become a card for the researcher, routine/final notes
+        # a status line in the job's thread; no coordinator wake-up
         esc = self.work.escalations()
         if esc and self._escalations_due(esc):
-            src = self.work.job(esc[0]["from_job"]) or {}
-            tid = src.get("thread_id") if src.get("thread_id") and self.lab.message(src["thread_id"]) \
-                else self._system_thread()
-            lines = [f"- from {m['from_job']}: {m['body']}" for m in esc]
-            yield {"kind": "escalation", "thread_id": tid, "msg_ids": [], "reply_to": src.get("reply_to") or tid,
-                   "forced": None, "req_ids": [], "esc_ids": [m["id"] for m in esc],
-                   "text": "Parallel jobs escalated to you (you may answer each with python3 tools/work.py say <job> "
-                           "\"...\"; ask the researcher only if it is the researcher's call):\n" + "\n".join(lines)}
+            self._post_escalations(esc)
         # 2. decisions
         _, decs = self.lab.undelivered()
         self._launch_pending()

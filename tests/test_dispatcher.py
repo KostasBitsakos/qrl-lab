@@ -936,26 +936,35 @@ def test_escalation_debounce():
     d = fresh_dispatcher()
     w = d.work
     a = w.create("worker", "spawn", "A", "long job", reply_to="M-x", status="running")
+    n0 = len(calls("claude")) + len(calls("codex"))
     esc = lambda: [i for i in d._candidates() if i["kind"] == "escalation"]
+    reqs = lambda: d.lab.conn.execute("SELECT * FROM requests WHERE author='dispatcher' AND title LIKE ?",
+                                      (a + ":%",)).fetchall()
+    notes = lambda: d.lab.conn.execute("SELECT body FROM messages WHERE author='dispatcher' AND body LIKE ?",
+                                       (f"%{a}%",)).fetchall()
     w.say(a, "coordinator", "progress 1")
-    first = esc()
-    assert len(first) == 1, "no wake-up yet: the first routine note wakes the coordinator"
-    d._consume(first[0])
+    assert esc() == [] and len(notes()) == 1, "routine note: a status line by script, no coordinator task"
     w.say(a, "coordinator", "progress 2")
     w.say(a, "coordinator", "progress 3")
-    assert esc() == [], "routine notes inside the debounce window are batched"
+    esc()
+    assert len(notes()) == 1, "routine notes inside the debounce window are batched"
     d.dd.conn.execute("UPDATE settings SET value=? WHERE key='escalation_last_wake'", (str(time.time() - 1201),))
-    batch = esc()
-    assert len(batch) == 1 and "progress 2" in batch[0]["text"] and "progress 3" in batch[0]["text"]
-    d._consume(batch[0])
+    esc()
+    nb = notes()
+    assert len(nb) == 2 and "progress 2" in nb[-1]["body"] and "progress 3" in nb[-1]["body"]
     w.say(a, "coordinator", "blocked: need a choice", kind="urgent")
-    assert len(esc()) == 1, "urgent notes wake at once"
-    d._consume(esc()[0])
+    esc()
+    r = reqs()
+    assert len(r) == 1 and r[0]["kind"] == "question" and "blocked: need a choice" in r[0]["body"], "urgent -> a card at once"
+    esc()
+    assert len(reqs()) == 1, "exactly one card per note"
     w.say(a, "coordinator", "final note")
-    assert esc() == []
     w.set_status(a, "done")
-    assert len(esc()) == 1, "a note from a job that already ended wakes at once"
-    ok("escalation debounce: routine notes max 1 wake per window; urgent and final notes immediate")
+    esc()
+    assert len(notes()) == 3 and w.escalations() == [], "a note from a job that already ended is posted at once"
+    assert len(calls("claude")) + len(calls("codex")) == n0, "escalations cost no model call"
+    d.lab.conn.execute("UPDATE requests SET state='withdrawn', decision_delivered=1 WHERE author='dispatcher'")
+    ok("escalations: routine notes batched into a status line, urgent ones a card, no model call, once each")
 
 
 def n_tasks(d, provider):
