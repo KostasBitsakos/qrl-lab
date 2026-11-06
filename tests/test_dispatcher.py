@@ -812,6 +812,12 @@ def test_roles_commit_claimed_and_solo_review():
     reqs = d.dd.conn.execute("SELECT * FROM peer_requests WHERE key=?", (f"solo-{j}",)).fetchall()
     assert pid and len(reqs) == 1 and reqs[0]["to_provider"] == "claude", "exactly one joint review"
     d.dd.conn.execute("UPDATE peer_requests SET status='done' WHERE key=?", (f"solo-{j}",))
+    # Claude already marked unavailable before the job starts (nothing "tried"): still solo
+    d.dd.mark_exhausted("claude", time.time() + 3600, "drill")
+    j3 = d.work.create("worker", "spawn", "Pre-exhausted", "x", reply_to=root, thread_id=root, status="queued")
+    queue("codex", {"mode": "ok", "text": "ok"})
+    assert d.once() == "done" and d.dd.conn.execute("SELECT 1 FROM solo_jobs WHERE job=?", (j3,)).fetchone()
+    d.dd.clear("claude")
     # a job pinned to a provider is not solo
     j2 = d.work.create("worker", "spawn", "Pinned", "x", reply_to=root, thread_id=root, provider="codex", status="queued")
     queue("codex", {"mode": "ok", "text": "ok"})
@@ -847,6 +853,12 @@ def test_config_card_applies_on_approval_by_script():
     list(d._candidates())
     assert d.dd.get("max_retries") == "3", "applied flag: replay changes nothing"
     assert len(calls("claude")) + len(calls("codex")) == n0, "config cards cost no model call"
+    # a stale approval never overwrites a newer choice
+    rid3 = D.propose_config(d.lab, d.dd, "max_retries", "4", "r3", author="J9")
+    d.dd.change("max_retries", "2")
+    d.lab.decide(rid3, "approve", "ok")
+    list(d._candidates())
+    assert d.dd.get("max_retries") == "2" and d.lab.request(rid3)["decision_delivered"] == 1, "conflict: nothing written"
     d.dd.set("max_retries", "1")
     ok("config card: validated proposal, applied on approval by script (audited, once), rejected = no change, 0 model calls")
 
@@ -1072,7 +1084,9 @@ def test_escalation_debounce():
     d.dd.conn.execute("UPDATE settings SET value=? WHERE key='escalation_last_wake'", (str(time.time() - 1201),))
     esc()
     nb = notes()
-    assert len(nb) == 2 and "progress 2" in nb[-1]["body"] and "progress 3" in nb[-1]["body"]
+    assert len(nb) == 3 and "progress 2" in nb[1]["body"] and "progress 3" in nb[2]["body"], "one line per note, once each"
+    esc()
+    assert len(notes()) == 3, "a second scan reposts nothing"
     w.say(a, "coordinator", "blocked: need a choice", kind="urgent")
     esc()
     r = reqs()
@@ -1082,7 +1096,7 @@ def test_escalation_debounce():
     w.say(a, "coordinator", "final note")
     w.set_status(a, "done")
     esc()
-    assert len(notes()) == 3 and w.escalations() == [], "a note from a job that already ended is posted at once"
+    assert len(notes()) == 4 and w.escalations() == [], "a note from a job that already ended is posted at once"
     assert len(calls("claude")) + len(calls("codex")) == n0, "escalations cost no model call"
     d.lab.conn.execute("UPDATE requests SET state='withdrawn', decision_delivered=1 WHERE author='dispatcher'")
     ok("escalations: routine notes batched into a status line, urgent ones a card, no model call, once each")

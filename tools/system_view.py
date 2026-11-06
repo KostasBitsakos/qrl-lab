@@ -177,8 +177,17 @@ def _editor(st, r, path):
     else:
         new = c2.text_input("τιμή", value=r["value"], key=f"sv_{key}", label_visibility="collapsed")
     c2.caption(f"προεπιλογή {r['default']!r} · {r['source']}" + (f" · {r['changed']}" if r["changed"] else ""))
+    base = st.session_state.setdefault(f"sbase_{key}", r["value"])      # what this page first showed for the key
+    if base != r["value"]:
+        c3.warning("άλλαξε")
+        if c3.button("Ενημέρωση", key=f"sr_{key}"):
+            st.session_state[f"sbase_{key}"] = r["value"]
+            st.rerun()
+        c2.caption(f"Η τιμή άλλαξε στο μεταξύ ({base!r} → {r['value']!r}). Πάτα «Ενημέρωση» και δες τη νέα τιμή.")
+        return
     if c3.button("Εφαρμογή", key=f"sb_{key}", disabled=str(new).strip() == r["value"]):
-        status, msg = apply_change(path, key, new, r["value"])
+        status, msg = apply_change(path, key, new, base)
+        st.session_state.pop(f"sbase_{key}", None)
         (st.success if status == "applied" else st.warning if status in ("noop", "conflict") else st.error)(msg)
 
 

@@ -976,19 +976,18 @@ class Dispatcher:
             title = (src.get("title") or job)[:80]
             for urgent, ms in ((True, [m for m in msgs if m["kind"] == "urgent"]),
                                (False, [m for m in msgs if m["kind"] != "urgent"])):
-                if not ms:
-                    continue
-                mark = "[esc " + ",".join(str(m["id"]) for m in ms) + "]"
-                lines = "\n".join(f"- {m['body']}" for m in ms)
-                if urgent:
-                    if not self.lab.conn.execute("SELECT 1 FROM requests WHERE instr(body, ?)>0", (mark,)).fetchone():
+                for m in ms:      # one marker per note: a crash and a changed batch can never repost an earlier note
+                    mark = f"[esc {m['id']}]"
+                    if urgent:
+                        if self.lab.conn.execute("SELECT 1 FROM requests WHERE instr(body, ?)>0", (mark,)).fetchone():
+                            continue
                         self.lab.ask("question", f"{job}: χρειάζεται απόφαση — {title}",
-                                     f"Ο worker {job} («{title}») ζητά απόφαση:\n{lines}\n\n{mark}",
+                                     f"Ο worker {job} («{title}») ζητά απόφαση:\n- {m['body']}\n\n{mark}",
                                      author="dispatcher", scope="other", thread_id=tid)
-                elif not self.lab.conn.execute("SELECT 1 FROM messages WHERE thread_id=? AND instr(body, ?)>0",
-                                               (tid, mark)).fetchone():
-                    self.lab.post("dispatcher", f"Σημείωση από {job} («{title}»):\n{lines}\n\n{mark}", tid,
-                                  kind="status")
+                    elif not self.lab.conn.execute("SELECT 1 FROM messages WHERE thread_id=? AND instr(body, ?)>0",
+                                                   (tid, mark)).fetchone():
+                        self.lab.post("dispatcher", f"Σημείωση από {job} («{title}»):\n- {m['body']}\n\n{mark}", tid,
+                                      kind="status")
             self.work.mark_read([m["id"] for m in msgs])
         self.dd.conn.execute("INSERT OR REPLACE INTO settings(key, value, updated_at, updated_by)"
                              " VALUES ('escalation_last_wake',?,?,'dispatcher')", (str(time.time()), now_iso()))
@@ -1003,11 +1002,13 @@ class Dispatcher:
         if row["applied"] == 0:
             if r["state"] == "approved":
                 try:
-                    res = self.dd.change(row["key"], row["value"], actor=f"approved:{r['id']}")
+                    res = self.dd.change(row["key"], row["value"], expected_old=row["old"], actor=f"approved:{r['id']}")
                 except LabError as e:
                     res = f"refused: {e}"
                 text = {"applied": f"Εφαρμόστηκε: {row['key']} = {row['value']!r} (πριν {row['old']!r}).",
-                        "noop": f"{row['key']} είχε ήδη την τιμή {row['value']!r}: καμία αλλαγή."}.get(
+                        "noop": f"{row['key']} είχε ήδη την τιμή {row['value']!r}: καμία αλλαγή.",
+                        "conflict": f"Δεν εφαρμόστηκε: το {row['key']} άλλαξε στο μεταξύ (η πρόταση ήταν από "
+                                    f"{row['old']!r}). Δεν γράφτηκε τίποτα· ξαναπρότεινε αν το θέλεις."}.get(
                             res, f"Δεν εφαρμόστηκε ({res}).")
             else:
                 text = f"Η πρόταση {r['id']} ({r['state']}): δεν άλλαξε καμία ρύθμιση."
@@ -1448,7 +1449,7 @@ class Dispatcher:
                 return "cancelled"
             if res["ok"] and not self._paid_credit_stop(provider, res):
                 self._finish_ok(provider, item, res)
-                self._after_job_ok(provider, item, tried)
+                self._after_job_ok(provider, item, tried, wanted[0])
                 return "done"
             tried.append((provider, res))
             if res["ok"]:  # answered, but on paid credits: post the answer, then stop using Claude for a while
@@ -1518,7 +1519,7 @@ class Dispatcher:
         except (OSError, ValueError, sqlite3.Error):
             pass
 
-    def _after_job_ok(self, provider, item, tried):
+    def _after_job_ok(self, provider, item, tried, first=None):
         """B5, still holding the job's claims: (1) a Codex job's claimed files are committed by the dispatcher, only
         those, with a blob-hash check; (2) a job that ran on the other provider because the first one hit its limit is
         marked solo, and gets a joint review when that provider is back (`_solo_reviews`)."""
@@ -1546,10 +1547,10 @@ class Dispatcher:
             info = f"commit refused: {e}"
             self.dd.audit("dispatcher", "codex_commit_refused", f"{jid}: {e}"[:300])
             self._post(item["reply_to"], f"⚠️ Δεν έγινε commit για το {jid}: {clip(str(e), 300)}. Τα αρχεία μένουν στο working tree.")
-        if tried and not item.get("forced"):
+        if (tried or (first and provider != first)) and not item.get("forced"):
             self.dd.conn.execute("INSERT OR IGNORE INTO solo_jobs(job, ran_on, ts, commit_info) VALUES (?,?,?,?)",
                                  (jid, provider, now_iso(), info))
-            self.dd.audit("dispatcher", "solo_job", f"{jid} ran only on {provider} ({tried[0][0]} was at its limit)")
+            self.dd.audit("dispatcher", "solo_job", f"{jid} ran only on {provider} ({(tried[0][0] if tried else first)} was at its limit)")
 
     def _solo_reviews(self):
         """When the provider that was at its limit is available again, ask it for one read-only review of each solo job."""
@@ -1563,11 +1564,12 @@ class Dispatcher:
                       f"{LABEL[row['ran_on']]} while you were at your limit. {row['commit_info'] or ''}\n"
                       f"Files: {files}. Inspect with git (git log -3 --stat, git show) and the thread. Review for correctness, "
                       "leakage, unfair baselines and overclaiming; say OK or list blocking issues. English, <300 words.")
-            pid = self.dd.peer_submit(other, prompt, key=f"solo-{row['job']}", from_provider=row["ran_on"])
+            dup = self.dd.conn.execute("SELECT id FROM peer_requests WHERE key=?", (f"solo-{row['job']}",)).fetchone()
+            pid = dup["id"] if dup else self.dd.peer_submit(other, prompt, key=f"solo-{row['job']}", from_provider=row["ran_on"])
             self.dd.conn.execute("UPDATE solo_jobs SET review_peer=? WHERE job=?", (pid, row["job"]))
             if job.get("reply_to") and self.lab.message(job["reply_to"]):
                 self._post(job["reply_to"], f"Κώστα, το {row['job']} έτρεξε μόνο στον {LABEL[row['ran_on']]} (ο {LABEL[other]} "
-                                            f"ήταν σε όριο). Ζήτησα έναν read-only κοινό έλεγχο από τον {LABEL[other]} ({pid}).")
+                                            f"δεν ήταν διαθέσιμος: όριο ή ρυθμός). Ζήτησα έναν read-only κοινό έλεγχο από τον {LABEL[other]} ({pid}).")
 
     def _escalations_due(self, esc):
         """Debounce (R-20261029-012): urgent notes (work.py say --urgent) and notes from jobs that already ended wake
