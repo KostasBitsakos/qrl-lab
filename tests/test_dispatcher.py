@@ -750,10 +750,8 @@ def test_approved_sim_spec_is_launched_by_script():
     assert any("ξεκίνησε 2 από 3" in b for b in thread_bodies(db, root))
     d.once()
     assert len(runs()) == 2, "no duplicate start while both slots are busy"
-    t0 = time.time()
-    while time.time() - t0 < 30 and len(runs()) < 3:
-        time.sleep(0.5)
-        d._candidates().close() if False else list(d._candidates())
+    db.conn.execute("UPDATE runs SET status='done', exit_code=0 WHERE request_id=? AND entry=0", (rid,))  # a slot frees up
+    list(d._candidates())
     assert sorted(r["entry"] for r in runs()) == [0, 1, 2], runs()          # slot freed -> entry 2 started once
     time.sleep(0.5); list(d._candidates())
     assert len(runs()) == 3
