@@ -6,7 +6,7 @@ Read with `docs/STATE.md`. Full comparison with the original plan (16 changes, 5
 ## State
 - B0–B7 are merged in master (75c56e2) and live: dispatcher and dashboard restarted 6/11, governor ON (`governor_enabled`=1).
 - Rollback if needed (researcher decides): `git reset --hard dfe5bcb` + `systemctl --user restart qrl-dispatcher qrl-dashboard`.
-- **B7 freeze until the CCGrid abstract (24/11):** no infrastructure changes, only fixes the researcher asks for.
+- **B7 freeze until the CCGrid abstract (24/11):** «αφορά μόνο υποδομή (dispatcher, dashboard, tools, κανόνες)· η έρευνα, τα πειράματα και το paper συνεχίζουν κανονικά». Infrastructure: only fixes the researcher asks for.
 - Test baseline: 24 known failures + `test_spiky_guard::test_exact_child_not_arbitrary_code` (date-based, expired sandbox).
 
 ## What the dispatcher now does by script (you are NOT woken for these)

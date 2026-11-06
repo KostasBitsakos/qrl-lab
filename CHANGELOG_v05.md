@@ -54,7 +54,7 @@
 - AGENTS.md: the kb-vs-INDEX contradiction is resolved with one sentence (kb.py query first, INDEX.md only for titles).
 
 ## B7 — freeze
-- From the merge of B3–B6: no further infrastructure changes until the CCGrid abstract (24/11/2026), only fixes. Settings are
+- From the merge of B3–B6: no further infrastructure changes until the CCGrid abstract (24/11/2026), only fixes — «αφορά μόνο υποδομή (dispatcher, dashboard, tools, κανόνες)· η έρευνα, τα πειράματα και το paper συνεχίζουν κανονικά». Settings are
   changed from the System tab.
 
 ## Known issues added by review 4 (Codex, not fixed; none bypasses an approval or a safety refusal)
