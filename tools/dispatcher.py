@@ -61,6 +61,30 @@ import run_events  # noqa: E402
 import launch_run  # noqa: E402
 
 PROVIDERS = ("claude", "codex")
+# Liveness (v0.5.1 final infra round): every task row records its owner process and a heartbeat. The dispatcher refreshes the
+# beat of the rows whose owning thread is still alive, so a row nobody refreshes is dead within SWEEP_DEAD_S, whatever the
+# timeout settings say. Rows without an owner (older code) keep the slow time-based rule.
+PROC_OWNER = f"{os.getpid()}:{int(time.time())}"
+LIVE_TASKS = {}          # task id -> the thread that owns the row (this process)
+_LIVE_LOCK = threading.Lock()
+
+
+def _owner_pid(owner):
+    try:
+        return int(str(owner).split(":")[0])
+    except (ValueError, TypeError):
+        return None
+
+
+def pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:      # EPERM etc.: it exists
+        return True
+    return True
+
 OTHER = {"claude": "codex", "codex": "claude"}
 LABEL = {"claude": "Claude", "codex": "Codex"}
 
@@ -99,6 +123,7 @@ DEFAULTS = {
     "chat_hard_pct": "97",            # the chat coordinator answers until this, then fails over
     "usage_stale_h": "6",             # older/unknown usage -> conservative mode (one optional run at a time)
     "unknown_daily_runs": "40",       # runs per 24 h per provider while its usage is unknown (assumption, tunable)
+    "sweep_dead_after_s": "180",      # a row whose owner has not refreshed its heartbeat for this long is dead (the beat is every 5 s)
     "peer_hold_max_min": "30",        # a peer request held back by the governor this long fails (the caller is not left waiting)
     "max_retries": "1",               # transient failures retried at most this many times; a safety refusal never
     # roles (v0.5.1 §5): a worker spawned with `work.py spawn --role R` uses these; jobs without a role keep claude_model.
@@ -231,7 +256,7 @@ CREATE TABLE IF NOT EXISTS sessions(thread_id TEXT NOT NULL, provider TEXT NOT N
 CREATE TABLE IF NOT EXISTS tasks(id INTEGER PRIMARY KEY AUTOINCREMENT, started TEXT, ended TEXT, kind TEXT,
   thread_id TEXT, refs TEXT, provider TEXT, model TEXT, session_id TEXT, resumed INTEGER, status TEXT,
   cost_usd REAL, input_tokens INTEGER, cached_tokens INTEGER, cache_write_tokens INTEGER, output_tokens INTEGER,
-  duration_s REAL, note TEXT, lane TEXT);
+  duration_s REAL, note TEXT, lane TEXT, owner TEXT, beat REAL);
 CREATE TABLE IF NOT EXISTS deferred(msg_id TEXT PRIMARY KEY, ts TEXT);
 CREATE TABLE IF NOT EXISTS notified(kind TEXT NOT NULL, ref TEXT NOT NULL, ts TEXT, PRIMARY KEY(kind, ref));
 CREATE TABLE IF NOT EXISTS peer_requests(id TEXT PRIMARY KEY, ts TEXT, from_provider TEXT, to_provider TEXT,
@@ -270,9 +295,11 @@ class DispatchDB:
         self.conn.execute("PRAGMA busy_timeout=30000")
         self.journal_mode = self.conn.execute("PRAGMA journal_mode=WAL").fetchone()[0]
         self.conn.executescript(SCHEMA)
-        try:  # databases created before B2 have no tasks.lane
-            if "lane" not in {r[1] for r in self.conn.execute("PRAGMA table_info(tasks)")}:
-                self.conn.execute("ALTER TABLE tasks ADD COLUMN lane TEXT")
+        try:  # databases created before B2 have no tasks.lane; before the liveness round no owner/beat
+            have = {r[1] for r in self.conn.execute("PRAGMA table_info(tasks)")}
+            for col, typ in (("lane", "TEXT"), ("owner", "TEXT"), ("beat", "REAL")):
+                if col not in have:
+                    self.conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} {typ}")
         except sqlite3.OperationalError:
             pass  # another process added it first
 
@@ -418,7 +445,25 @@ class DispatchDB:
             "INSERT INTO tasks(started, kind, thread_id, refs, provider, model, session_id, resumed, status, lane)"
             " VALUES (?,?,?,?,?,?,?,?,?,?)",
             (now_iso(), kind, thread_id, json.dumps(refs), provider, model, session_id, int(resumed), "running", lane))
+        self._own(cur.lastrowid)
         return cur.lastrowid
+
+    def _own(self, task_id):
+        self.conn.execute("UPDATE tasks SET owner=?, beat=? WHERE id=?", (PROC_OWNER, time.time(), task_id))
+        with _LIVE_LOCK:
+            LIVE_TASKS[task_id] = threading.current_thread()
+
+    def _disown(self, task_id):
+        with _LIVE_LOCK:
+            LIVE_TASKS.pop(task_id, None)
+
+    def beat(self):
+        """Refresh the heartbeat of every row owned by a thread of this process that is still alive."""
+        with _LIVE_LOCK:
+            ids = [i for i, t in LIVE_TASKS.items() if t.is_alive()]
+        if ids:
+            self.conn.execute(f"UPDATE tasks SET beat=? WHERE owner=? AND status IN ('starting','running') AND id IN"
+                              f" ({','.join('?' * len(ids))})", [time.time(), PROC_OWNER, *ids])
 
     def reserve(self, kind, thread_id, refs, provider, lane, cap=None, daily_cap=None, hold_s=300):
         """Atomic admission (v0.5.1 B2): in ONE short BEGIN IMMEDIATE transaction count the provider's optional runs
@@ -443,23 +488,31 @@ class DispatchDB:
             cur = c.execute("INSERT INTO tasks(started, kind, thread_id, refs, provider, resumed, status, lane)"
                             " VALUES (?,?,?,?,?,?,?,?)",
                             (now_iso(), kind, thread_id, json.dumps(refs), provider, 0, "starting", lane))
-            return cur.lastrowid
+            c.execute("UPDATE tasks SET owner=?, beat=? WHERE id=?", (PROC_OWNER, time.time(), cur.lastrowid))
+        with _LIVE_LOCK:
+            LIVE_TASKS[cur.lastrowid] = threading.current_thread()
+        return cur.lastrowid
 
     def claim_start(self, task_id, refs, session_id, resumed):
         """starting -> running for a reserved task row. False if the row is no longer 'starting'."""
-        cur = self.conn.execute("UPDATE tasks SET status='running', started=?, refs=?, session_id=?, resumed=?"
+        cur = self.conn.execute("UPDATE tasks SET status='running', started=?, refs=?, session_id=?, resumed=?, owner=?, beat=?"
                                 " WHERE id=? AND status='starting'",
-                                (now_iso(), json.dumps(refs), session_id, int(resumed), task_id))
+                                (now_iso(), json.dumps(refs), session_id, int(resumed), PROC_OWNER, time.time(), task_id))
+        if cur.rowcount == 1:
+            with _LIVE_LOCK:
+                LIVE_TASKS[task_id] = threading.current_thread()   # the running thread now owns it
         return cur.rowcount == 1
 
     def release(self, task_id):
         self.conn.execute("UPDATE tasks SET status='released', ended=? WHERE id=? AND status='starting'",
                           (now_iso(), task_id))
+        self._disown(task_id)
 
     def peer_requeue(self, pid):
         self.conn.execute("UPDATE peer_requests SET status='queued' WHERE id=? AND status='running'", (pid,))
 
     def task_end(self, task_id, status, res, duration_s, note=""):
+        self._disown(task_id)
         u = res.get("usage", {}) if res else {}
         self.conn.execute(
             "UPDATE tasks SET ended=?, status=?, session_id=COALESCE(?, session_id), cost_usd=?, input_tokens=?,"
@@ -1739,6 +1792,16 @@ class Dispatcher:
     def recover(self):
         """After a crash: tasks left 'running' and their messages are retried; spawned jobs are queued again."""
         perm_store.withdraw_deny_rules(self.root)
+        # peer requests claimed by the previous process: never started -> queued again; already running -> failed with a
+        # clear message (a read-only review is not silently run twice). Looked at BEFORE the task rows below change.
+        for r in [dict(x) for x in self.dd.conn.execute("SELECT id FROM peer_requests WHERE status='running'")]:
+            live = self.dd.conn.execute("SELECT status FROM tasks WHERE lane='peer' AND refs LIKE ? ORDER BY id DESC LIMIT 1",
+                                        (f'%"{r["id"]}"%',)).fetchone()
+            if live is None or live[0] in ("released", "starting"):
+                self.dd.conn.execute("UPDATE peer_requests SET status='queued' WHERE id=?", (r["id"],))
+            elif live[0] == "running":
+                self.dd.conn.execute("UPDATE peer_requests SET status='failed', error=?, ts_done=? WHERE id=?",
+                                     ("interrupted: the dispatcher restarted during this run", now_iso(), r["id"]))
         for t in [dict(r) for r in self.dd.conn.execute("SELECT * FROM tasks WHERE status IN ('running','starting')")]:
             self.dd.conn.execute("UPDATE tasks SET status='interrupted', ended=? WHERE id=?", (now_iso(), t["id"]))
             ids = [i for i in json.loads(t["refs"] or "[]") if i.startswith("M-")]
@@ -1782,6 +1845,10 @@ class Dispatcher:
         """The 'online' signal must not depend on runs ending: it is written by its own thread."""
         while True:
             self.heartbeat()
+            try:
+                self.dd.beat()
+            except sqlite3.Error as e:
+                print(f"dispatcher warning: task beat: {e}", file=sys.stderr, flush=True)
             time.sleep(every)
 
     def sweep(self, now=None):
@@ -1797,16 +1864,28 @@ class Dispatcher:
         hold_max = _num(s["peer_hold_max_min"], DEFAULTS["peer_hold_max_min"]) * 60
         freed = 0
         c = self.dd.conn
+        dead_after = _num(s["sweep_dead_after_s"], DEFAULTS["sweep_dead_after_s"])
         for t in [dict(r) for r in c.execute(
-                "SELECT id, refs, status, lane, CAST(strftime('%s', started) AS INTEGER) AS ts FROM tasks"
+                "SELECT id, refs, status, lane, owner, beat, CAST(strftime('%s', started) AS INTEGER) AS ts FROM tasks"
                 " WHERE status IN ('starting','running')")]:
             age = now - (t["ts"] or 0)
-            if t["status"] == "starting" and age > 300:
-                c.execute("UPDATE tasks SET status='released', ended=? WHERE id=? AND status='starting'", (now_iso(), t["id"]))
-            elif t["status"] == "running" and age > limits.get(t["lane"], default):
-                c.execute("UPDATE tasks SET status='interrupted', ended=? WHERE id=? AND status='running'", (now_iso(), t["id"]))
-            else:
+            if t["owner"]:   # explicit liveness: owner process + heartbeat; no dependence on any timeout setting
+                pid = _owner_pid(t["owner"])
+                if t["owner"] == PROC_OWNER:
+                    dead = now - (t["beat"] or 0) > dead_after
+                else:        # another process (e.g. an inline ask_peer) is alive as long as its pid is
+                    dead = not (pid and pid != os.getpid() and pid_alive(pid))
+                if t["status"] == "starting" and age > 300:
+                    dead = True        # a reservation nobody claimed within 5 min
+            else:            # row written by older code: only the slow time rule is safe
+                dead = (age > 300) if t["status"] == "starting" else age > limits.get(t["lane"], default)
+            if not dead:
                 continue
+            if t["status"] == "starting":
+                c.execute("UPDATE tasks SET status='released', ended=? WHERE id=? AND status='starting'", (now_iso(), t["id"]))
+            else:
+                c.execute("UPDATE tasks SET status='interrupted', ended=? WHERE id=? AND status='running'", (now_iso(), t["id"]))
+            self.dd._disown(t["id"])
             freed += 1
             for ref in json.loads(t["refs"] or "[]"):
                 if str(ref).startswith("J"):   # the job is not running any more: queue it again
