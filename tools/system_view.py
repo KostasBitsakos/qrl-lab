@@ -68,7 +68,6 @@ SETTINGS_META = {
     "chat_hard_pct": ("Governor", "Όριο Πάρη (%)", "Ο Πάρις απαντά μέχρι εδώ, μετά εναλλαγή παρόχου."),
     "usage_stale_h": ("Governor", "Παλιά μέτρηση (ώρες)", "Παλιότερη/άγνωστη χρήση: συντηρητικά, ένα προαιρετικό job τη φορά."),
     "unknown_daily_runs": ("Governor", "Εκτελέσεις/24ω με άγνωστη χρήση", "Παραδοχή, ρυθμίζεται."),
-    "sweep_dead_after_s": ("Governor", "Νεκρή γραμμή μετά (s)", "Γραμμή task που ο ιδιοκτήτης της δεν ανανεώνει το χτύπημα ζωής τόσο, ελευθερώνεται (το χτύπημα είναι κάθε 5 s)."),
     "peer_hold_max_min": ("Governor", "Μέγιστη αναμονή peer (λεπτά)", "Αίτημα peer που κρατιέται τόσο, αποτυγχάνει με σαφές μήνυμα."),
     "max_retries": ("Governor", "Μέγιστες επαναλήψεις", "Παροδικό σφάλμα: τόσες φορές· άρνηση ασφαλείας: ποτέ."),
     "role_research_claude": ("Ρόλοι", "research · Claude", "Worker με --role research (κώδικας πειραμάτων/μοντέλων, ανάλυση)."),
@@ -183,6 +182,7 @@ def _editor(st, r, path):
         c3.warning("άλλαξε")
         if c3.button("Ενημέρωση", key=f"sr_{key}"):
             st.session_state[f"sbase_{key}"] = r["value"]
+            st.session_state.pop(f"sv_{key}", None)       # the input shows the fresh value again, not the stale choice
             st.rerun()
         c2.caption(f"Η τιμή άλλαξε στο μεταξύ ({base!r} → {r['value']!r}). Πάτα «Ενημέρωση» και δες τη νέα τιμή.")
         return

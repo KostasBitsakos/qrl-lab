@@ -15,6 +15,7 @@ def make(tmp_path, monkeypatch, **settings):
     monkeypatch.setenv("QRL_LAB_DIR", str(tmp_path))
     monkeypatch.setenv("QRL_DISPATCH_DB", str(tmp_path / "dispatch.db"))
     (tmp_path / ".lab").mkdir(exist_ok=True)
+    D.LIVE_TASKS.clear()          # task ids restart at 1 in every fresh test database
     d = D.Dispatcher(str(tmp_path))
     d.dd.set("governor_enabled", "1")
     for k, v in settings.items():
@@ -45,7 +46,8 @@ def test_sweeper_frees_a_dead_row_in_minutes_not_hours(tmp_path, monkeypatch):
         "INSERT INTO tasks(started, kind, refs, provider, status, lane, owner, beat) VALUES (?,?,?,?,?,?,?,?)",
         (D.now_iso(), "job", refs, "claude", status, "worker", owner, beat)).lastrowid
     alive = ins("running", D.PROC_OWNER, now - 30)
-    dead = ins("running", D.PROC_OWNER, now - 400, json.dumps([jid]))          # no heartbeat for 400 s
+    D.LIVE_TASKS[alive] = threading.current_thread()                            # a live thread of this process owns it
+    dead = ins("running", D.PROC_OWNER, now - 400, json.dumps([jid]))          # nobody owns it any more
     gone = ins("running", "999999:1", now)                                      # owner process does not exist
     other = ins("running", f"{os.getppid()}:1", now - 5000)                     # another LIVE process (e.g. inline ask_peer)
     legacy = ins("running", None, None)                                         # older code: only the slow rule applies
@@ -60,6 +62,7 @@ def test_heartbeat_keeps_live_rows_and_not_rows_of_dead_threads(tmp_path, monkey
     t = d.dd.reserve("job", "T", ["J1"], "claude", "worker")
     assert d.dd.claim_start(t, ["J1"], None, False)
     d.dd.conn.execute("UPDATE tasks SET beat=? WHERE id=?", (time.time() - 1000, t))
+    assert d.sweep() == 0, "a late heartbeat alone (process paused) never frees a row whose thread is alive"
     d.dd.beat()                                                     # this (alive) thread owns it: refreshed
     assert time.time() - row(d, t)["beat"] < 5 and d.sweep() == 0
     box = {}
@@ -97,3 +100,41 @@ def test_recover_requeues_unstarted_peers_and_fails_running_ones(tmp_path, monke
     ps = {r["id"]: (r["status"], r["error"]) for r in c.execute("SELECT id, status, error FROM peer_requests")}
     assert ps["P-never"][0] == "queued"
     assert ps["P-running"][0] == "failed" and "restarted" in ps["P-running"][1]
+
+
+def test_recover_keeps_rows_of_a_live_foreign_owner(tmp_path, monkeypatch):
+    d = make(tmp_path, monkeypatch)
+    c = d.dd.conn
+    ins = lambda owner, status="running", refs="[]": c.execute(
+        "INSERT INTO tasks(started, kind, refs, provider, status, lane, owner, beat) VALUES (?,?,?,?,?,?,?,?)",
+        (D.now_iso(), "peer", refs, "codex", status, "peer", owner, time.time())).lastrowid
+    inline = ins(f"{os.getppid()}:1", refs=json.dumps(["P-inline"]))           # an inline ask_peer that is still executing
+    old = ins("999999:1")                                                       # the previous dispatcher, dead
+    c.execute("INSERT INTO peer_requests(id, ts, from_provider, to_provider, prompt, status) VALUES (?,?,?,?,?,?)",
+              ("P-inline", D.now_iso(), "claude", "codex", "q", "running"))
+    D.Dispatcher(str(tmp_path)).recover()
+    st = {r["id"]: r["status"] for r in c.execute("SELECT id, status FROM tasks")}
+    assert st == {inline: "running", old: "interrupted"}
+    assert c.execute("SELECT status FROM peer_requests WHERE id='P-inline'").fetchone()[0] == "running"
+    # the slot of the live inline peer still counts against the cap
+    assert d.dd.reserve("peer", "T", [], "codex", "peer", cap=1) is None
+
+
+def test_sweep_transition_is_conditional(tmp_path, monkeypatch):
+    d = make(tmp_path, monkeypatch)
+    jid = d.work.create("worker", "spawn", "J", "b", status="running")
+    t = d.dd.conn.execute("INSERT INTO tasks(started, kind, refs, provider, status, lane, owner, beat) VALUES (?,?,?,?,?,?,?,?)",
+                          (D.now_iso(), "job", json.dumps([jid]), "claude", "running", "worker", D.PROC_OWNER, 0)).lastrowid
+    real = d.dd.conn
+
+    class Racy:                      # the owner finishes the row between the sweeper's SELECT and its UPDATE
+        def __init__(self, conn):
+            self._c = conn
+        def execute(self, sql, *a):
+            if sql.startswith("UPDATE tasks SET status='interrupted'"):
+                self._c.execute("UPDATE tasks SET status='done' WHERE id=?", (t,))
+            return self._c.execute(sql, *a)
+    d.dd.conn = Racy(real)
+    assert d.sweep() == 0, "the row had finished: nothing freed, its job not requeued"
+    d.dd.conn = real
+    assert d.work.job(jid)["status"] == "running"

@@ -123,7 +123,6 @@ DEFAULTS = {
     "chat_hard_pct": "97",            # the chat coordinator answers until this, then fails over
     "usage_stale_h": "6",             # older/unknown usage -> conservative mode (one optional run at a time)
     "unknown_daily_runs": "40",       # runs per 24 h per provider while its usage is unknown (assumption, tunable)
-    "sweep_dead_after_s": "180",      # a row whose owner has not refreshed its heartbeat for this long is dead (the beat is every 5 s)
     "peer_hold_max_min": "30",        # a peer request held back by the governor this long fails (the caller is not left waiting)
     "max_retries": "1",               # transient failures retried at most this many times; a safety refusal never
     # roles (v0.5.1 §5): a worker spawned with `work.py spawn --role R` uses these; jobs without a role keep claude_model.
@@ -449,9 +448,9 @@ class DispatchDB:
         return cur.lastrowid
 
     def _own(self, task_id):
-        self.conn.execute("UPDATE tasks SET owner=?, beat=? WHERE id=?", (PROC_OWNER, time.time(), task_id))
         with _LIVE_LOCK:
             LIVE_TASKS[task_id] = threading.current_thread()
+        self.conn.execute("UPDATE tasks SET owner=?, beat=? WHERE id=?", (PROC_OWNER, time.time(), task_id))
 
     def _disown(self, task_id):
         with _LIVE_LOCK:
@@ -489,18 +488,24 @@ class DispatchDB:
                             " VALUES (?,?,?,?,?,?,?,?)",
                             (now_iso(), kind, thread_id, json.dumps(refs), provider, 0, "starting", lane))
             c.execute("UPDATE tasks SET owner=?, beat=? WHERE id=?", (PROC_OWNER, time.time(), cur.lastrowid))
-        with _LIVE_LOCK:
-            LIVE_TASKS[cur.lastrowid] = threading.current_thread()
+            with _LIVE_LOCK:     # registered before the row becomes visible to the sweeper
+                LIVE_TASKS[cur.lastrowid] = threading.current_thread()
         return cur.lastrowid
 
     def claim_start(self, task_id, refs, session_id, resumed):
         """starting -> running for a reserved task row. False if the row is no longer 'starting'."""
+        with _LIVE_LOCK:
+            prev = LIVE_TASKS.get(task_id)
+            LIVE_TASKS[task_id] = threading.current_thread()       # the running thread now owns it
         cur = self.conn.execute("UPDATE tasks SET status='running', started=?, refs=?, session_id=?, resumed=?, owner=?, beat=?"
                                 " WHERE id=? AND status='starting'",
                                 (now_iso(), json.dumps(refs), session_id, int(resumed), PROC_OWNER, time.time(), task_id))
-        if cur.rowcount == 1:
-            with _LIVE_LOCK:
-                LIVE_TASKS[task_id] = threading.current_thread()   # the running thread now owns it
+        if cur.rowcount != 1:
+            with _LIVE_LOCK:     # not ours after all (swept/released): give the registration back
+                if prev is None:
+                    LIVE_TASKS.pop(task_id, None)
+                else:
+                    LIVE_TASKS[task_id] = prev
         return cur.rowcount == 1
 
     def release(self, task_id):
@@ -1794,15 +1799,23 @@ class Dispatcher:
         perm_store.withdraw_deny_rules(self.root)
         # peer requests claimed by the previous process: never started -> queued again; already running -> failed with a
         # clear message (a read-only review is not silently run twice). Looked at BEFORE the task rows below change.
+        kept = {t["id"] for t in [dict(x) for x in self.dd.conn.execute(
+            "SELECT id, owner FROM tasks WHERE status IN ('running','starting') AND owner IS NOT NULL")]
+            if _owner_pid(t["owner"]) and _owner_pid(t["owner"]) != os.getpid() and pid_alive(_owner_pid(t["owner"]))}
         for r in [dict(x) for x in self.dd.conn.execute("SELECT id FROM peer_requests WHERE status='running'")]:
-            live = self.dd.conn.execute("SELECT status FROM tasks WHERE lane='peer' AND refs LIKE ? ORDER BY id DESC LIMIT 1",
+            live = self.dd.conn.execute("SELECT id, status FROM tasks WHERE lane='peer' AND refs LIKE ? ORDER BY id DESC LIMIT 1",
                                         (f'%"{r["id"]}"%',)).fetchone()
+            if live is not None and live[0] in kept:
+                continue                                   # an inline peer of a live process is still executing
+            live = None if live is None else (live[1],)
             if live is None or live[0] in ("released", "starting"):
                 self.dd.conn.execute("UPDATE peer_requests SET status='queued' WHERE id=?", (r["id"],))
             elif live[0] == "running":
                 self.dd.conn.execute("UPDATE peer_requests SET status='failed', error=?, ts_done=? WHERE id=?",
                                      ("interrupted: the dispatcher restarted during this run", now_iso(), r["id"]))
         for t in [dict(r) for r in self.dd.conn.execute("SELECT * FROM tasks WHERE status IN ('running','starting')")]:
+            if t["id"] in kept:
+                continue                                   # its owner process is alive: not ours to free
             self.dd.conn.execute("UPDATE tasks SET status='interrupted', ended=? WHERE id=?", (now_iso(), t["id"]))
             ids = [i for i in json.loads(t["refs"] or "[]") if i.startswith("M-")]
             self.dd.defer(ids)
@@ -1864,27 +1877,38 @@ class Dispatcher:
         hold_max = _num(s["peer_hold_max_min"], DEFAULTS["peer_hold_max_min"]) * 60
         freed = 0
         c = self.dd.conn
-        dead_after = _num(s["sweep_dead_after_s"], DEFAULTS["sweep_dead_after_s"])
         for t in [dict(r) for r in c.execute(
                 "SELECT id, refs, status, lane, owner, beat, CAST(strftime('%s', started) AS INTEGER) AS ts FROM tasks"
                 " WHERE status IN ('starting','running')")]:
             age = now - (t["ts"] or 0)
-            if t["owner"]:   # explicit liveness: owner process + heartbeat; no dependence on any timeout setting
+            if t["owner"]:   # explicit liveness, no dependence on any timeout setting
                 pid = _owner_pid(t["owner"])
                 if t["owner"] == PROC_OWNER:
-                    dead = now - (t["beat"] or 0) > dead_after
+                    # a row of this process is alive exactly while a live thread of this process owns it (a stale beat is
+                    # only a late heartbeat: after a pause of the whole process the owning threads are still there)
+                    with _LIVE_LOCK:
+                        th = LIVE_TASKS.get(t["id"])
+                    dead = th is None or not th.is_alive()
                 else:        # another process (e.g. an inline ask_peer) is alive as long as its pid is
                     dead = not (pid and pid != os.getpid() and pid_alive(pid))
-                if t["status"] == "starting" and age > 300:
-                    dead = True        # a reservation nobody claimed within 5 min
+                if t["status"] == "starting" and age > 300 and t["owner"] != PROC_OWNER:
+                    dead = True        # a foreign reservation nobody claimed within 5 min
+                elif t["status"] == "starting" and age > 300 and not dead:
+                    dead = True        # ... and our own, unclaimed for 5 min
             else:            # row written by older code: only the slow time rule is safe
                 dead = (age > 300) if t["status"] == "starting" else age > limits.get(t["lane"], default)
             if not dead:
                 continue
+            # transition only if the row is still exactly what was inspected (a claim or a heartbeat may have raced us);
+            # side effects (disown, requeue the job) only after the transition really happened
             if t["status"] == "starting":
-                c.execute("UPDATE tasks SET status='released', ended=? WHERE id=? AND status='starting'", (now_iso(), t["id"]))
+                moved = c.execute("UPDATE tasks SET status='released', ended=? WHERE id=? AND status='starting' AND"
+                                  " COALESCE(owner,'')=?", (now_iso(), t["id"], t["owner"] or "")).rowcount
             else:
-                c.execute("UPDATE tasks SET status='interrupted', ended=? WHERE id=? AND status='running'", (now_iso(), t["id"]))
+                moved = c.execute("UPDATE tasks SET status='interrupted', ended=? WHERE id=? AND status='running' AND"
+                                  " COALESCE(owner,'')=?", (now_iso(), t["id"], t["owner"] or "")).rowcount
+            if moved != 1:
+                continue
             self.dd._disown(t["id"])
             freed += 1
             for ref in json.loads(t["refs"] or "[]"):
