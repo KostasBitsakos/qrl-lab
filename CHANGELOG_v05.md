@@ -65,3 +65,15 @@
 - `peer_submit` has no key uniqueness; `_solo_reviews` deduplicates by key lookup, which is not atomic across processes.
 - Fixed from that review: per-note escalation markers, `expected_old` on approved cards, UI baseline for stale pages,
   solo flag when the first provider was already unavailable. These fixes were not re-reviewed by Codex.
+
+## Final infra round (liveness) — before the freeze
+- Task rows carry `owner` (pid:boot) and `beat`. A row of this process is alive exactly while a live thread of this process
+  owns it (`LIVE_TASKS`); the dispatcher's heartbeat thread refreshes the beat for others to read. A row of another process
+  (inline `ask_peer`) is alive while its pid is. So the sweeper frees a dead row on its next pass (≤ 30 s), with no timeout
+  setting involved. The 6 h floor of review 3 now applies only to rows without an owner (written by older code).
+- `recover()` at start-up: every starting/running row of a dead owner is freed, unstarted peers are queued again, running
+  peers fail with a clear message; rows and peers of a LIVE foreign owner are kept. Test: crash after `reserve` → free after restart.
+- Sweeper transitions are conditional (status + owner) and side effects happen only if the row really moved; `task_end`
+  deregisters after the terminal update. Held peer requests keep `peer_hold_max_min` (30 min).
+- Codex review 5 (two P1s: recovery vs live inline peer, late heartbeat) and re-review (one P1: completion race) fixed.
+  Not fixed (non-blocking): pid reuse ignores the owner timestamp; config apply/mark-applied are two transactions.

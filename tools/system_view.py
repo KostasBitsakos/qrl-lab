@@ -182,6 +182,7 @@ def _editor(st, r, path):
         c3.warning("άλλαξε")
         if c3.button("Ενημέρωση", key=f"sr_{key}"):
             st.session_state[f"sbase_{key}"] = r["value"]
+            st.session_state.pop(f"sv_{key}", None)       # the input shows the fresh value again, not the stale choice
             st.rerun()
         c2.caption(f"Η τιμή άλλαξε στο μεταξύ ({base!r} → {r['value']!r}). Πάτα «Ενημέρωση» και δες τη νέα τιμή.")
         return
