@@ -4,6 +4,7 @@ Data only: never trains, never launches. Writes .lab/j350/W-spec-draft.json (+ F
 W  = per lane, 2 configs x 2 common seeds (18500-18501) x 19,968 TOTAL ticks incl. transfer source, 10 learning arms
      (9 J332 arms + derp_ddqn) + one HPA reference task (hpa_orig + hpa_demand 5 thresholds, val 13000-13019).
 F  = template only (10 seeds 18600-18609 x 39,936 total; transfer 9,984 + 29,952); filled after the joint W freeze.
+Rebuild with --pilot-timings FILE for measured reservations. Without it launch_ready=false.
 Reservation = 2 x nominal (council envelope); nominal from the cycle-3 ledger rates (J299 build.py RATES, extrapolated,
 NOT measured on poisson_ms) until pilots replace them. derp_ddqn is costed like derp_hist10 (council, codex_round2 d).
 Usage: build_w.py [--lanes opus[,astra]] [--check]
@@ -11,6 +12,7 @@ Usage: build_w.py [--lanes opus[,astra]] [--check]
 import argparse
 import hashlib
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -57,6 +59,8 @@ def template(arm):
     p = ROOT / f'.lab/j299/children/spiky1-A-{base}-off-s17000.json'
     c = json.loads(p.read_text())['entries'][0]['cmd']
     c = [str(ROOT / '.venv/bin/python')] + c[1:]
+    if arm in {'derp_hist10', 'derp_ddqn'}:
+        c = flag(c, '--derp-history', 10)
     if arm == 'derp_ddqn':
         c = flag(c, '--derp-double', 'on')
     if '--history-ablation' in c:            # default 'off'; the flag is not needed on poisson_ms
@@ -105,7 +109,64 @@ def task(stage, name, arm, seed, c, nom, out, lane=None, cfg=None, tgt=None):
                 target_ticks=tgt, nominal_cpu_h=round(nom, 6), reserve_cpu_h=reserve, child=child)
 
 
-def build(lanes=('opus',)):
+def select_w(spec, returns):
+    """Choose ONE candidate per arm across lanes, using both endpoint seed returns."""
+    groups = {}
+    for t in spec['tasks']:
+        if t['stage'] != 'W':
+            continue
+        value = returns[t['name']]
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            raise ValueError('nonfinite W return')
+        key = (t['arm'], t['lane'], t['config'])
+        groups.setdefault(key, []).append((t['seed'], value))
+    winners = {}
+    for (arm, lane, cfg), rows in groups.items():
+        if sorted(s for s, _ in rows) != W_SEEDS:
+            raise ValueError('selection requires both common seeds exactly once')
+        score = sum(v for _, v in rows) / len(rows)
+        rank = (-score, cfg != 'c0', lane != 'opus', f'{lane}-{arm}-{cfg}')
+        if arm not in winners or rank < winners[arm][0]:
+            winners[arm] = (rank, dict(arm=arm, lane=lane, config=cfg, mean_val_return=score))
+    if set(winners) != set(ARMS):
+        raise ValueError('selection requires every arm')
+    return {arm: winners[arm][1] for arm in ARMS}
+
+
+def timing_key(cmd):
+    """Bind timing to the full workload/configuration, independent of seed and output path."""
+    c = list(cmd)
+    for k in ('--seed', '--out'):
+        if k in c:
+            c[c.index(k) + 1] = '<variable>'
+    return canonical_hash(c)
+
+
+def apply_pilots(tasks, pilots):
+    """Full W-exposure launcher timings; no linear extrapolation from short pilots."""
+    required = {timing_key(t['child']['entries'][0]['cmd']): t['arm'] for t in tasks}
+    by_arm = {}
+    covered = set()
+    for r in pilots['measurements']:
+        key = timing_key(r['cmd'])
+        seconds = r['elapsed_seconds']
+        if key not in required or isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or \
+                not math.isfinite(seconds) or seconds <= 0 or r.get('includes_startup_and_eval') is not True or \
+                not r.get('run_id') or not r.get('request_id') or not r.get('evidence_path'):
+            raise ValueError('invalid or unbound full-exposure pilot measurement')
+        arm = required[key]
+        by_arm[arm] = max(by_arm.get(arm, 0), seconds)
+        covered.add(key)
+    if covered != set(required):
+        raise ValueError('pilot coverage incomplete: every distinct W command including reference is required')
+    for t in tasks:
+        # Round upwards: the frozen reservation must never be less than twice the measurement.
+        cap = math.ceil(MARGIN * by_arm[t['arm']] / 3600 * 1e6) / 1e6
+        t['reserve_cpu_h'] = cap
+        t['child']['entries'][0]['wall_clock_hours'] = cap
+
+
+def build(lanes=('opus',), pilots=None):
     tasks = []
     ref_out = 'tuning/results/c345/c345-W-reference-hpa.json'
     tasks.append(task('P0', 'c345-W-reference-hpa', 'reference', VAL[0],
@@ -125,6 +186,8 @@ def build(lanes=('opus',)):
                 out = f'tuning/results/c345/{name}.json'
                 c, tgt = cmd_for(arm, seed, W_TOTAL, extra, out)
                 tasks.append(task('W', name, arm, seed, c, nominal(arm, W_TOTAL), out, lane, f'c{ci}', tgt))
+    if pilots is not None:
+        apply_pilots(tasks, pilots)
     nom = sum(t['nominal_cpu_h'] for t in tasks)
     res = sum(t['reserve_cpu_h'] for t in tasks)
     budget = round(res + 1e-6, 6)
@@ -147,23 +210,24 @@ def build(lanes=('opus',)):
                             later_stages='F not authorized by this spec',
                             selection='ONE config per arm across both lanes (distinct candidates; identical commands '
                                       'are run once, see config_aliases): max mean val return at the endpoint over '
-                                      'the 2 seeds; ties -> opus c0 (cycle-3 command), then candidate id order; '
+                                      'the 2 seeds; ties -> config c0 first, then lane opus before astra, then candidate id order; '
                                       'rule frozen before W ends; intermediate evals diagnostics only',
                             config_aliases=aliases,
-                            arm_labels={'derp_hist10': 'Enhanced DERP, cycle-3 tuned --derp-history 3 (label kept '
-                                                       'from J332; result arm field reads derp_hist3)',
-                                        'derp_ddqn': 'Enhanced DERP (--derp-history 3) + Double-DQN target; c0 '
-                                                     'sync 1 isolates the target; sync 100 also changes cadence'},
-                            pilot_gate='reservations here are 2x extrapolated nominal; before approval a separately '
-                                       'approved pilot (1 run per arm at W ticks) measures train+eval+startup; '
-                                       'per-run cap := 2x slowest measured pilot of the arm; spec rebuilt and re-hashed',
+                            arm_labels={'derp_hist10': 'Enhanced DERP, explicit --derp-history 10',
+                                        'derp_ddqn': 'Enhanced DERP, history 10 + Double-DQN; sync 1 isolates '
+                                                     'target substitution; sync 100 also changes cadence'},
+                            pilot_gate='Separate approved pilot spec required before W; full W exposure, startup '
+                                       'and endpoint val included, each distinct config and reference covered; '
+                                       'rebuild with --pilot-timings FILE; cap = 2x slowest measured pilot per arm',
+                            launch_ready=pilots is not None,
+                            pilot_timings=pilots,
                             envelope_cpu_h=ENVELOPE, margin=MARGIN,
-                            costs='extrapolated cycle-3 ledger rates (tools/spiky_stage1/build.py RATES), not measured '
-                                  'on poisson_ms; per-run cap must be re-set to 2x slowest pilot before approval',
+                            costs=('measured pilot reservations; nominal figures remain historical extrapolations' if pilots is not None
+                                   else 'extrapolated cycle-3 ledger rates, NOT launch-ready; rebuild after pilots'),
                             interpretation='screening on reused val; no winner claim from W'),
                 nominal_cpu_h=round(nom, 6), reserved_cpu_h=round(res, 6),
                 runtime_sha256={p: hashlib.sha256((ROOT / p).read_bytes()).hexdigest() for p in
-                                ['tools/c345/driver.py', 'tools/sandbox_guard.py', 'tools/launch_run.py']})
+                                ['tools/c345/driver.py', 'tools/c345/build_w.py', 'tools/sandbox_guard.py', 'tools/launch_run.py']})
 
 
 def f_template():
@@ -204,12 +268,13 @@ def seed_guard():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--lanes', default='opus')
+    ap.add_argument('--pilot-timings', type=Path)
     a = ap.parse_args()
     lanes = tuple(a.lanes.split(','))
     hits = seed_guard()
     if hits:
         raise SystemExit('seed guard: seeds already used:\n' + '\n'.join(hits[:20]))
-    spec = build(lanes)
+    spec = build(lanes, json.loads(a.pilot_timings.read_text()) if a.pilot_timings else None)
     ft = f_template()
     OUT.mkdir(exist_ok=True)
     (OUT / 'W-spec-draft.json').write_text(json.dumps(spec, indent=2) + '\n')

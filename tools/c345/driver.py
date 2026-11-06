@@ -53,6 +53,16 @@ def validate(spec, protected=True):
     if spec['kind'] != 'sandbox' or spec['scope'] != 'sim' or sb['cpu_hours_budget'] > 160 \
             or pol(spec, 'variant', None) != 'pms:poisson_ms':
         raise LabError('invalid Stage1 sandbox')
+    if pol(spec, 'launch_ready', False):
+        from copy import deepcopy
+        from c345.build_w import apply_pilots
+        expected = deepcopy(tasks)
+        try:
+            apply_pilots(expected, pol(spec, 'pilot_timings', None))
+        except (KeyError, TypeError, ValueError) as ex:
+            raise LabError('invalid pilot timing gate') from ex
+        if any(a['reserve_cpu_h'] != b['reserve_cpu_h'] for a, b in zip(tasks, expected)):
+            raise LabError('reservations differ from measured pilot caps')
     if len(tasks) != pol(spec, 'expected_tasks', 67) or len({t['name'] for t in tasks}) != len(tasks):
         raise LabError(f"Stage requires exactly {pol(spec, 'expected_tasks', 67)} tasks with unique names")
     if {t['stage'] for t in tasks} - set(pol(spec, 'stages', STAGES)):
@@ -107,11 +117,16 @@ def artifact(t, root=ROOT):
         opt = lambda k, d: val(k) if k in c else d  # noqa: E731
         if val('--agent') == 'derp':    # C345: plain DERP vs derp_ddqn vs history must match the frozen command
             dd = opt('--derp-double', 'off') == 'on'
-            if bool(x.get('double_dqn_target', False)) != dd or x.get('derp_history') != int(opt('--derp-history', 1)):
+            if x.get('double_dqn_target', False) is not dd or x.get('derp_history') != int(opt('--derp-history', 1)):
                 raise LabError('wrong DERP target/history')
             if dd and (x.get('arm') != 'derp_ddqn' or x.get('target_sync_replays') != int(opt('--derp-target-sync', 1))):
                 raise LabError('wrong derp_ddqn sync')
-        if x.get('pretrain_variant') != opt('--pretrain-variant', None) or \
+        elif x.get('double_dqn_target') is not (opt('--agent-variant', 'legacy') not in ('legacy', 'verbatim')):
+            raise LabError('wrong Double-DQN target identity')
+        if val('--agent') != 'derp' and x.get('target_sync_replays') != int(opt('--target-sync', 250) if opt('--agent-variant', 'legacy') not in ('legacy', 'verbatim') else 1):
+            raise LabError('wrong target sync cadence')
+        if x.get('pretrain_env_family') != opt('--pretrain-env-family', None) or \
+                x.get('pretrain_variant') != opt('--pretrain-variant', None) or \
                 x.get('finetune_eps', 'restart') != opt('--finetune-eps', 'restart'):
             raise LabError('wrong transfer source')
         oo = x.get('optim_options') or {}
@@ -180,6 +195,8 @@ class Backend:
         finally:
             c.close()
     def approval(self):
+        if not pol(self.spec, 'launch_ready', False):
+            raise LabError('W pilot timing gate unmet: draft cannot launch')
         with self.connection() as c:
             r=c.execute('SELECT * FROM requests WHERE id=?',(self.rid,)).fetchone()
         if not r or r['kind'] != 'approval' or r['scope'] != 'sim' or r['state'] != 'approved' or r['spec_hash'] != canonical_hash(self.spec):
