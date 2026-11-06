@@ -103,6 +103,54 @@ DEFAULTS = {
 }
 RESEARCHER_KEYS = set(DEFAULTS)
 
+# v0.5.1 B4: value rules for changes made from the System tab or approved config cards (the `set` CLI stays lenient: tests
+# and drills use tiny timeouts). kind: bool | int(lo,hi) | float(lo,hi) | enum(...) | text(regex)
+_MODEL_RE = r"[A-Za-z0-9._:\-\[\]]{0,64}"
+SETTING_RULES = {
+    "coordinator": ("enum", PROVIDERS), "failover": ("bool",), "paused": ("bool",), "allow_paid_credits": ("bool",),
+    "governor_enabled": ("bool",),
+    "claude_model": ("text", _MODEL_RE), "codex_model": ("text", _MODEL_RE), "events_model": ("text", _MODEL_RE),
+    "peer_claude_model": ("text", _MODEL_RE), "peer_claude_major_model": ("text", _MODEL_RE),
+    "peer_codex_model": ("text", _MODEL_RE),
+    "claude_effort": ("text", r"[a-z]{0,12}"), "codex_effort": ("text", r"[a-z]{0,12}"),
+    "peer_codex_effort": ("text", r"[a-z]{0,12}"), "peer_codex_major_effort": ("text", r"[a-z]{0,12}"),
+    "max_workers": ("int", 1, 16), "task_timeout_min": ("int", 1, 1440), "peer_timeout_min": ("int", 1, 240),
+    "escalation_debounce_s": ("int", 0, 86400), "resume_max_tokens": ("int", 1000, 1000000),
+    "codex_resume_window_s": ("int", 0, 86400), "thread_messages": ("int", 0, 100), "state_max_lines": ("int", 20, 1000),
+    "pace_margin_pct": ("float", 0, 100), "optional_hard_pct": ("float", 1, 100), "five_hour_max_pct": ("float", 1, 100),
+    "chat_hard_pct": ("float", 1, 100), "usage_stale_h": ("float", 0.1, 168), "unknown_daily_runs": ("int", 1, 10000),
+    "peer_hold_max_min": ("int", 1, 1440), "max_retries": ("int", 0, 5),
+    "chat_budget_usd": ("float", 0.01, 100), "max_budget_usd": ("float", 0.01, 100), "peer_budget_usd": ("float", 0.01, 100),
+}
+
+
+def validate_setting(key, value):
+    """-> the normalised string value, or raises LabError (unknown key, wrong type, out of range)."""
+    if key not in RESEARCHER_KEYS:
+        raise LabError(f"Άγνωστη ρύθμιση {key}.")
+    value = str(value).strip()
+    rule = SETTING_RULES.get(key)
+    if rule is None:
+        raise LabError(f"{key}: δεν επιτρέπεται αλλαγή από το dashboard.")
+    kind = rule[0]
+    if kind == "bool":
+        if value not in ("0", "1"):
+            raise LabError(f"{key}: 0 ή 1.")
+    elif kind == "enum":
+        if value not in rule[1]:
+            raise LabError(f"{key}: ένα από {', '.join(rule[1])}.")
+    elif kind in ("int", "float"):
+        try:
+            x = int(value) if kind == "int" else float(value)
+        except ValueError:
+            raise LabError(f"{key}: αριθμός ({kind}).")
+        if value.lower() in ("nan", "inf", "-inf") or not (rule[1] <= x <= rule[2]):
+            raise LabError(f"{key}: από {rule[1]} έως {rule[2]}.")
+    elif kind == "text":
+        if not re.fullmatch(rule[1], value):
+            raise LabError(f"{key}: μη έγκυρη τιμή.")
+    return value
+
 QUOTA_RE = re.compile(
     r"(hit your (?:[\w']+ ){0,3}(?:limit|budget)|usage limit|limit reached|out of (?:extra )?usage|"
     r"out of usage credits|credit balance (?:is )?too low|usage credits are required|insufficient_quota|"
@@ -167,6 +215,8 @@ CREATE TABLE IF NOT EXISTS notified(kind TEXT NOT NULL, ref TEXT NOT NULL, ts TE
 CREATE TABLE IF NOT EXISTS peer_requests(id TEXT PRIMARY KEY, ts TEXT, from_provider TEXT, to_provider TEXT,
   key TEXT, major INTEGER, prompt TEXT, status TEXT, answer TEXT, error TEXT, cost_usd REAL, ts_done TEXT);
 CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, actor TEXT, action TEXT, detail TEXT);
+CREATE TABLE IF NOT EXISTS config_proposals(request_id TEXT PRIMARY KEY, key TEXT NOT NULL, value TEXT NOT NULL,
+  old TEXT, reason TEXT, proposed_by TEXT, ts TEXT, applied INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS limits(provider TEXT NOT NULL, window TEXT NOT NULL, status TEXT, utilization REAL,
   resets_at REAL, overage INTEGER, updated_at TEXT, PRIMARY KEY(provider, window));
 """
@@ -255,6 +305,25 @@ class DispatchDB:
                       (key, value, now_iso(), actor))
             c.execute("INSERT INTO audit(ts, actor, action, detail) VALUES (?,?,?,?)",
                       (now_iso(), actor, "set", f"{key}={value}"))
+
+    def change(self, key, value, expected_old=None, actor="researcher"):
+        """Validated, audited, compare-and-set change -> 'applied' | 'noop' (already that value) | 'conflict' (the stored
+        value is no longer `expected_old`: someone else changed it, nothing is written). One transaction, so a double
+        click or a replayed approval applies at most once."""
+        value = validate_setting(key, value)
+        with self.tx() as c:
+            r = c.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+            cur = r["value"] if r else DEFAULTS.get(key, "")
+            if cur == value:
+                return "noop"
+            if expected_old is not None and cur != str(expected_old):
+                return "conflict"
+            c.execute("INSERT INTO settings(key, value, updated_at, updated_by) VALUES (?,?,?,?) ON CONFLICT(key) DO"
+                      " UPDATE SET value=excluded.value, updated_at=excluded.updated_at, updated_by=excluded.updated_by",
+                      (key, value, now_iso(), actor))
+            c.execute("INSERT INTO audit(ts, actor, action, detail) VALUES (?,?,?,?)",
+                      (now_iso(), actor, "set", f"{key}: {cur!r} -> {value!r}"))
+        return "applied"
 
     # providers
     def provider(self, name):
@@ -894,6 +963,29 @@ class Dispatcher:
         self.dd.conn.execute("INSERT OR REPLACE INTO settings(key, value, updated_at, updated_by)"
                              " VALUES ('escalation_last_wake',?,?,'dispatcher')", (str(time.time()), now_iso()))
 
+    def _apply_config_card(self, r):
+        """True if `r` is a config card (handled here, decision delivered, no model). Approved -> validated, audited
+        compare-and-set from `config_proposals`; anything else -> nothing changes."""
+        row = self.dd.conn.execute("SELECT * FROM config_proposals WHERE request_id=?", (r["id"],)).fetchone()
+        if not row:
+            return False
+        tid = r["thread_id"] if r["thread_id"] and self.lab.message(r["thread_id"]) else self._system_thread()
+        if row["applied"] == 0:
+            if r["state"] == "approved":
+                try:
+                    res = self.dd.change(row["key"], row["value"], actor=f"approved:{r['id']}")
+                except LabError as e:
+                    res = f"refused: {e}"
+                text = {"applied": f"Εφαρμόστηκε: {row['key']} = {row['value']!r} (πριν {row['old']!r}).",
+                        "noop": f"{row['key']} είχε ήδη την τιμή {row['value']!r}: καμία αλλαγή."}.get(
+                            res, f"Δεν εφαρμόστηκε ({res}).")
+            else:
+                text = f"Η πρόταση {r['id']} ({r['state']}): δεν άλλαξε καμία ρύθμιση."
+            self.dd.conn.execute("UPDATE config_proposals SET applied=1 WHERE request_id=?", (r["id"],))
+            self.lab.post("dispatcher", f"Κώστα, {text}", tid, kind="status")
+        self.lab.mark_delivered(req_ids=[r["id"]])
+        return True
+
     def _launch_ready(self, rid):
         """Start the not-yet-started entries of approved request `rid` up to spec.max_parallel (what
         `launch_run.py start --all` does) -> (started run ids, entries still waiting). launch_run re-checks approval,
@@ -1022,6 +1114,8 @@ class Dispatcher:
         _, decs = self.lab.undelivered()
         self._launch_pending()
         for r in decs:
+            if self._apply_config_card(r):      # B4: an approved/rejected config card is settled by script
+                continue
             tid = r["thread_id"] if r["thread_id"] and self.lab.message(r["thread_id"]) else self._system_thread()
             err = self._launch_approved(r, tid)       # B3: an approved frozen sim spec is launched by a script
             if err is None:
@@ -1834,6 +1928,23 @@ def print_status(root):
               f" {t['refs']}")
 
 
+def propose_config(lab, dd, key, value, reason, author="agent"):
+    """An agent proposes a settings change as a card (kind proposal). The card text is built here from the validated
+    key/value, and what gets applied on approval is read from `config_proposals`, never from the card body."""
+    value = validate_setting(key, value)
+    old = dd.get(key)
+    if old == value:
+        raise LabError(f"{key} είναι ήδη {value!r}.")
+    rid = lab.ask("proposal", f"Αλλαγή ρύθμισης {key}: {old!r} → {value!r}",
+                  f"Προτείνεται αλλαγή της ρύθμισης `{key}` από {old!r} σε {value!r}.\n\nΛόγος: {(reason or '-').strip()[:800]}"
+                  f"\n\nΜε «approve» εφαρμόζεται αμέσως από τον dispatcher (έλεγχος τιμής, audit)· με «reject» δεν αλλάζει τίποτα.",
+                  author=author, scope="other")
+    dd.conn.execute("INSERT INTO config_proposals(request_id, key, value, old, reason, proposed_by, ts) VALUES (?,?,?,?,?,?,?)",
+                    (rid, key, value, old, (reason or "")[:800], author, now_iso()))
+    dd.audit(author, "propose_config", f"{rid}: {key}: {old!r} -> {value!r}")
+    return rid
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--root", default=None, help="lab directory (default: $QRL_LAB_DIR or cwd)")
@@ -1844,6 +1955,11 @@ def main(argv=None):
     s = sub.add_parser("set")
     s.add_argument("key")
     s.add_argument("value")
+    s = sub.add_parser("propose", help="agents: propose a settings change as a card for the researcher")
+    s.add_argument("key")
+    s.add_argument("value")
+    s.add_argument("--reason", default="")
+    s.add_argument("--as", dest="author", default=os.environ.get("QRL_JOB") or "agent")
     s = sub.add_parser("clear")
     s.add_argument("provider", choices=PROVIDERS)
     s = sub.add_parser("exhaust", help="drill: treat a provider as out of quota for N minutes")
@@ -1866,6 +1982,9 @@ def main(argv=None):
     elif a.cmd == "set":
         DispatchDB(dispatch_db_path(root)).set(a.key, a.value)
         print(f"{a.key} = {a.value}")
+    elif a.cmd == "propose":
+        lab = LabDB(os.path.join(root, ".lab", "lab.db"))
+        print(propose_config(lab, DispatchDB(dispatch_db_path(root)), a.key, a.value, a.reason, a.author))
     elif a.cmd == "clear":
         with DispatchDB(dispatch_db_path(root)) as dd:
             dd.clear(a.provider)

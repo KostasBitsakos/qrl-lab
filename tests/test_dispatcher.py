@@ -728,6 +728,38 @@ def test_max_workers_cancel_heartbeat():
     ok("max_workers cap, cancel stops the run, heartbeat thread, restart re-queues spawned jobs")
 
 
+def test_config_card_applies_on_approval_by_script():
+    d = fresh_dispatcher()
+    d.lab.close()
+    d.lab = LabDB(os.path.join(LAB, ".lab", "lab.db"))
+    n0 = len(calls("claude")) + len(calls("codex"))
+    d.dd.set("max_retries", "1")
+    rid = D.propose_config(d.lab, d.dd, "max_retries", "2", "δοκιμή", author="J9")
+    assert d.dd.get("max_retries") == "1", "a proposal changes nothing"
+    for bad in (("max_retries", "99"), ("max_retries", "x"), ("nope", "1"), ("max_retries", "1")):
+        try:
+            D.propose_config(d.lab, d.dd, *bad, "r")
+            raise AssertionError(bad)
+        except D.LabError:
+            pass
+    d.lab.decide(rid, "approve", "ok")
+    list(d._candidates())
+    assert d.dd.get("max_retries") == "2" and d.lab.request(rid)["decision_delivered"] == 1
+    assert all(x["kind"] != "decision" for x in d._candidates())
+    assert d.dd.conn.execute("SELECT COUNT(*) FROM audit WHERE detail LIKE 'max_retries: %'").fetchone()[0] == 1
+    rid2 = D.propose_config(d.lab, d.dd, "max_retries", "0", "r2", author="J9")
+    d.lab.decide(rid2, "reject", "όχι")
+    list(d._candidates())
+    assert d.dd.get("max_retries") == "2" and d.lab.request(rid2)["decision_delivered"] == 1
+    d.dd.change("max_retries", "3")                      # a replayed, already-applied card must not re-apply
+    d.lab.conn.execute("UPDATE requests SET decision_delivered=0 WHERE id=?", (rid,))
+    list(d._candidates())
+    assert d.dd.get("max_retries") == "3", "applied flag: replay changes nothing"
+    assert len(calls("claude")) + len(calls("codex")) == n0, "config cards cost no model call"
+    d.dd.set("max_retries", "1")
+    ok("config card: validated proposal, applied on approval by script (audited, once), rejected = no change, 0 model calls")
+
+
 def test_approved_sim_spec_is_launched_by_script():
     d = fresh_dispatcher()
     d.lab.close()
@@ -1066,7 +1098,7 @@ def test_held_job_does_not_block_the_queue_and_peer_requeues():
 
 
 
-TESTS = [test_approved_sim_spec_is_launched_by_script, test_clean_batch_summary_by_script_exactly_once, test_run_events_full_request_set, test_retry_attempt_accounting_and_resume_policy,
+TESTS = [test_config_card_applies_on_approval_by_script, test_approved_sim_spec_is_launched_by_script, test_clean_batch_summary_by_script_exactly_once, test_run_events_full_request_set, test_retry_attempt_accounting_and_resume_policy,
          test_resume_rejection_before_work_only, test_peer_context_and_ttl_limits, test_claude_reply_and_resume, test_failover_on_quota, test_both_exhausted_then_resume,
          test_choice_mention_status_and_errors, test_paid_credits_guard, test_decisions_and_run_events, test_peers,
          test_md_index, test_parse_reset, test_panel_and_installer, test_edit_freeze, test_headless_permission_roundtrip,

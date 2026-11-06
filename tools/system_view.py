@@ -122,6 +122,48 @@ def effective(rows):
     return {r["key"]: r["value"] for r in rows}
 
 
+def apply_change(path, key, new, expected_old, actor="researcher"):
+    """One click = one change (B4). -> (status, message_in_greek); status in applied|noop|conflict|invalid|error.
+    Compare-and-set against the value the page showed, so a second click or a stale page changes nothing."""
+    try:
+        dd = D.DispatchDB(path)
+        try:
+            res = dd.change(key, new, expected_old=expected_old, actor=actor)
+        finally:
+            dd.conn.close()
+    except D.LabError as e:
+        return "invalid", str(e)
+    except sqlite3.Error as e:
+        return "error", f"βάση: {e}"
+    return res, {"applied": f"{key} = {str(new).strip()!r} (πριν {expected_old!r}). Ισχύει από το επόμενο tick.",
+                 "noop": f"{key}: ήδη {str(new).strip()!r}, δεν έγινε τίποτα.",
+                 "conflict": f"{key}: άλλαξε στο μεταξύ. Φόρτωσε ξανά τη σελίδα και δες την τρέχουσα τιμή."}[res]
+
+
+def _editor(st, r, path):
+    """One row: input + «Εφαρμογή». Choices come from the same rules the dispatcher enforces."""
+    key, rule = r["key"], D.SETTING_RULES.get(r["key"])
+    c1, c2, c3 = st.columns([3, 2, 1])
+    c1.markdown(f"**{r['label']}** `{key}`  \n{r['help']}" if r["help"] else f"**{r['label']}** `{key}`")
+    if rule is None:
+        c2.text_input("τιμή", value=r["value"], disabled=True, key=f"sv_{key}", label_visibility="collapsed")
+        c3.caption("μόνο CLI")
+        return
+    if rule[0] == "bool":
+        new = c2.selectbox("τιμή", ["0", "1"], index=0 if r["value"] != "1" else 1, key=f"sv_{key}",
+                           label_visibility="collapsed")
+    elif rule[0] == "enum":
+        opts = list(rule[1])
+        new = c2.selectbox("τιμή", opts, index=opts.index(r["value"]) if r["value"] in opts else 0, key=f"sv_{key}",
+                           label_visibility="collapsed")
+    else:
+        new = c2.text_input("τιμή", value=r["value"], key=f"sv_{key}", label_visibility="collapsed")
+    c2.caption(f"προεπιλογή {r['default']!r} · {r['source']}" + (f" · {r['changed']}" if r["changed"] else ""))
+    if c3.button("Εφαρμογή", key=f"sb_{key}", disabled=str(new).strip() == r["value"]):
+        status, msg = apply_change(path, key, new, r["value"])
+        (st.success if status == "applied" else st.warning if status in ("noop", "conflict") else st.error)(msg)
+
+
 # ---------------------------------------------------------------- routing
 def routing_rows(s):
     """Who answers each event kind with the current settings, and why (no per-message selection)."""
@@ -284,7 +326,7 @@ def render(root=ROOT):
 
     now = time.time()
     P = paths(root)
-    st.caption("Μόνο προβολή. Οι αλλαγές ρυθμίσεων έρχονται στο Β4. Καμία κλήση μοντέλου από αυτή την καρτέλα.")
+    st.caption("Οι ρυθμίσεις αλλάζουν εδώ: έλεγχος τιμής, audit, ένα κλικ = μία αλλαγή (ισχύει στο επόμενο tick). Καμία κλήση μοντέλου από αυτή την καρτέλα.")
     rows = settings_rows(P["dispatch"])
     s = effective(rows)
 
@@ -310,5 +352,6 @@ def render(root=ROOT):
     st.subheader("Όλες οι ρυθμίσεις")
     for group in dict.fromkeys(r["group"] for r in rows):
         with st.expander(group, expanded=group in ("Πάροχοι", "Μοντέλα")):
-            st.dataframe(pd.DataFrame([{k: r[k] for k in ("label", "key", "value", "default", "source", "changed", "help")}
-                                       for r in rows if r["group"] == group]), hide_index=True, width="stretch")
+            for r in rows:
+                if r["group"] == group:
+                    _editor(st, r, P["dispatch"])
