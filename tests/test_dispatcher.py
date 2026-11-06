@@ -729,6 +729,46 @@ def test_max_workers_cancel_heartbeat():
     ok("max_workers cap, cancel stops the run, heartbeat thread, restart re-queues spawned jobs")
 
 
+def test_related_kb_pointers_and_refresh_and_state_limit():
+    d = fresh_dispatcher()
+    s = d.dd.settings()
+    kb = os.path.join(d.root, ".lab", "kb")
+    shutil.rmtree(kb, ignore_errors=True)
+    long_text = "Πού ορίζεται ο governor και πώς αποφασίζει για προαιρετικές εκτελέσεις; " * 3
+    assert d.kb_related(long_text, s) == "" and d.kb_related("σύντομο", s) == "", "no index / short text: nothing"
+    os.makedirs(kb)
+    seen = []
+
+    def fake_run(cmd, **kw):
+        seen.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, "WARNING: old\ndocs/a.md:3 [doc] governor\n", "")
+    with patch.object(D.subprocess, "run", fake_run):
+        assert d.kb_related("κοντό", s) == "", "messages up to kb_related_min_chars skip the query"
+        out = d.kb_related(long_text, s)
+    assert out == "docs/a.md:3 [doc] governor" and len(seen) == 1 and "query" in seen[0]
+    popen = []
+    with patch.object(D.subprocess, "Popen", lambda cmd, **kw: popen.append(cmd)):
+        d.kb_refresh_soon(s); d.kb_refresh_soon(s)
+    assert len(popen) == 1 and popen[0][:3] == ["taskset", "-c", "4-7"], "one refresh per window, on cores 4-7"
+    d.dd.set("kb_refresh_min", "0")
+    d.dd.conn.execute("DELETE FROM settings WHERE key='kb_refresh_last'")
+    with patch.object(D.subprocess, "Popen", lambda cmd, **kw: popen.append(cmd)):
+        d.kb_refresh_soon(d.dd.settings())
+    assert len(popen) == 1, "kb_refresh_min=0 never refreshes"
+    d.dd.set("kb_refresh_min", "10")
+    shutil.rmtree(kb, ignore_errors=True)
+    # STATE size note
+    os.makedirs(os.path.join(d.root, "docs"), exist_ok=True)
+    keep = d._read("docs/STATE.md")
+    open(os.path.join(d.root, "docs", "STATE.md"), "w").write("x" * 9000)
+    notes = []
+    d.build_prompt("claude", {"kind": "message", "thread_id": "T", "msg_ids": [], "reply_to": "M", "text": "hi",
+                             "req_ids": []}, True, notes)
+    open(os.path.join(d.root, "docs", "STATE.md"), "w").write(keep or "")
+    assert any("9000 bytes" in n for n in notes), notes
+    ok("B6: kb pointers for long messages only, one refresh per window on cores 4-7, STATE byte limit note")
+
+
 def test_roles_commit_claimed_and_solo_review():
     d = fresh_dispatcher()
     db = LabDB()
@@ -1149,7 +1189,7 @@ def test_held_job_does_not_block_the_queue_and_peer_requeues():
 
 
 
-TESTS = [test_roles_commit_claimed_and_solo_review, test_config_card_applies_on_approval_by_script, test_approved_sim_spec_is_launched_by_script, test_clean_batch_summary_by_script_exactly_once, test_run_events_full_request_set, test_retry_attempt_accounting_and_resume_policy,
+TESTS = [test_related_kb_pointers_and_refresh_and_state_limit, test_roles_commit_claimed_and_solo_review, test_config_card_applies_on_approval_by_script, test_approved_sim_spec_is_launched_by_script, test_clean_batch_summary_by_script_exactly_once, test_run_events_full_request_set, test_retry_attempt_accounting_and_resume_policy,
          test_resume_rejection_before_work_only, test_peer_context_and_ttl_limits, test_claude_reply_and_resume, test_failover_on_quota, test_both_exhausted_then_resume,
          test_choice_mention_status_and_errors, test_paid_credits_guard, test_decisions_and_run_events, test_peers,
          test_md_index, test_parse_reset, test_panel_and_installer, test_edit_freeze, test_headless_permission_roundtrip,

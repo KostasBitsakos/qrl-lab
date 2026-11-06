@@ -23,8 +23,8 @@ Source of truth: `docs/PLAN.md` §1, §2, §6. Start every task from `docs/STATE
 - Either model may coordinate. Task text starting with `[QRL-Lab task` → you ARE the coordinator: follow
   `prompts/coordinator.md`; the other model is your co-researcher via `tools/ask_peer.py`. The coordinator is «Πάρις»
   (Παρασκευάς): open replies with «Κώστα,» and sign «— Πάρις» (Codex coordinating: «— Πάρις (Codex)») (M-20261028-011).
-- Update `docs/STATE.md` (≤150 lines) after any task that changed something. Notes: grep `docs/INDEX.md` (generated;
-  never edit or read whole). Decisions: `docs/DECISIONS.md`. Journal: `docs/journal/`.
+- Update `docs/STATE.md` (≤150 lines) after any task that changed something. Notes: `docs/INDEX.md` is generated (never edit or read
+  whole): ask `kb.py query` first (rule above); grep INDEX.md only to list note titles. Decisions: `docs/DECISIONS.md`. Journal: `docs/journal/`.
 - All researcher-visible replies, status notes and contributions from Codex must be in Greek (M-20261029-159).
   English review format below applies only to internal exchanges; translate before posting to the researcher.
 

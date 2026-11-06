@@ -90,6 +90,7 @@ DEFAULTS = {
     "codex_resume_window_s": "900",
     "thread_messages": "12",          # thread messages included in a fresh context pack
     "state_max_lines": "150",
+    "state_max_bytes": "8192",         # B6: STATE.md above this -> a note asking the coordinator to condense it (archive the old text)
     # governor (v0.5.1 §5): pace-based admission, see tools/governor.py
     "governor_enabled": "0",          # B2 ships closed (review 3): the researcher opens it after watching one day of traffic
     "pace_margin_pct": "10",          # optional run if weekly use <= pace + this
@@ -106,6 +107,9 @@ DEFAULTS = {
     "role_research_codex": "", "role_work_codex": "", "role_light_codex": "", "role_quick_codex": "",
     "role_research_codex_effort": "high", "role_work_codex_effort": "", "role_light_codex_effort": "low",
     "role_quick_codex_effort": "low", "role_light_claude_effort": "low",
+    "kb_related": "1",                # «Σχετικά» (B6): pointers from `kb.py query` for chat messages longer than kb_related_min_chars
+    "kb_related_min_chars": "80",
+    "kb_refresh_min": "10",           # B6: refresh the kb index after a finished job, at most every N minutes (0 = never)
     "codex_commit": "1",              # the dispatcher commits a finished Codex job's claimed files (Codex cannot write .git)
 }
 RESEARCHER_KEYS = set(DEFAULTS)
@@ -124,6 +128,7 @@ SETTING_RULES = {
     "max_workers": ("int", 1, 16), "task_timeout_min": ("int", 1, 1440), "peer_timeout_min": ("int", 1, 240),
     "escalation_debounce_s": ("int", 0, 86400), "resume_max_tokens": ("int", 1000, 1000000),
     "codex_resume_window_s": ("int", 0, 86400), "thread_messages": ("int", 0, 100), "state_max_lines": ("int", 20, 1000),
+    "state_max_bytes": ("int", 1024, 200000),
     "pace_margin_pct": ("float", 0, 100), "optional_hard_pct": ("float", 1, 100), "five_hour_max_pct": ("float", 1, 100),
     "chat_hard_pct": ("float", 1, 100), "usage_stale_h": ("float", 0.1, 168), "unknown_daily_runs": ("int", 1, 10000),
     "peer_hold_max_min": ("int", 1, 1440), "max_retries": ("int", 0, 5),
@@ -133,7 +138,8 @@ SETTING_RULES = {
     "role_light_codex": ("text", _MODEL_RE), "role_quick_codex": ("text", _MODEL_RE),
     "role_research_codex_effort": ("text", r"[a-z]{0,12}"), "role_work_codex_effort": ("text", r"[a-z]{0,12}"),
     "role_light_codex_effort": ("text", r"[a-z]{0,12}"), "role_quick_codex_effort": ("text", r"[a-z]{0,12}"),
-    "role_light_claude_effort": ("text", r"[a-z]{0,12}"), "codex_commit": ("bool",),
+    "role_light_claude_effort": ("text", r"[a-z]{0,12}"), "codex_commit": ("bool",), "kb_related": ("bool",),
+    "kb_related_min_chars": ("int", 1, 5000), "kb_refresh_min": ("int", 0, 1440),
     "chat_budget_usd": ("float", 0.01, 100), "max_budget_usd": ("float", 0.01, 100), "peer_budget_usd": ("float", 0.01, 100),
 }
 
@@ -924,6 +930,10 @@ class Dispatcher:
             n_lines = len(state.splitlines()) if state else 0
             parts.append("## docs/STATE.md\n" + (state.strip() if state else "(missing: create it from the template "
                                                                               "in prompts/STATE.template.md)"))
+            n_bytes = len(state.encode("utf-8")) if state else 0
+            if n_bytes > int(s["state_max_bytes"]):
+                note_lines.append(f"docs/STATE.md is {n_bytes} bytes: condense it to ≤{s['state_max_bytes']} (copy the old text "
+                                  "verbatim to docs/archive/ first and keep pointers to it).")
             if n_lines > int(s["state_max_lines"]):
                 note_lines.append(f"docs/STATE.md has {n_lines} lines: condense it to ≤{s['state_max_lines']}.")
             hist = self.lab.thread(item["thread_id"])
@@ -939,6 +949,9 @@ class Dispatcher:
                 mem = convo_context.relevant(item["text"], self.root, max_chars=1500, exclude_ids=in_pack)
             except Exception:
                 mem = ""
+            rel = self.kb_related(item["text"], s) if item["kind"] == "message" else ""
+            if rel:
+                parts.append("## Related (kb.py query; pointers, read only the cited windows)\n" + rel)
             if mem:
                 parts.append("## Possibly relevant memory (pointers; check before claiming, and before appending to any md file run"
                              " `python3 tools/md_dedupe.py check <file> \"<text>\"`)\n" + mem)
@@ -1473,6 +1486,38 @@ class Dispatcher:
                                          f" σε όριο). Το αίτημα περιμένει· συνεχίζει αυτόματα περίπου {when}.")
         return "deferred"
 
+    def kb_related(self, text, s):
+        """«Σχετικά» (B6): `kb.py query` pointers for a longer message; bounded, never blocks or fails the run."""
+        text = " ".join((text or "").split())
+        try:
+            if s.get("kb_related") != "1" or len(text) <= int(s["kb_related_min_chars"]):
+                return ""
+            if not os.path.isdir(os.path.join(self.root, ".lab", "kb")):
+                return ""
+            p = subprocess.run([sys.executable, os.path.join(TOOLS, "kb.py"), "query", "--chars", "900", "--docs", "3",
+                                "--code", "2", text[:300]], cwd=self.root, capture_output=True, text=True, timeout=10)
+            lines = [ln for ln in p.stdout.splitlines() if ln.strip() and not ln.startswith(("WARNING", "kb not built"))]
+            return "\n".join(lines)[:1200] if p.returncode == 0 else ""
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return ""
+
+    def kb_refresh_soon(self, s):
+        """B6: a small kb refresh after a finished job (cores 4-7, detached, single-instance via kb's own lock), at most
+        every `kb_refresh_min` minutes; only when an index already exists."""
+        try:
+            gap = int(s.get("kb_refresh_min") or 0) * 60
+            if gap <= 0 or not os.path.isdir(os.path.join(self.root, ".lab", "kb")):
+                return
+            if time.time() - float(self.dd.get("kb_refresh_last") or 0) < gap:
+                return
+            self.dd.conn.execute("INSERT OR REPLACE INTO settings(key, value, updated_at, updated_by)"
+                                 " VALUES ('kb_refresh_last',?,?,'dispatcher')", (str(time.time()), now_iso()))
+            subprocess.Popen(["taskset", "-c", "4-7", sys.executable, os.path.join(TOOLS, "kb.py"), "refresh"], cwd=self.root,
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             start_new_session=True)
+        except (OSError, ValueError, sqlite3.Error):
+            pass
+
     def _after_job_ok(self, provider, item, tried):
         """B5, still holding the job's claims: (1) a Codex job's claimed files are committed by the dispatcher, only
         those, with a blob-hash check; (2) a job that ran on the other provider because the first one hit its limit is
@@ -1480,6 +1525,7 @@ class Dispatcher:
         jid = item.get("job_id")
         if not jid or item["kind"] != "job":
             return
+        self.kb_refresh_soon(self.dd.settings())
         info = ""
         try:
             if provider == "codex" and self.dd.get("codex_commit") == "1":
