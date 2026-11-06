@@ -50,6 +50,7 @@ sys.path.insert(0, os.path.join(LAB, "tools"))
 
 from labdb import LabDB, LabError  # noqa: E402
 import dispatcher as D  # noqa: E402
+import work as W  # noqa: E402
 import build_md_index  # noqa: E402
 
 PASSED = []
@@ -346,13 +347,20 @@ def test_decisions_and_run_events():
     add_run("new-1", rid, "running")
     assert d.once() is None
     db.conn.execute("UPDATE runs SET status='done' WHERE run_id='new-1'")
+    n_claude = len(calls("claude"))
+    assert d.once() is None, "a clean batch is summarised by a script: no coordinator task"   # B3
+    assert len(calls("claude")) == n_claude
+    body = thread_bodies(db, root)[-1]
+    assert "new-1" in body and "old-1" not in body and "[run-summary " in body
+    assert d.once() is None and thread_bodies(db, root)[-1] == body
+    add_run("new-2", rid, "failed")                      # a failed batch still wakes the coordinator, once
+    db.conn.execute("UPDATE runs SET exit_code=1 WHERE run_id='new-2'")
     queue("claude", {"mode": "ok", "text": "Τα αποτελέσματα: ..."})
     assert d.once() == "done"
     p = prompt_of(calls("claude")[-1])
-    assert "new-1" in p and "old-1" not in p and "have ended" in p
+    assert "new-2" in p and "old-1" not in p and "have ended" in p
     assert d.once() is None
-    assert thread_bodies(db, root)[-1].startswith("Κώστα,\n\nΤα αποτελέσματα")
-    ok("decisions and finished experiment batches wake the coordinator once each (no LLM polling)")
+    ok("decisions wake the coordinator once; clean batches get a script summary, failed ones wake the coordinator once")
 
 
 def test_peers():
@@ -721,6 +729,206 @@ def test_max_workers_cancel_heartbeat():
     ok("max_workers cap, cancel stops the run, heartbeat thread, restart re-queues spawned jobs")
 
 
+def test_related_kb_pointers_and_refresh_and_state_limit():
+    d = fresh_dispatcher()
+    s = d.dd.settings()
+    kb = os.path.join(d.root, ".lab", "kb")
+    shutil.rmtree(kb, ignore_errors=True)
+    long_text = "Πού ορίζεται ο governor και πώς αποφασίζει για προαιρετικές εκτελέσεις; " * 3
+    assert d.kb_related(long_text, s) == "" and d.kb_related("σύντομο", s) == "", "no index / short text: nothing"
+    os.makedirs(kb)
+    seen = []
+
+    def fake_run(cmd, **kw):
+        seen.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, "WARNING: old\ndocs/a.md:3 [doc] governor\n", "")
+    with patch.object(D.subprocess, "run", fake_run):
+        assert d.kb_related("κοντό", s) == "", "messages up to kb_related_min_chars skip the query"
+        out = d.kb_related(long_text, s)
+    assert out == "docs/a.md:3 [doc] governor" and len(seen) == 1 and "query" in seen[0]
+    popen = []
+    with patch.object(D.subprocess, "Popen", lambda cmd, **kw: popen.append(cmd)):
+        d.kb_refresh_soon(s); d.kb_refresh_soon(s)
+    assert len(popen) == 1 and popen[0][:3] == ["taskset", "-c", "4-7"], "one refresh per window, on cores 4-7"
+    d.dd.set("kb_refresh_min", "0")
+    d.dd.conn.execute("DELETE FROM settings WHERE key='kb_refresh_last'")
+    with patch.object(D.subprocess, "Popen", lambda cmd, **kw: popen.append(cmd)):
+        d.kb_refresh_soon(d.dd.settings())
+    assert len(popen) == 1, "kb_refresh_min=0 never refreshes"
+    d.dd.set("kb_refresh_min", "10")
+    shutil.rmtree(kb, ignore_errors=True)
+    # STATE size note
+    os.makedirs(os.path.join(d.root, "docs"), exist_ok=True)
+    keep = d._read("docs/STATE.md")
+    open(os.path.join(d.root, "docs", "STATE.md"), "w").write("x" * 9000)
+    notes = []
+    d.build_prompt("claude", {"kind": "message", "thread_id": "T", "msg_ids": [], "reply_to": "M", "text": "hi",
+                             "req_ids": []}, True, notes)
+    open(os.path.join(d.root, "docs", "STATE.md"), "w").write(keep or "")
+    assert any("9000 bytes" in n for n in notes), notes
+    ok("B6: kb pointers for long messages only, one refresh per window on cores 4-7, STATE byte limit note")
+
+
+def test_roles_commit_claimed_and_solo_review():
+    d = fresh_dispatcher()
+    db = LabDB()
+    d.dd.set("claude_model", "sonnet")
+    root = db.researcher_send("δουλειά")
+    db.conn.execute("UPDATE messages SET status='done' WHERE id=?", (root,))
+    # role: a research worker runs on the role's model, an unroled one keeps claude_model
+    d.work.create("worker", "spawn", "R job", "x", reply_to=root, thread_id=root, status="queued", role="research")
+    queue("claude", {"mode": "ok", "text": "ok"})
+    assert d.once() == "done"
+    argv = calls("claude")[-1]["argv"]
+    assert "opus" in argv and "sonnet" not in argv, argv
+    d.work.create("worker", "spawn", "plain", "x", reply_to=root, thread_id=root, status="queued")
+    queue("claude", {"mode": "ok", "text": "ok"})
+    assert d.once() == "done" and "sonnet" in calls("claude")[-1]["argv"]
+    # commit_claimed: only the claimed file, blobs verified; an unclaimed modified file stays out
+    repo = tempfile.mkdtemp(prefix="b5repo-")
+    os.makedirs(os.path.join(repo, ".lab"))
+    run = lambda *a: subprocess.run(["git", *a], cwd=repo, capture_output=True, text=True, check=True)
+    run("init", "-q"); run("config", "user.email", "t@t"); run("config", "user.name", "t")
+    open(os.path.join(repo, "seed.txt"), "w").write("0"); run("add", "-A"); run("commit", "-qm", "seed")
+    open(os.path.join(repo, "mine.py"), "w").write("print(1)\n")
+    open(os.path.join(repo, "other.py"), "w").write("print(2)\n")
+    r = W.commit_claimed(repo, ["mine.py"], "J1: test")
+    assert r["files"] == ["mine.py"] and r["mismatch"] == [], r
+    assert "other.py" in run("status", "--porcelain").stdout and "mine.py" not in run("status", "--porcelain").stdout
+    assert W.commit_claimed(repo, ["mine.py"], "J1: again")["files"] == [], "nothing new: no empty commit"
+    shutil.rmtree(repo, ignore_errors=True)
+    # solo: Claude at its limit -> the job runs on Codex only; when Claude is back, one read-only review is requested
+    j = d.work.create("worker", "spawn", "Solo job", "x", reply_to=root, thread_id=root, status="queued")
+    queue("claude", {"mode": "quota"})
+    queue("codex", {"mode": "ok", "text": "έτοιμο"})
+    assert d.once() == "done"
+    row = d.dd.conn.execute("SELECT * FROM solo_jobs WHERE job=?", (j,)).fetchone()
+    assert row and row["ran_on"] == "codex" and row["review_peer"] is None
+    d._solo_reviews()
+    assert d.dd.conn.execute("SELECT review_peer FROM solo_jobs WHERE job=?", (j,)).fetchone()[0] is None, "Claude still out"
+    d.dd.clear("claude")
+    d._solo_reviews(); d._solo_reviews()
+    pid = d.dd.conn.execute("SELECT review_peer FROM solo_jobs WHERE job=?", (j,)).fetchone()[0]
+    reqs = d.dd.conn.execute("SELECT * FROM peer_requests WHERE key=?", (f"solo-{j}",)).fetchall()
+    assert pid and len(reqs) == 1 and reqs[0]["to_provider"] == "claude", "exactly one joint review"
+    d.dd.conn.execute("UPDATE peer_requests SET status='done' WHERE key=?", (f"solo-{j}",))
+    # Claude already marked unavailable before the job starts (nothing "tried"): still solo
+    d.dd.mark_exhausted("claude", time.time() + 3600, "drill")
+    j3 = d.work.create("worker", "spawn", "Pre-exhausted", "x", reply_to=root, thread_id=root, status="queued")
+    queue("codex", {"mode": "ok", "text": "ok"})
+    assert d.once() == "done" and d.dd.conn.execute("SELECT 1 FROM solo_jobs WHERE job=?", (j3,)).fetchone()
+    d.dd.clear("claude")
+    # a job pinned to a provider is not solo
+    j2 = d.work.create("worker", "spawn", "Pinned", "x", reply_to=root, thread_id=root, provider="codex", status="queued")
+    queue("codex", {"mode": "ok", "text": "ok"})
+    assert d.once() == "done" and not d.dd.conn.execute("SELECT 1 FROM solo_jobs WHERE job=?", (j2,)).fetchone()
+    ok("B5: role models for workers, dispatcher commit of claimed files only (blob check), solo jobs get one joint review")
+
+
+def test_config_card_applies_on_approval_by_script():
+    d = fresh_dispatcher()
+    d.lab.close()
+    d.lab = LabDB(os.path.join(LAB, ".lab", "lab.db"))
+    n0 = len(calls("claude")) + len(calls("codex"))
+    d.dd.set("max_retries", "1")
+    rid = D.propose_config(d.lab, d.dd, "max_retries", "2", "δοκιμή", author="J9")
+    assert d.dd.get("max_retries") == "1", "a proposal changes nothing"
+    for bad in (("max_retries", "99"), ("max_retries", "x"), ("nope", "1"), ("max_retries", "1")):
+        try:
+            D.propose_config(d.lab, d.dd, *bad, "r")
+            raise AssertionError(bad)
+        except D.LabError:
+            pass
+    d.lab.decide(rid, "approve", "ok")
+    list(d._candidates())
+    assert d.dd.get("max_retries") == "2" and d.lab.request(rid)["decision_delivered"] == 1
+    assert all(x["kind"] != "decision" for x in d._candidates())
+    assert d.dd.conn.execute("SELECT COUNT(*) FROM audit WHERE detail LIKE 'max_retries: %'").fetchone()[0] == 1
+    rid2 = D.propose_config(d.lab, d.dd, "max_retries", "0", "r2", author="J9")
+    d.lab.decide(rid2, "reject", "όχι")
+    list(d._candidates())
+    assert d.dd.get("max_retries") == "2" and d.lab.request(rid2)["decision_delivered"] == 1
+    d.dd.change("max_retries", "3")                      # a replayed, already-applied card must not re-apply
+    d.lab.conn.execute("UPDATE requests SET decision_delivered=0 WHERE id=?", (rid,))
+    list(d._candidates())
+    assert d.dd.get("max_retries") == "3", "applied flag: replay changes nothing"
+    assert len(calls("claude")) + len(calls("codex")) == n0, "config cards cost no model call"
+    # a stale approval never overwrites a newer choice
+    rid3 = D.propose_config(d.lab, d.dd, "max_retries", "4", "r3", author="J9")
+    d.dd.change("max_retries", "2")
+    d.lab.decide(rid3, "approve", "ok")
+    list(d._candidates())
+    assert d.dd.get("max_retries") == "2" and d.lab.request(rid3)["decision_delivered"] == 1, "conflict: nothing written"
+    d.dd.set("max_retries", "1")
+    ok("config card: validated proposal, applied on approval by script (audited, once), rejected = no change, 0 model calls")
+
+
+def test_approved_sim_spec_is_launched_by_script():
+    d = fresh_dispatcher()
+    d.lab.close()
+    d.lab = LabDB(os.path.join(LAB, ".lab", "lab.db"))
+    db = d.lab
+    root = db.researcher_send("Τρέξε τρία seeds")
+    db.conn.execute("UPDATE messages SET status='done' WHERE id=?", (root,))
+    cmd = [sys.executable, "-c", "import time; time.sleep(2)"]
+    spec = {"name": "tri", "scope": "sim", "cwd": ".", "max_attempts": 1, "max_parallel": 2,
+            "entries": [{"name": f"seed{i}", "seed": i, "cmd": cmd} for i in range(3)],
+            "limits": {"wall_clock_hours": 1.0}}
+    rid = db.ask("approval", "tri", "σώμα", scope="sim", spec=spec, thread_id=root)
+    n0 = len(calls("claude")) + len(calls("codex"))
+    db.decide(rid, "approve", "οκ")
+    assert d.once() is None, "approved sim spec: launched by script, no coordinator task"
+    assert len(calls("claude")) + len(calls("codex")) == n0
+    runs = lambda: [dict(r) for r in db.conn.execute("SELECT entry, status FROM runs WHERE request_id=?", (rid,))]
+    assert sorted(r["entry"] for r in runs()) == [0, 1], runs()           # max_parallel 2
+    assert db.request(rid)["decision_delivered"] == 1
+    assert any("ξεκίνησε 2 από 3" in b for b in thread_bodies(db, root))
+    d.once()
+    assert len(runs()) == 2, "no duplicate start while both slots are busy"
+    db.conn.execute("UPDATE runs SET status='done', exit_code=0 WHERE request_id=? AND entry=0", (rid,))  # a slot frees up
+    list(d._candidates())
+    assert sorted(r["entry"] for r in runs()) == [0, 1, 2], runs()          # slot freed -> entry 2 started once
+    time.sleep(0.5); list(d._candidates())
+    assert len(runs()) == 3
+    # a real-scope approval is never launched by script
+    rid2 = db.ask("approval", "real", "σώμα", scope="real", thread_id=root,
+                  spec={"name": "r", "scope": "real", "cwd": ".", "max_attempts": 1,
+                        "entries": [{"name": "e", "cmd": cmd}], "limits": {"wall_clock_hours": 1.0},
+                        "real": {"kube_context": "x", "namespace": "n", "rollback": "r"}})
+    db.decide(rid2, "approve", "οκ")
+    items = [x for x in d._candidates() if x["kind"] == "decision"]
+    assert items and rid2 in items[0]["req_ids"] and not db.conn.execute(
+        "SELECT 1 FROM runs WHERE request_id=?", (rid2,)).fetchone()
+    db.mark_delivered(req_ids=[rid2])   # leave no pending decision for the next test
+    ok("approved sim spec -> launched by script (max_parallel, once, no model); real scope stays with the coordinator")
+
+
+def test_clean_batch_summary_by_script_exactly_once():
+    d = fresh_dispatcher()
+    d.lab.close()
+    d.lab = LabDB(os.path.join(LAB, ".lab", f"script-ev-{time.time_ns()}.db"))
+    d.dd.conn.execute("INSERT OR REPLACE INTO settings(key,value) VALUES ('events_initialized','1')")
+    n0 = len(calls("claude")) + len(calls("codex"))
+
+    def add(ident, rid, status, code):
+        d.lab.conn.execute(
+            "INSERT INTO runs(run_id,request_id,spec_hash,entry,attempt,scope,cmd,cwd,run_dir,status,exit_code,created)"
+            " VALUES (?,?, 'h',0,1,'sim','[]','.','fx',?,?,?)", (ident, rid, status, code, D.now_iso()))
+    add("ok-a", "R-script-ok", "done", 0)
+    add("ok-b", "R-script-ok", "done", 0)
+    assert not [x for x in d._candidates() if x.get("event_ref", "").startswith("R-script-ok:")], "clean batch: no model"
+    posts = d.lab.conn.execute("SELECT body FROM messages WHERE author='dispatcher' AND body LIKE '%[run-summary R-script-ok:%'").fetchall()
+    assert len(posts) == 1 and "ok-a" in posts[0]["body"] and "ok-b" in posts[0]["body"]
+    assert not [x for x in d._candidates() if x.get("event_ref", "").startswith("R-script-ok:")]
+    d.dd.conn.execute("DELETE FROM notified")   # restart that lost the notified mark: the marker in the thread still holds
+    d._candidates()
+    assert d.lab.conn.execute("SELECT COUNT(*) FROM messages WHERE body LIKE '%[run-summary R-script-ok:%'").fetchone()[0] == 1
+    add("bad-a", "R-script-bad", "done", 0)
+    add("bad-b", "R-script-bad", "failed", 1)
+    assert len([x for x in d._candidates() if x.get("event_ref", "").startswith("R-script-bad:")]) == 1, "failure -> model"
+    assert len(calls("claude")) + len(calls("codex")) == n0
+
+
 def test_run_events_full_request_set():
     d = fresh_dispatcher()
     # This window fixture must own its run set, independent of earlier test batches.
@@ -729,7 +937,7 @@ def test_run_events_full_request_set():
     d.dd.conn.execute("INSERT OR REPLACE INTO settings(key,value) VALUES ('events_initialized','1')")
     rid = "R-rolling-regression"
 
-    def add(ident, request, created, status="done"):
+    def add(ident, request, created, status="failed"):
         d.lab.conn.execute(
             "INSERT INTO runs(run_id,request_id,spec_hash,entry,attempt,scope,cmd,cwd,run_dir,status,created)"
             " VALUES (?,?, 'h',0,1,'sim','[]','.','fixture',?,?)", (ident, request, status, created))
@@ -861,26 +1069,37 @@ def test_escalation_debounce():
     d = fresh_dispatcher()
     w = d.work
     a = w.create("worker", "spawn", "A", "long job", reply_to="M-x", status="running")
+    n0 = len(calls("claude")) + len(calls("codex"))
     esc = lambda: [i for i in d._candidates() if i["kind"] == "escalation"]
+    reqs = lambda: d.lab.conn.execute("SELECT * FROM requests WHERE author='dispatcher' AND title LIKE ?",
+                                      (a + ":%",)).fetchall()
+    notes = lambda: d.lab.conn.execute("SELECT body FROM messages WHERE author='dispatcher' AND body LIKE ?",
+                                       (f"%{a}%",)).fetchall()
     w.say(a, "coordinator", "progress 1")
-    first = esc()
-    assert len(first) == 1, "no wake-up yet: the first routine note wakes the coordinator"
-    d._consume(first[0])
+    assert esc() == [] and len(notes()) == 1, "routine note: a status line by script, no coordinator task"
     w.say(a, "coordinator", "progress 2")
     w.say(a, "coordinator", "progress 3")
-    assert esc() == [], "routine notes inside the debounce window are batched"
+    esc()
+    assert len(notes()) == 1, "routine notes inside the debounce window are batched"
     d.dd.conn.execute("UPDATE settings SET value=? WHERE key='escalation_last_wake'", (str(time.time() - 1201),))
-    batch = esc()
-    assert len(batch) == 1 and "progress 2" in batch[0]["text"] and "progress 3" in batch[0]["text"]
-    d._consume(batch[0])
+    esc()
+    nb = notes()
+    assert len(nb) == 3 and "progress 2" in nb[1]["body"] and "progress 3" in nb[2]["body"], "one line per note, once each"
+    esc()
+    assert len(notes()) == 3, "a second scan reposts nothing"
     w.say(a, "coordinator", "blocked: need a choice", kind="urgent")
-    assert len(esc()) == 1, "urgent notes wake at once"
-    d._consume(esc()[0])
+    esc()
+    r = reqs()
+    assert len(r) == 1 and r[0]["kind"] == "question" and "blocked: need a choice" in r[0]["body"], "urgent -> a card at once"
+    esc()
+    assert len(reqs()) == 1, "exactly one card per note"
     w.say(a, "coordinator", "final note")
-    assert esc() == []
     w.set_status(a, "done")
-    assert len(esc()) == 1, "a note from a job that already ended wakes at once"
-    ok("escalation debounce: routine notes max 1 wake per window; urgent and final notes immediate")
+    esc()
+    assert len(notes()) == 4 and w.escalations() == [], "a note from a job that already ended is posted at once"
+    assert len(calls("claude")) + len(calls("codex")) == n0, "escalations cost no model call"
+    d.lab.conn.execute("UPDATE requests SET state='withdrawn', decision_delivered=1 WHERE author='dispatcher'")
+    ok("escalations: routine notes batched into a status line, urgent ones a card, no model call, once each")
 
 
 def n_tasks(d, provider):
@@ -984,7 +1203,7 @@ def test_held_job_does_not_block_the_queue_and_peer_requeues():
 
 
 
-TESTS = [test_run_events_full_request_set, test_retry_attempt_accounting_and_resume_policy,
+TESTS = [test_related_kb_pointers_and_refresh_and_state_limit, test_roles_commit_claimed_and_solo_review, test_config_card_applies_on_approval_by_script, test_approved_sim_spec_is_launched_by_script, test_clean_batch_summary_by_script_exactly_once, test_run_events_full_request_set, test_retry_attempt_accounting_and_resume_policy,
          test_resume_rejection_before_work_only, test_peer_context_and_ttl_limits, test_claude_reply_and_resume, test_failover_on_quota, test_both_exhausted_then_resume,
          test_choice_mention_status_and_errors, test_paid_credits_guard, test_decisions_and_run_events, test_peers,
          test_md_index, test_parse_reset, test_panel_and_installer, test_edit_freeze, test_headless_permission_roundtrip,

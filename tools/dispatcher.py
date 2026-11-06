@@ -57,6 +57,8 @@ import perm_store  # noqa: E402
 import work as W  # noqa: E402
 from researcher_text import researcher_text  # noqa: E402
 import governor  # noqa: E402
+import run_events  # noqa: E402
+import launch_run  # noqa: E402
 
 PROVIDERS = ("claude", "codex")
 OTHER = {"claude": "codex", "codex": "claude"}
@@ -88,6 +90,7 @@ DEFAULTS = {
     "codex_resume_window_s": "900",
     "thread_messages": "12",          # thread messages included in a fresh context pack
     "state_max_lines": "150",
+    "state_max_bytes": "8192",         # B6: STATE.md above this -> a note asking the coordinator to condense it (archive the old text)
     # governor (v0.5.1 §5): pace-based admission, see tools/governor.py
     "governor_enabled": "0",          # B2 ships closed (review 3): the researcher opens it after watching one day of traffic
     "pace_margin_pct": "10",          # optional run if weekly use <= pace + this
@@ -98,8 +101,75 @@ DEFAULTS = {
     "unknown_daily_runs": "40",       # runs per 24 h per provider while its usage is unknown (assumption, tunable)
     "peer_hold_max_min": "30",        # a peer request held back by the governor this long fails (the caller is not left waiting)
     "max_retries": "1",               # transient failures retried at most this many times; a safety refusal never
+    # roles (v0.5.1 §5): a worker spawned with `work.py spawn --role R` uses these; jobs without a role keep claude_model.
+    # Codex models are empty = the ~/.codex/config.toml default until the researcher sets them (names are not guessed here)
+    "role_research_claude": "opus", "role_work_claude": "sonnet", "role_light_claude": "sonnet", "role_quick_claude": "haiku",
+    "role_research_codex": "", "role_work_codex": "", "role_light_codex": "", "role_quick_codex": "",
+    "role_research_codex_effort": "high", "role_work_codex_effort": "", "role_light_codex_effort": "low",
+    "role_quick_codex_effort": "low", "role_light_claude_effort": "low",
+    "kb_related": "1",                # «Σχετικά» (B6): pointers from `kb.py query` for chat messages longer than kb_related_min_chars
+    "kb_related_min_chars": "80",
+    "kb_refresh_min": "10",           # B6: refresh the kb index after a finished job, at most every N minutes (0 = never)
+    "codex_commit": "1",              # the dispatcher commits a finished Codex job's claimed files (Codex cannot write .git)
 }
 RESEARCHER_KEYS = set(DEFAULTS)
+
+# v0.5.1 B4: value rules for changes made from the System tab or approved config cards (the `set` CLI stays lenient: tests
+# and drills use tiny timeouts). kind: bool | int(lo,hi) | float(lo,hi) | enum(...) | text(regex)
+_MODEL_RE = r"[A-Za-z0-9._:\-\[\]]{0,64}"
+SETTING_RULES = {
+    "coordinator": ("enum", PROVIDERS), "failover": ("bool",), "paused": ("bool",), "allow_paid_credits": ("bool",),
+    "governor_enabled": ("bool",),
+    "claude_model": ("text", _MODEL_RE), "codex_model": ("text", _MODEL_RE), "events_model": ("text", _MODEL_RE),
+    "peer_claude_model": ("text", _MODEL_RE), "peer_claude_major_model": ("text", _MODEL_RE),
+    "peer_codex_model": ("text", _MODEL_RE),
+    "claude_effort": ("text", r"[a-z]{0,12}"), "codex_effort": ("text", r"[a-z]{0,12}"),
+    "peer_codex_effort": ("text", r"[a-z]{0,12}"), "peer_codex_major_effort": ("text", r"[a-z]{0,12}"),
+    "max_workers": ("int", 1, 16), "task_timeout_min": ("int", 1, 1440), "peer_timeout_min": ("int", 1, 240),
+    "escalation_debounce_s": ("int", 0, 86400), "resume_max_tokens": ("int", 1000, 1000000),
+    "codex_resume_window_s": ("int", 0, 86400), "thread_messages": ("int", 0, 100), "state_max_lines": ("int", 20, 1000),
+    "state_max_bytes": ("int", 1024, 200000),
+    "pace_margin_pct": ("float", 0, 100), "optional_hard_pct": ("float", 1, 100), "five_hour_max_pct": ("float", 1, 100),
+    "chat_hard_pct": ("float", 1, 100), "usage_stale_h": ("float", 0.1, 168), "unknown_daily_runs": ("int", 1, 10000),
+    "peer_hold_max_min": ("int", 1, 1440), "max_retries": ("int", 0, 5),
+    "role_research_claude": ("text", _MODEL_RE), "role_work_claude": ("text", _MODEL_RE),
+    "role_light_claude": ("text", _MODEL_RE), "role_quick_claude": ("text", _MODEL_RE),
+    "role_research_codex": ("text", _MODEL_RE), "role_work_codex": ("text", _MODEL_RE),
+    "role_light_codex": ("text", _MODEL_RE), "role_quick_codex": ("text", _MODEL_RE),
+    "role_research_codex_effort": ("text", r"[a-z]{0,12}"), "role_work_codex_effort": ("text", r"[a-z]{0,12}"),
+    "role_light_codex_effort": ("text", r"[a-z]{0,12}"), "role_quick_codex_effort": ("text", r"[a-z]{0,12}"),
+    "role_light_claude_effort": ("text", r"[a-z]{0,12}"), "codex_commit": ("bool",), "kb_related": ("bool",),
+    "kb_related_min_chars": ("int", 1, 5000), "kb_refresh_min": ("int", 0, 1440),
+    "chat_budget_usd": ("float", 0.01, 100), "max_budget_usd": ("float", 0.01, 100), "peer_budget_usd": ("float", 0.01, 100),
+}
+
+
+def validate_setting(key, value):
+    """-> the normalised string value, or raises LabError (unknown key, wrong type, out of range)."""
+    if key not in RESEARCHER_KEYS:
+        raise LabError(f"Άγνωστη ρύθμιση {key}.")
+    value = str(value).strip()
+    rule = SETTING_RULES.get(key)
+    if rule is None:
+        raise LabError(f"{key}: δεν επιτρέπεται αλλαγή από το dashboard.")
+    kind = rule[0]
+    if kind == "bool":
+        if value not in ("0", "1"):
+            raise LabError(f"{key}: 0 ή 1.")
+    elif kind == "enum":
+        if value not in rule[1]:
+            raise LabError(f"{key}: ένα από {', '.join(rule[1])}.")
+    elif kind in ("int", "float"):
+        try:
+            x = int(value) if kind == "int" else float(value)
+        except ValueError:
+            raise LabError(f"{key}: αριθμός ({kind}).")
+        if value.lower() in ("nan", "inf", "-inf") or not (rule[1] <= x <= rule[2]):
+            raise LabError(f"{key}: από {rule[1]} έως {rule[2]}.")
+    elif kind == "text":
+        if not re.fullmatch(rule[1], value):
+            raise LabError(f"{key}: μη έγκυρη τιμή.")
+    return value
 
 QUOTA_RE = re.compile(
     r"(hit your (?:[\w']+ ){0,3}(?:limit|budget)|usage limit|limit reached|out of (?:extra )?usage|"
@@ -137,10 +207,12 @@ def route_request(req_model, req_effort):
     return provider, model, effort
 
 
-def claude_model_for(s, kind, sel_model=None):
+def claude_model_for(s, kind, sel_model=None, role=None):
     """Claude model of one task -> (model, why). Single source for the dispatcher and the System tab."""
     if sel_model:
         return sel_model, "req_model"
+    if role and s.get(f"role_{role}_claude"):
+        return s[f"role_{role}_claude"], f"role_{role}_claude"
     if kind == "perm_answer":
         return (s["events_model"], "events_model") if s["events_model"] else (s["peer_claude_model"], "peer_claude_model")
     if kind == "run_event" and s["events_model"]:
@@ -165,6 +237,9 @@ CREATE TABLE IF NOT EXISTS notified(kind TEXT NOT NULL, ref TEXT NOT NULL, ts TE
 CREATE TABLE IF NOT EXISTS peer_requests(id TEXT PRIMARY KEY, ts TEXT, from_provider TEXT, to_provider TEXT,
   key TEXT, major INTEGER, prompt TEXT, status TEXT, answer TEXT, error TEXT, cost_usd REAL, ts_done TEXT);
 CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, actor TEXT, action TEXT, detail TEXT);
+CREATE TABLE IF NOT EXISTS config_proposals(request_id TEXT PRIMARY KEY, key TEXT NOT NULL, value TEXT NOT NULL,
+  old TEXT, reason TEXT, proposed_by TEXT, ts TEXT, applied INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS solo_jobs(job TEXT PRIMARY KEY, ran_on TEXT, ts TEXT, commit_info TEXT, review_peer TEXT);
 CREATE TABLE IF NOT EXISTS limits(provider TEXT NOT NULL, window TEXT NOT NULL, status TEXT, utilization REAL,
   resets_at REAL, overage INTEGER, updated_at TEXT, PRIMARY KEY(provider, window));
 """
@@ -253,6 +328,25 @@ class DispatchDB:
                       (key, value, now_iso(), actor))
             c.execute("INSERT INTO audit(ts, actor, action, detail) VALUES (?,?,?,?)",
                       (now_iso(), actor, "set", f"{key}={value}"))
+
+    def change(self, key, value, expected_old=None, actor="researcher"):
+        """Validated, audited, compare-and-set change -> 'applied' | 'noop' (already that value) | 'conflict' (the stored
+        value is no longer `expected_old`: someone else changed it, nothing is written). One transaction, so a double
+        click or a replayed approval applies at most once."""
+        value = validate_setting(key, value)
+        with self.tx() as c:
+            r = c.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+            cur = r["value"] if r else DEFAULTS.get(key, "")
+            if cur == value:
+                return "noop"
+            if expected_old is not None and cur != str(expected_old):
+                return "conflict"
+            c.execute("INSERT INTO settings(key, value, updated_at, updated_by) VALUES (?,?,?,?) ON CONFLICT(key) DO"
+                      " UPDATE SET value=excluded.value, updated_at=excluded.updated_at, updated_by=excluded.updated_by",
+                      (key, value, now_iso(), actor))
+            c.execute("INSERT INTO audit(ts, actor, action, detail) VALUES (?,?,?,?)",
+                      (now_iso(), actor, "set", f"{key}: {cur!r} -> {value!r}"))
+        return "applied"
 
     # providers
     def provider(self, name):
@@ -836,6 +930,10 @@ class Dispatcher:
             n_lines = len(state.splitlines()) if state else 0
             parts.append("## docs/STATE.md\n" + (state.strip() if state else "(missing: create it from the template "
                                                                               "in prompts/STATE.template.md)"))
+            n_bytes = len(state.encode("utf-8")) if state else 0
+            if n_bytes > int(s["state_max_bytes"]):
+                note_lines.append(f"docs/STATE.md is {n_bytes} bytes: condense it to ≤{s['state_max_bytes']} (copy the old text "
+                                  "verbatim to docs/archive/ first and keep pointers to it).")
             if n_lines > int(s["state_max_lines"]):
                 note_lines.append(f"docs/STATE.md has {n_lines} lines: condense it to ≤{s['state_max_lines']}.")
             hist = self.lab.thread(item["thread_id"])
@@ -851,6 +949,9 @@ class Dispatcher:
                 mem = convo_context.relevant(item["text"], self.root, max_chars=1500, exclude_ids=in_pack)
             except Exception:
                 mem = ""
+            rel = self.kb_related(item["text"], s) if item["kind"] == "message" else ""
+            if rel:
+                parts.append("## Related (kb.py query; pointers, read only the cited windows)\n" + rel)
             if mem:
                 parts.append("## Possibly relevant memory (pointers; check before claiming, and before appending to any md file run"
                              " `python3 tools/md_dedupe.py check <file> \"<text>\"`)\n" + mem)
@@ -863,6 +964,124 @@ class Dispatcher:
         return "\n\n".join(p for p in parts if p)
 
     # ---- work discovery
+    def _post_escalations(self, esc):
+        """Exactly once per note: the ids in the body are the idempotency key (post/ask, then mark read)."""
+        groups = {}
+        for m in esc:
+            groups.setdefault(m["from_job"], []).append(m)
+        for job, msgs in groups.items():
+            src = self.work.job(job) or {}
+            tid = src.get("thread_id") if src.get("thread_id") and self.lab.message(src["thread_id"]) \
+                else self._system_thread()
+            title = (src.get("title") or job)[:80]
+            for urgent, ms in ((True, [m for m in msgs if m["kind"] == "urgent"]),
+                               (False, [m for m in msgs if m["kind"] != "urgent"])):
+                for m in ms:      # one marker per note: a crash and a changed batch can never repost an earlier note
+                    mark = f"[esc {m['id']}]"
+                    if urgent:
+                        if self.lab.conn.execute("SELECT 1 FROM requests WHERE instr(body, ?)>0", (mark,)).fetchone():
+                            continue
+                        self.lab.ask("question", f"{job}: χρειάζεται απόφαση — {title}",
+                                     f"Ο worker {job} («{title}») ζητά απόφαση:\n- {m['body']}\n\n{mark}",
+                                     author="dispatcher", scope="other", thread_id=tid)
+                    elif not self.lab.conn.execute("SELECT 1 FROM messages WHERE thread_id=? AND instr(body, ?)>0",
+                                                   (tid, mark)).fetchone():
+                        self.lab.post("dispatcher", f"Σημείωση από {job} («{title}»):\n- {m['body']}\n\n{mark}", tid,
+                                      kind="status")
+            self.work.mark_read([m["id"] for m in msgs])
+        self.dd.conn.execute("INSERT OR REPLACE INTO settings(key, value, updated_at, updated_by)"
+                             " VALUES ('escalation_last_wake',?,?,'dispatcher')", (str(time.time()), now_iso()))
+
+    def _apply_config_card(self, r):
+        """True if `r` is a config card (handled here, decision delivered, no model). Approved -> validated, audited
+        compare-and-set from `config_proposals`; anything else -> nothing changes."""
+        row = self.dd.conn.execute("SELECT * FROM config_proposals WHERE request_id=?", (r["id"],)).fetchone()
+        if not row:
+            return False
+        tid = r["thread_id"] if r["thread_id"] and self.lab.message(r["thread_id"]) else self._system_thread()
+        if row["applied"] == 0:
+            if r["state"] == "approved":
+                try:
+                    res = self.dd.change(row["key"], row["value"], expected_old=row["old"], actor=f"approved:{r['id']}")
+                except LabError as e:
+                    res = f"refused: {e}"
+                text = {"applied": f"Εφαρμόστηκε: {row['key']} = {row['value']!r} (πριν {row['old']!r}).",
+                        "noop": f"{row['key']} είχε ήδη την τιμή {row['value']!r}: καμία αλλαγή.",
+                        "conflict": f"Δεν εφαρμόστηκε: το {row['key']} άλλαξε στο μεταξύ (η πρόταση ήταν από "
+                                    f"{row['old']!r}). Δεν γράφτηκε τίποτα· ξαναπρότεινε αν το θέλεις."}.get(
+                            res, f"Δεν εφαρμόστηκε ({res}).")
+            else:
+                text = f"Η πρόταση {r['id']} ({r['state']}): δεν άλλαξε καμία ρύθμιση."
+            self.dd.conn.execute("UPDATE config_proposals SET applied=1 WHERE request_id=?", (r["id"],))
+            self.lab.post("dispatcher", f"Κώστα, {text}", tid, kind="status")
+        self.lab.mark_delivered(req_ids=[r["id"]])
+        return True
+
+    def _launch_ready(self, rid):
+        """Start the not-yet-started entries of approved request `rid` up to spec.max_parallel (what
+        `launch_run.py start --all` does) -> (started run ids, entries still waiting). launch_run re-checks approval,
+        hash and attempts, and refuses an entry that is already running, so repeating this never duplicates a run."""
+        _, spec = launch_run.load_approved_spec(self.lab, rid)
+        runs = [dict(x) for x in self.lab.conn.execute("SELECT entry, status FROM runs WHERE request_id=?", (rid,))]
+        running = sum(1 for x in runs if x["status"] in ("starting", "running"))
+        todo = [i for i in range(len(spec["entries"])) if i not in {x["entry"] for x in runs}]
+        started = []
+        for i in list(todo):
+            if running >= int(spec.get("max_parallel", 1)):
+                break
+            started.append(launch_run.start_entry(self.lab, rid, i))
+            todo.remove(i)
+            running += 1
+        return started, len(todo)
+
+    def _launch_approved(self, r, tid):
+        """None = handled by script (decision delivered); "" = not eligible, the coordinator gets it as before;
+        otherwise the refusal text (the coordinator gets the decision with that note). Only approved, frozen,
+        scope 'sim' specs that are not sandbox specs; real/qpu approvals keep going through the coordinator."""
+        if not (r["kind"] == "approval" and r["state"] == "approved" and r["scope"] == "sim"
+                and r["spec_path"] and r["spec_hash"]):
+            return ""
+        try:
+            _, spec = launch_run.load_approved_spec(self.lab, r["id"])
+            if spec.get("kind") in ("sandbox", "sandbox-amendment"):
+                return ""
+            first = not self.dd.is_notified("launch", r["id"])
+            started, left = self._launch_ready(r["id"])
+            self.dd.mark_notified("launch", r["id"])        # later ticks keep filling slots as runs finish
+        except (LabError, OSError, ValueError) as e:
+            return str(e)[:300]
+        if first:
+            root = tid if self.lab.message(tid) else self._system_thread()
+            self.lab.post("dispatcher", f"Κώστα, εγκρίθηκε το {r['id']} («{r['title']}»). Ο dispatcher ξεκίνησε "
+                          f"{len(started)} από {len(spec['entries'])} entries με script, χωρίς μοντέλο"
+                          + (f" ({left} περιμένουν θέση, max_parallel {spec.get('max_parallel', 1)})" if left else "")
+                          + ":\n" + "\n".join(f"- {x}" for x in started), root, kind="status")
+        self.lab.mark_delivered(req_ids=[r["id"]])
+        return None
+
+    def _launch_pending(self):
+        """Fill free slots for requests the script launched earlier (entries beyond max_parallel)."""
+        for row in self.dd.conn.execute("SELECT ref FROM notified WHERE kind='launch'").fetchall():
+            req = self.lab.request(row["ref"])
+            if not req or req["state"] != "approved":
+                continue
+            try:
+                self._launch_ready(row["ref"])
+            except (LabError, OSError, ValueError):
+                continue
+
+    def _post_batch_summary(self, rid, runs, ref, tid):
+        """Exactly once: the marker in the body is the idempotency key (a crash between post and mark_notified must not
+        post twice), mark_notified keeps the candidate scan from revisiting the batch."""
+        mark = run_events.marker(ref)
+        have = self.lab.conn.execute("SELECT 1 FROM messages WHERE thread_id=? AND author='dispatcher' AND"
+                                     " instr(body, ?)>0 LIMIT 1", (tid, mark)).fetchone()
+        if not have:
+            root = self.lab.conn.execute("SELECT id FROM messages WHERE id=?", (tid,)).fetchone()["id"]
+            self.lab.post("dispatcher", run_events.summary(rid, runs, ref, os.path.join(self.root, ".lab")), root,
+                          kind="status")
+        self.dd.mark_notified("runs", ref)
+
     def _system_thread(self):
         """Root message for events that belong to no thread (author 'dispatcher')."""
         r = self.lab.conn.execute("SELECT id FROM messages WHERE author='dispatcher' AND kind='status' AND"
@@ -917,22 +1136,24 @@ class Dispatcher:
             yield {"kind": "message", "thread_id": tid, "msg_ids": [m["id"] for m in batch],
                    "reply_to": batch[-1]["id"], "forced": forced or sel_provider, "sel_model": sel_model,
                    "sel_effort": sel_effort, "text": "\n\n".join(texts), "req_ids": []}
-        # 1b. agents' escalations to the chat coordinator (could not agree, or need the researcher)
+        # 1b. agents' escalations: by script (B3) - urgent notes become a card for the researcher, routine/final notes
+        # a status line in the job's thread; no coordinator wake-up
         esc = self.work.escalations()
         if esc and self._escalations_due(esc):
-            src = self.work.job(esc[0]["from_job"]) or {}
-            tid = src.get("thread_id") if src.get("thread_id") and self.lab.message(src["thread_id"]) \
-                else self._system_thread()
-            lines = [f"- from {m['from_job']}: {m['body']}" for m in esc]
-            yield {"kind": "escalation", "thread_id": tid, "msg_ids": [], "reply_to": src.get("reply_to") or tid,
-                   "forced": None, "req_ids": [], "esc_ids": [m["id"] for m in esc],
-                   "text": "Parallel jobs escalated to you (you may answer each with python3 tools/work.py say <job> "
-                           "\"...\"; ask the researcher only if it is the researcher's call):\n" + "\n".join(lines)}
+            self._post_escalations(esc)
         # 2. decisions
         _, decs = self.lab.undelivered()
+        self._launch_pending()
         for r in decs:
+            if self._apply_config_card(r):      # B4: an approved/rejected config card is settled by script
+                continue
             tid = r["thread_id"] if r["thread_id"] and self.lab.message(r["thread_id"]) else self._system_thread()
+            err = self._launch_approved(r, tid)       # B3: an approved frozen sim spec is launched by a script
+            if err is None:
+                continue
             note = f' Researcher note: "{r["decision_text"]}"' if r["decision_text"] else ""
+            if err:
+                note += f" The script launch was refused ({err}); handle it yourself, within the approval."
             text = (f"Researcher decision on {r['id']} [{r['kind']}/{r['scope']}] \"{r['title']}\": {r['state']}."
                     f"{note}\nAct only within what this decision allows (python3 tools/labq.py request {r['id']}),"
                     f" then report in this thread.")
@@ -994,6 +1215,9 @@ class Dispatcher:
             req = self.lab.request(rid) or {}
             tid = req.get("thread_id") if req.get("thread_id") and self.lab.message(req["thread_id"]) \
                 else self._system_thread()
+            if run_events.all_ok(runs):  # B3: a clean batch is summarised by a script; a model only on failure
+                self._post_batch_summary(rid, runs, ref, tid)
+                continue
             lines = [f"- {r['run_id']} entry {r['entry']} attempt {r['attempt']} {r['name'] or ''}: {r['status']},"
                      f" exit {r['exit_code']}, dir {r['run_dir']}" for r in sorted(runs, key=lambda r: r['entry'])]
             text = (f"All runs of approved request {rid} have ended:\n" + "\n".join(lines) +
@@ -1013,7 +1237,8 @@ class Dispatcher:
                 text += ("\n\n(An earlier attempt of this job was interrupted by a dispatcher restart: check "
                          "`git status` and the files it may have touched before you continue.)")
             yield {"kind": "job", "thread_id": tid, "msg_ids": [], "reply_to": j["reply_to"] or tid,
-                   "forced": j["provider"], "text": text, "req_ids": [], "job_id": j["id"], "title": j["title"],
+                   "forced": j["provider"], "role": j.get("role"), "text": text, "req_ids": [], "job_id": j["id"],
+                   "title": j["title"],
                    "parent_msgs": json.loads(j["parent_msgs"] or "[]")}
 
     # ---- one task
@@ -1125,12 +1350,16 @@ class Dispatcher:
                    QRL_REPLY_TO=item["reply_to"] or "")
         budget = s["chat_budget_usd"] if lane_of(item) == "chat" else s["max_budget_usd"]
         if provider == "claude":
-            model, _why = claude_model_for(s, item["kind"], item.get("sel_model"))
-            return run_claude(prompt, self.root, model, item.get("sel_effort") or s["claude_effort"], session_id=session_id,
+            role = item.get("role")
+            model, _why = claude_model_for(s, item["kind"], item.get("sel_model"), role)
+            effort = item.get("sel_effort") or (role and s.get(f"role_{role}_claude_effort")) or s["claude_effort"]
+            return run_claude(prompt, self.root, model, effort, session_id=session_id,
                               system_append=self.static_prompt(), budget=budget, timeout_s=timeout_s,
                               env=env, job=job)
-        return run_codex(prompt, self.root, item.get("sel_model") or s["codex_model"] or None,
-                         item.get("sel_effort") or s["codex_effort"] or None,
+        role = item.get("role")
+        return run_codex(prompt, self.root,
+                         item.get("sel_model") or (role and s.get(f"role_{role}_codex")) or s["codex_model"] or None,
+                         item.get("sel_effort") or (role and s.get(f"role_{role}_codex_effort")) or s["codex_effort"] or None,
                          session_id=session_id, timeout_s=timeout_s, env=env, job=job)
 
     def _cancelled(self, item):
@@ -1220,6 +1449,7 @@ class Dispatcher:
                 return "cancelled"
             if res["ok"] and not self._paid_credit_stop(provider, res):
                 self._finish_ok(provider, item, res)
+                self._after_job_ok(provider, item, tried, wanted[0])
                 return "done"
             tried.append((provider, res))
             if res["ok"]:  # answered, but on paid credits: post the answer, then stop using Claude for a while
@@ -1256,6 +1486,90 @@ class Dispatcher:
             self._post(item["reply_to"], f"⏸ Κανένας διαθέσιμος συντονιστής τώρα ({', '.join(LABEL[p] for p in wanted)}"
                                          f" σε όριο). Το αίτημα περιμένει· συνεχίζει αυτόματα περίπου {when}.")
         return "deferred"
+
+    def kb_related(self, text, s):
+        """«Σχετικά» (B6): `kb.py query` pointers for a longer message; bounded, never blocks or fails the run."""
+        text = " ".join((text or "").split())
+        try:
+            if s.get("kb_related") != "1" or len(text) <= int(s["kb_related_min_chars"]):
+                return ""
+            if not os.path.isdir(os.path.join(self.root, ".lab", "kb")):
+                return ""
+            p = subprocess.run([sys.executable, os.path.join(TOOLS, "kb.py"), "query", "--chars", "900", "--docs", "3",
+                                "--code", "2", text[:300]], cwd=self.root, capture_output=True, text=True, timeout=10)
+            lines = [ln for ln in p.stdout.splitlines() if ln.strip() and not ln.startswith(("WARNING", "kb not built"))]
+            return "\n".join(lines)[:1200] if p.returncode == 0 else ""
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return ""
+
+    def kb_refresh_soon(self, s):
+        """B6: a small kb refresh after a finished job (cores 4-7, detached, single-instance via kb's own lock), at most
+        every `kb_refresh_min` minutes; only when an index already exists."""
+        try:
+            gap = int(s.get("kb_refresh_min") or 0) * 60
+            if gap <= 0 or not os.path.isdir(os.path.join(self.root, ".lab", "kb")):
+                return
+            if time.time() - float(self.dd.get("kb_refresh_last") or 0) < gap:
+                return
+            self.dd.conn.execute("INSERT OR REPLACE INTO settings(key, value, updated_at, updated_by)"
+                                 " VALUES ('kb_refresh_last',?,?,'dispatcher')", (str(time.time()), now_iso()))
+            subprocess.Popen(["taskset", "-c", "4-7", sys.executable, os.path.join(TOOLS, "kb.py"), "refresh"], cwd=self.root,
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             start_new_session=True)
+        except (OSError, ValueError, sqlite3.Error):
+            pass
+
+    def _after_job_ok(self, provider, item, tried, first=None):
+        """B5, still holding the job's claims: (1) a Codex job's claimed files are committed by the dispatcher, only
+        those, with a blob-hash check; (2) a job that ran on the other provider because the first one hit its limit is
+        marked solo, and gets a joint review when that provider is back (`_solo_reviews`)."""
+        jid = item.get("job_id")
+        if not jid or item["kind"] != "job":
+            return
+        self.kb_refresh_soon(self.dd.settings())
+        info = ""
+        try:
+            if provider == "codex" and self.dd.get("codex_commit") == "1":
+                paths = [c["path"] for c in self.work.claims(jid)]
+                if paths:
+                    r = W.commit_claimed(self.root, paths, f"{jid}: {clip(item.get('title') or '', 100)} (committed by the "
+                                         f"dispatcher for the Codex job; claimed files only)")
+                    info = f"commit {r['out']}: {', '.join(r['files']) or '-'}"
+                    if r["mismatch"]:
+                        info += f" · HASH MISMATCH {r['mismatch']}"
+                        self.dd.audit("dispatcher", "commit_mismatch", f"{jid}: {r['mismatch']}")
+                    self.dd.audit("dispatcher", "codex_commit", f"{jid}: {info}")
+                    if r["files"]:
+                        self._post(item["reply_to"], f"Κώστα, ο dispatcher έκανε commit για το {jid} (Codex), μόνο τα claimed "
+                                   f"αρχεία: {', '.join(r['files'])}" + (f" · ΠΡΟΣΟΧΗ: το hash δεν ταιριάζει {r['mismatch']}"
+                                                                         if r["mismatch"] else "") + ".")
+        except (LabError, OSError) as e:
+            info = f"commit refused: {e}"
+            self.dd.audit("dispatcher", "codex_commit_refused", f"{jid}: {e}"[:300])
+            self._post(item["reply_to"], f"⚠️ Δεν έγινε commit για το {jid}: {clip(str(e), 300)}. Τα αρχεία μένουν στο working tree.")
+        if (tried or (first and provider != first)) and not item.get("forced"):
+            self.dd.conn.execute("INSERT OR IGNORE INTO solo_jobs(job, ran_on, ts, commit_info) VALUES (?,?,?,?)",
+                                 (jid, provider, now_iso(), info))
+            self.dd.audit("dispatcher", "solo_job", f"{jid} ran only on {provider} ({(tried[0][0] if tried else first)} was at its limit)")
+
+    def _solo_reviews(self):
+        """When the provider that was at its limit is available again, ask it for one read-only review of each solo job."""
+        for row in self.dd.conn.execute("SELECT * FROM solo_jobs WHERE review_peer IS NULL").fetchall():
+            other = OTHER.get(row["ran_on"])
+            if not other or not self.dd.available(other):
+                continue
+            job = self.work.job(row["job"]) or {}
+            files = ", ".join(c["path"] for c in self.work.claims(row["job"])) or "(claims already released: see the commit)"
+            prompt = (f"Read-only joint review (v0.5.1 B5). Job {row['job']} «{job.get('title', '')}» ran only on "
+                      f"{LABEL[row['ran_on']]} while you were at your limit. {row['commit_info'] or ''}\n"
+                      f"Files: {files}. Inspect with git (git log -3 --stat, git show) and the thread. Review for correctness, "
+                      "leakage, unfair baselines and overclaiming; say OK or list blocking issues. English, <300 words.")
+            dup = self.dd.conn.execute("SELECT id FROM peer_requests WHERE key=?", (f"solo-{row['job']}",)).fetchone()
+            pid = dup["id"] if dup else self.dd.peer_submit(other, prompt, key=f"solo-{row['job']}", from_provider=row["ran_on"])
+            self.dd.conn.execute("UPDATE solo_jobs SET review_peer=? WHERE job=?", (pid, row["job"]))
+            if job.get("reply_to") and self.lab.message(job["reply_to"]):
+                self._post(job["reply_to"], f"Κώστα, το {row['job']} έτρεξε μόνο στον {LABEL[row['ran_on']]} (ο {LABEL[other]} "
+                                            f"δεν ήταν διαθέσιμος: όριο ή ρυθμός). Ζήτησα έναν read-only κοινό έλεγχο από τον {LABEL[other]} ({pid}).")
 
     def _escalations_due(self, esc):
         """Debounce (R-20261029-012): urgent notes (work.py say --urgent) and notes from jobs that already ended wake
@@ -1530,6 +1844,10 @@ class Dispatcher:
                 print(f"dispatcher warning: sweep: {e}", file=sys.stderr, flush=True)
         for jid in self.work.cancel_requested():
             stop_job(jid)
+        try:
+            self._solo_reviews()
+        except sqlite3.Error as e:
+            print(f"dispatcher warning: solo reviews: {e}", file=sys.stderr, flush=True)
         if self.dd.get("paused") == "1":
             return
         with self._busy_lock:
@@ -1735,6 +2053,23 @@ def print_status(root):
               f" {t['refs']}")
 
 
+def propose_config(lab, dd, key, value, reason, author="agent"):
+    """An agent proposes a settings change as a card (kind proposal). The card text is built here from the validated
+    key/value, and what gets applied on approval is read from `config_proposals`, never from the card body."""
+    value = validate_setting(key, value)
+    old = dd.get(key)
+    if old == value:
+        raise LabError(f"{key} είναι ήδη {value!r}.")
+    rid = lab.ask("proposal", f"Αλλαγή ρύθμισης {key}: {old!r} → {value!r}",
+                  f"Προτείνεται αλλαγή της ρύθμισης `{key}` από {old!r} σε {value!r}.\n\nΛόγος: {(reason or '-').strip()[:800]}"
+                  f"\n\nΜε «approve» εφαρμόζεται αμέσως από τον dispatcher (έλεγχος τιμής, audit)· με «reject» δεν αλλάζει τίποτα.",
+                  author=author, scope="other")
+    dd.conn.execute("INSERT INTO config_proposals(request_id, key, value, old, reason, proposed_by, ts) VALUES (?,?,?,?,?,?,?)",
+                    (rid, key, value, old, (reason or "")[:800], author, now_iso()))
+    dd.audit(author, "propose_config", f"{rid}: {key}: {old!r} -> {value!r}")
+    return rid
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--root", default=None, help="lab directory (default: $QRL_LAB_DIR or cwd)")
@@ -1745,6 +2080,11 @@ def main(argv=None):
     s = sub.add_parser("set")
     s.add_argument("key")
     s.add_argument("value")
+    s = sub.add_parser("propose", help="agents: propose a settings change as a card for the researcher")
+    s.add_argument("key")
+    s.add_argument("value")
+    s.add_argument("--reason", default="")
+    s.add_argument("--as", dest="author", default=os.environ.get("QRL_JOB") or "agent")
     s = sub.add_parser("clear")
     s.add_argument("provider", choices=PROVIDERS)
     s = sub.add_parser("exhaust", help="drill: treat a provider as out of quota for N minutes")
@@ -1767,6 +2107,9 @@ def main(argv=None):
     elif a.cmd == "set":
         DispatchDB(dispatch_db_path(root)).set(a.key, a.value)
         print(f"{a.key} = {a.value}")
+    elif a.cmd == "propose":
+        lab = LabDB(os.path.join(root, ".lab", "lab.db"))
+        print(propose_config(lab, DispatchDB(dispatch_db_path(root)), a.key, a.value, a.reason, a.author))
     elif a.cmd == "clear":
         with DispatchDB(dispatch_db_path(root)) as dd:
             dd.clear(a.provider)

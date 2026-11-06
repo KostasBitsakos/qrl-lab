@@ -141,3 +141,25 @@ def test_usage_shows_pace_next_to_weekly_use():
     cx = sv.codex_usage([{"slot": "secondary", "used_percent": 12.0, "resets_at": reset, "as_of": NOW - 60}], NOW)
     assert cx[0]["pace"] == "50%"
     assert sv.claude_usage(None, NOW)[1]["pace"] == "—"         # unknown reset -> no pace, never a guess
+
+
+def test_apply_change_validates_audits_and_is_compare_and_set(tmp_path):
+    path = str(tmp_path / "dispatch.db")
+    assert sv.apply_change(path, "max_workers", "3", "2")[0] == "applied"
+    assert sv.apply_change(path, "max_workers", "3", "2")[0] == "noop", "second click does nothing"
+    assert sv.apply_change(path, "max_workers", "5", "2")[0] == "conflict", "stale page: nothing written"
+    for key, bad in (("max_workers", "0"), ("max_workers", "abc"), ("failover", "2"), ("coordinator", "gemini"),
+                     ("chat_hard_pct", "nan"), ("claude_model", "x y"), ("nope", "1")):
+        assert sv.apply_change(path, key, bad, "")[0] == "invalid", (key, bad)
+    c = sqlite3.connect(path)
+    assert c.execute("SELECT value FROM settings WHERE key='max_workers'").fetchone()[0] == "3"
+    audit = [r[0] for r in c.execute("SELECT detail FROM audit WHERE action='set'")]
+    assert audit == ["max_workers: '2' -> '3'"], audit
+    assert c.execute("SELECT COUNT(*) FROM settings").fetchone()[0] == 1, "invalid values wrote nothing"
+
+
+def test_every_rule_key_exists_and_defaults_are_valid():
+    for key, default in D.DEFAULTS.items():
+        if key in D.SETTING_RULES:
+            assert D.validate_setting(key, default) == default, (key, default)
+    assert set(D.SETTING_RULES) <= set(D.DEFAULTS)

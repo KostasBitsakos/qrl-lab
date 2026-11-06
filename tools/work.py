@@ -32,12 +32,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from labdb import LabError  # noqa: E402
 
 ACTIVE = ("queued", "running")
+ROLES = ("research", "work", "light", "quick")   # v0.5.1 §5; the chat coordinator has its own settings
 CONFLICT_EXIT = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS jobs(n INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT UNIQUE, created TEXT, lane TEXT,
   origin TEXT, created_by TEXT, thread_id TEXT, reply_to TEXT, parent_msgs TEXT, title TEXT, brief TEXT, provider TEXT,
-  status TEXT, started TEXT, ended TEXT, cancel INTEGER DEFAULT 0, result TEXT);
+  status TEXT, started TEXT, ended TEXT, cancel INTEGER DEFAULT 0, result TEXT, role TEXT);
 CREATE TABLE IF NOT EXISTS claims(path TEXT NOT NULL, job TEXT NOT NULL, ts TEXT, note TEXT, PRIMARY KEY(path, job));
 CREATE TABLE IF NOT EXISTS agent_msgs(id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, from_job TEXT, to_job TEXT,
   kind TEXT, body TEXT, read INTEGER DEFAULT 0);
@@ -46,6 +47,11 @@ CREATE TABLE IF NOT EXISTS agent_msgs(id INTEGER PRIMARY KEY AUTOINCREMENT, ts T
 
 def ensure_schema(conn):
     conn.executescript(SCHEMA)
+    if "role" not in {r[1] for r in conn.execute("PRAGMA table_info(jobs)")}:   # B5: jobs of older databases
+        try:
+            conn.execute("ALTER TABLE jobs ADD COLUMN role TEXT")
+        except Exception:   # a concurrent process migrated first
+            pass
 
 
 def _now():
@@ -86,14 +92,14 @@ class Work:
 
     # jobs
     def create(self, lane, origin, title, brief="", thread_id=None, reply_to=None, parent_msgs=None, provider=None,
-               created_by="dispatcher", status="queued"):
+               created_by="dispatcher", status="queued", role=None):
         import json
         prefix = "C" if lane == "chat" else "J"
         with self._tx() as c:
             cur = c.execute("INSERT INTO jobs(created, lane, origin, created_by, thread_id, reply_to, parent_msgs, title,"
-                            " brief, provider, status) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                            " brief, provider, status, role) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                             (_now(), lane, origin, created_by, thread_id, reply_to, json.dumps(parent_msgs or []),
-                             (title or "").strip()[:200], brief or "", provider, status))
+                             (title or "").strip()[:200], brief or "", provider, status, role))
             jid = f"{prefix}{cur.lastrowid}"
             c.execute("UPDATE jobs SET id=? WHERE n=?", (jid, cur.lastrowid))
         return jid
@@ -318,6 +324,37 @@ def git_commit(root, paths, message, worktree=None):
             fcntl.flock(lf, fcntl.LOCK_UN)
 
 
+def commit_claimed(root, paths, message):
+    """Commit only the files under `paths` (a job's claims), then verify that every committed blob is byte-identical to the
+    working-tree file hashed just before the commit (nothing changed between add and commit).
+    -> {"files": [...], "mismatch": [...], "out": str}; raises LabError when git refuses."""
+    target, scoped = commit_scope(root, paths)
+    files = [x[len(":(literal)"):] for x in scoped]
+    before = {}
+    for f in files:
+        h = subprocess.run(["git", "hash-object", "--", f], cwd=target, capture_output=True, text=True)
+        before[f] = h.stdout.strip() if h.returncode == 0 else None      # None = file removed
+    head0 = subprocess.run(["git", "rev-parse", "HEAD"], cwd=target, capture_output=True, text=True).stdout.strip()
+    p = git_commit(root, paths, message)
+    if p.returncode:
+        raise LabError((p.stderr or p.stdout).strip()[:300] or "git commit failed")
+    head1 = subprocess.run(["git", "rev-parse", "HEAD"], cwd=target, capture_output=True, text=True).stdout.strip()
+    if head1 == head0:
+        return {"files": [], "mismatch": [], "out": "nothing to commit"}
+    done = subprocess.run(["git", "show", "--name-only", "--pretty=format:", "HEAD"], cwd=target,
+                          capture_output=True, text=True).stdout.split()
+    mismatch = []
+    for f in done:
+        if f not in before:
+            mismatch.append(f)          # committed a file outside the claims: must never happen
+            continue
+        blob = subprocess.run(["git", "rev-parse", f"HEAD:{f}"], cwd=target, capture_output=True, text=True)
+        have = blob.stdout.strip() if blob.returncode == 0 else None
+        if have != before[f]:
+            mismatch.append(f)
+    return {"files": done, "mismatch": mismatch, "out": head1[:10]}
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="QRL-Lab parallel work board")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -328,6 +365,7 @@ def main(argv=None):
     g.add_argument("--brief")
     g.add_argument("--brief-file")
     s.add_argument("--to", choices=("claude", "codex"))
+    s.add_argument("--role", choices=ROLES, help="model role of the worker (settings role_<role>_claude/_codex)")
     s.add_argument("--reply-to", help="message the worker reports to (default: the one you are answering)")
     s = sub.add_parser("claim")
     s.add_argument("paths", nargs="+")
@@ -374,7 +412,8 @@ def main(argv=None):
             raise LabError("--reply-to is required outside a dispatcher run.")
         import json
         jid = w.create("worker", "spawn", a.title, brief, thread_id=mine.get("thread_id"), reply_to=reply_to,
-                       parent_msgs=json.loads(mine.get("parent_msgs") or "[]"), provider=a.to, created_by=me)
+                       parent_msgs=json.loads(mine.get("parent_msgs") or "[]"), provider=a.to, created_by=me,
+                       role=a.role)
         print(f"{jid} queued: it starts as soon as a worker slot is free and reports in the thread.")
     elif a.cmd == "claim":
         t_end = time.time() + a.wait

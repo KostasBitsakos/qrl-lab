@@ -60,6 +60,7 @@ SETTINGS_META = {
     "codex_resume_window_s": ("Context", "Παράθυρο resume Codex (s)", ""),
     "thread_messages": ("Context", "Μηνύματα νήματος στο πακέτο", ""),
     "state_max_lines": ("Context", "Μέγιστες γραμμές STATE", ""),
+    "state_max_bytes": ("Context", "Μέγιστο μέγεθος STATE (bytes)", "Πάνω από αυτό ο Πάρις ζητά συμπύκνωση (με archive του παλιού κειμένου)."),
     "governor_enabled": ("Governor", "Governor ενεργός", "0 = χωρίς έλεγχο ρυθμού/ορίων (μόνο τα πραγματικά όρια του παρόχου)."),
     "pace_margin_pct": ("Governor", "Περιθώριο ρυθμού (%)", "Προαιρετική δουλειά αν η εβδομαδιαία χρήση ≤ ρυθμός + αυτό."),
     "optional_hard_pct": ("Governor", "Σκληρό όριο προαιρετικών (%)", "Εβδομαδιαία χρήση ≥ αυτό: καμία προαιρετική δουλειά."),
@@ -69,6 +70,23 @@ SETTINGS_META = {
     "unknown_daily_runs": ("Governor", "Εκτελέσεις/24ω με άγνωστη χρήση", "Παραδοχή, ρυθμίζεται."),
     "peer_hold_max_min": ("Governor", "Μέγιστη αναμονή peer (λεπτά)", "Αίτημα peer που κρατιέται τόσο, αποτυγχάνει με σαφές μήνυμα."),
     "max_retries": ("Governor", "Μέγιστες επαναλήψεις", "Παροδικό σφάλμα: τόσες φορές· άρνηση ασφαλείας: ποτέ."),
+    "role_research_claude": ("Ρόλοι", "research · Claude", "Worker με --role research (κώδικας πειραμάτων/μοντέλων, ανάλυση)."),
+    "role_work_claude": ("Ρόλοι", "work · Claude", "Υλοποίηση, tools."),
+    "role_light_claude": ("Ρόλοι", "light · Claude", "Dashboard, docs."),
+    "role_quick_claude": ("Ρόλοι", "quick · Claude", "Μηχανικά κείμενα: σύνοψη, μορφοποίηση, εξαγωγή."),
+    "role_research_codex": ("Ρόλοι", "research · Codex", "Κενό = προεπιλογή του ~/.codex/config.toml (δεν μαντεύω ονόματα μοντέλων)."),
+    "role_work_codex": ("Ρόλοι", "work · Codex", "Κενό = προεπιλογή του config."),
+    "role_light_codex": ("Ρόλοι", "light · Codex", "Κενό = προεπιλογή του config."),
+    "role_quick_codex": ("Ρόλοι", "quick · Codex", "Κενό = προεπιλογή του config."),
+    "role_research_codex_effort": ("Ρόλοι", "research · effort Codex", ""),
+    "role_work_codex_effort": ("Ρόλοι", "work · effort Codex", "Κενό = codex_effort."),
+    "role_light_codex_effort": ("Ρόλοι", "light · effort Codex", ""),
+    "role_quick_codex_effort": ("Ρόλοι", "quick · effort Codex", ""),
+    "role_light_claude_effort": ("Ρόλοι", "light · effort Claude", ""),
+    "kb_related": ("Context", "«Σχετικά» από kb.py", "1 = δείκτες από το kb.py query για μηνύματα μεγαλύτερα από το όριο."),
+    "kb_related_min_chars": ("Context", "Όριο χαρακτήρων για «Σχετικά»", "Κοντά μηνύματα δεν ψάχνουν στο kb."),
+    "kb_refresh_min": ("Context", "Ανανέωση kb μετά από job (λεπτά)", "Το πολύ κάθε τόσα λεπτά, πυρήνες 4–7· 0 = ποτέ."),
+    "codex_commit": ("Πάροχοι", "Commit για τον Codex", "1 = ο dispatcher κάνει commit τα claimed αρχεία ενός Codex job (έλεγχος hash)."),
     "task_timeout_min": ("Χρόνοι", "Timeout δουλειάς (λεπτά)", ""),
     "peer_timeout_min": ("Χρόνοι", "Timeout peer (λεπτά)", ""),
     "escalation_debounce_s": ("Χρόνοι", "Αραίωση κλιμακώσεων (s)", "Ο Πάρις ξυπνά για κλιμακώσεις το πολύ μία φορά ανά τόσο."),
@@ -120,6 +138,57 @@ def settings_rows(db=DISPATCH_DB):
 
 def effective(rows):
     return {r["key"]: r["value"] for r in rows}
+
+
+def apply_change(path, key, new, expected_old, actor="researcher"):
+    """One click = one change (B4). -> (status, message_in_greek); status in applied|noop|conflict|invalid|error.
+    Compare-and-set against the value the page showed, so a second click or a stale page changes nothing."""
+    try:
+        dd = D.DispatchDB(path)
+        try:
+            res = dd.change(key, new, expected_old=expected_old, actor=actor)
+        finally:
+            dd.conn.close()
+    except D.LabError as e:
+        return "invalid", str(e)
+    except sqlite3.Error as e:
+        return "error", f"βάση: {e}"
+    return res, {"applied": f"{key} = {str(new).strip()!r} (πριν {expected_old!r}). Ισχύει από το επόμενο tick.",
+                 "noop": f"{key}: ήδη {str(new).strip()!r}, δεν έγινε τίποτα.",
+                 "conflict": f"{key}: άλλαξε στο μεταξύ. Φόρτωσε ξανά τη σελίδα και δες την τρέχουσα τιμή."}[res]
+
+
+def _editor(st, r, path):
+    """One row: input + «Εφαρμογή». Choices come from the same rules the dispatcher enforces."""
+    key, rule = r["key"], D.SETTING_RULES.get(r["key"])
+    c1, c2, c3 = st.columns([3, 2, 1])
+    c1.markdown(f"**{r['label']}** `{key}`  \n{r['help']}" if r["help"] else f"**{r['label']}** `{key}`")
+    if rule is None:
+        c2.text_input("τιμή", value=r["value"], disabled=True, key=f"sv_{key}", label_visibility="collapsed")
+        c3.caption("μόνο CLI")
+        return
+    if rule[0] == "bool":
+        new = c2.selectbox("τιμή", ["0", "1"], index=0 if r["value"] != "1" else 1, key=f"sv_{key}",
+                           label_visibility="collapsed")
+    elif rule[0] == "enum":
+        opts = list(rule[1])
+        new = c2.selectbox("τιμή", opts, index=opts.index(r["value"]) if r["value"] in opts else 0, key=f"sv_{key}",
+                           label_visibility="collapsed")
+    else:
+        new = c2.text_input("τιμή", value=r["value"], key=f"sv_{key}", label_visibility="collapsed")
+    c2.caption(f"προεπιλογή {r['default']!r} · {r['source']}" + (f" · {r['changed']}" if r["changed"] else ""))
+    base = st.session_state.setdefault(f"sbase_{key}", r["value"])      # what this page first showed for the key
+    if base != r["value"]:
+        c3.warning("άλλαξε")
+        if c3.button("Ενημέρωση", key=f"sr_{key}"):
+            st.session_state[f"sbase_{key}"] = r["value"]
+            st.rerun()
+        c2.caption(f"Η τιμή άλλαξε στο μεταξύ ({base!r} → {r['value']!r}). Πάτα «Ενημέρωση» και δες τη νέα τιμή.")
+        return
+    if c3.button("Εφαρμογή", key=f"sb_{key}", disabled=str(new).strip() == r["value"]):
+        status, msg = apply_change(path, key, new, base)
+        st.session_state.pop(f"sbase_{key}", None)
+        (st.success if status == "applied" else st.warning if status in ("noop", "conflict") else st.error)(msg)
 
 
 # ---------------------------------------------------------------- routing
@@ -284,7 +353,7 @@ def render(root=ROOT):
 
     now = time.time()
     P = paths(root)
-    st.caption("Μόνο προβολή. Οι αλλαγές ρυθμίσεων έρχονται στο Β4. Καμία κλήση μοντέλου από αυτή την καρτέλα.")
+    st.caption("Οι ρυθμίσεις αλλάζουν εδώ: έλεγχος τιμής, audit, ένα κλικ = μία αλλαγή (ισχύει στο επόμενο tick). Καμία κλήση μοντέλου από αυτή την καρτέλα.")
     rows = settings_rows(P["dispatch"])
     s = effective(rows)
 
@@ -310,5 +379,6 @@ def render(root=ROOT):
     st.subheader("Όλες οι ρυθμίσεις")
     for group in dict.fromkeys(r["group"] for r in rows):
         with st.expander(group, expanded=group in ("Πάροχοι", "Μοντέλα")):
-            st.dataframe(pd.DataFrame([{k: r[k] for k in ("label", "key", "value", "default", "source", "changed", "help")}
-                                       for r in rows if r["group"] == group]), hide_index=True, width="stretch")
+            for r in rows:
+                if r["group"] == group:
+                    _editor(st, r, P["dispatch"])
