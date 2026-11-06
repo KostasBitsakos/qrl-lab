@@ -228,3 +228,21 @@ def test_measured_reservations_and_dependency_are_frozen():
     draft['policy']['launch_ready'] = True
     with pytest.raises(Exception, match='invalid pilot timing gate'):
         D.validate(draft, protected=False)
+
+
+def test_w_is_measurement_mode():
+    from labdb import canonical_hash
+    B, D = _load('build_w'), _load('driver')
+    spec = B.build(('opus', 'astra'), w_measures=True)
+    assert spec['policy']['launch_ready'] and spec['policy']['timing_mode'] == 'w_is_measurement'
+    assert spec['policy']['pilot_timings'] is None and spec['name'] == 'c345-W'
+    for t in spec['tasks']:
+        assert abs(t['reserve_cpu_h'] - 3 * t['nominal_cpu_h']) < 4e-6
+    assert spec['sandbox']['allowed_children'] == [canonical_hash(t['child']) for t in spec['tasks']]
+    assert spec['sandbox']['cpu_hours_budget'] <= 160
+    D.validate(spec, protected=True)
+    spec['tasks'][0]['reserve_cpu_h'] += .01
+    with pytest.raises(Exception, match='W-is-measurement caps'):
+        D.validate(spec, protected=False)
+    with pytest.raises(AssertionError):
+        B.build(pilots={'measurements': []}, w_measures=True)

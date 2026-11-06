@@ -53,7 +53,12 @@ def validate(spec, protected=True):
     if spec['kind'] != 'sandbox' or spec['scope'] != 'sim' or sb['cpu_hours_budget'] > 160 \
             or pol(spec, 'variant', None) != 'pms:poisson_ms':
         raise LabError('invalid Stage1 sandbox')
-    if pol(spec, 'launch_ready', False):
+    if pol(spec, 'launch_ready', False) and pol(spec, 'timing_mode', None) == 'w_is_measurement':
+        from c345.build_w import W_MEASURES_MARGIN
+        if pol(spec, 'pilot_timings', None) is not None or \
+                any(abs(t['reserve_cpu_h'] - W_MEASURES_MARGIN * t['nominal_cpu_h']) > 4e-6 for t in tasks):
+            raise LabError('reservations differ from W-is-measurement caps')
+    elif pol(spec, 'launch_ready', False):
         from copy import deepcopy
         from c345.build_w import apply_pilots
         expected = deepcopy(tasks)

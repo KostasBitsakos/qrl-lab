@@ -30,6 +30,7 @@ TEST12 = [14000, 14019]
 W_TOTAL, SRC = 19968, 9984
 F_TOTAL = 39936
 ENVELOPE, MARGIN = 350.0, 2.0
+W_MEASURES_MARGIN = 3.0   # J369: W itself is the timing measurement; generous cap on historical estimates
 # (source s/tick, target s/tick, eval+startup s) from tools/spiky_stage1/build.py RATES (cycle-3 ledger)
 RATES = {'lstm': (0, .1794253729961939, 189.29), 'lstm_transfer': (.1767853, .1631976, 161.10),
          'dinos': (0, .1004527, 135.93), 'v2': (.0996972, .0985360, 128.95),
@@ -100,8 +101,8 @@ def cmd_for(arm, seed, total, extra, out):
     return c, tgt
 
 
-def task(stage, name, arm, seed, c, nom, out, lane=None, cfg=None, tgt=None):
-    reserve = round(MARGIN * nom, 6)
+def task(stage, name, arm, seed, c, nom, out, lane=None, cfg=None, tgt=None, margin=None):
+    reserve = round((margin or MARGIN) * nom, 6)
     child = dict(name=name, scope='sim', repo=REPO, cwd=REPO, max_parallel=1, cpu_affinity='8-39',
                  env_threads={k: '1' for k in G.ENV_ALLOWED},
                  entries=[dict(name=name, seed=seed, cpus=1, wall_clock_hours=reserve, cmd=c)])
@@ -166,13 +167,17 @@ def apply_pilots(tasks, pilots):
         t['child']['entries'][0]['wall_clock_hours'] = cap
 
 
-def build(lanes=('opus',), pilots=None):
+def build(lanes=('opus',), pilots=None, w_measures=False):
+    """w_measures (J369, researcher M-20261106-070): no separate pilot; reservations = 3x historical nominal,
+    launch_ready=True; the first completed W runs recalibrate reservations for F."""
+    assert not (w_measures and pilots is not None)
+    mg = W_MEASURES_MARGIN if w_measures else None
     tasks = []
     ref_out = 'tuning/results/c345/c345-W-reference-hpa.json'
     tasks.append(task('P0', 'c345-W-reference-hpa', 'reference', VAL[0],
                       [str(ROOT / '.venv/bin/python'), 'tuning/cycle2_entry.py', 'reference', '--variant', VARIANT,
                        '--controllers', 'hpa_orig,hpa_demand,fixed,oracle', '--split', 'val', '--out', ref_out],
-                      .25, ref_out))
+                      .25, ref_out, margin=mg))
     seen, aliases = {}, {}      # identical commands across lanes run ONCE (same candidate); aliases recorded
     for (lane, arm), cfgs in configs(lanes).items():
         for ci, extra in enumerate(cfgs):
@@ -185,7 +190,7 @@ def build(lanes=('opus',), pilots=None):
                 name = f'c345-W-{cid}-s{seed}'
                 out = f'tuning/results/c345/{name}.json'
                 c, tgt = cmd_for(arm, seed, W_TOTAL, extra, out)
-                tasks.append(task('W', name, arm, seed, c, nominal(arm, W_TOTAL), out, lane, f'c{ci}', tgt))
+                tasks.append(task('W', name, arm, seed, c, nominal(arm, W_TOTAL), out, lane, f'c{ci}', tgt, margin=mg))
     if pilots is not None:
         apply_pilots(tasks, pilots)
     nom = sum(t['nominal_cpu_h'] for t in tasks)
@@ -199,10 +204,10 @@ def build(lanes=('opus',), pilots=None):
               seed_ranges_allowed=[[13000, 13019], [18500, 18501]],
               seed_ranges_forbidden=[TEST12, [14500, 14519], [16500, 16519], [18600, 18609]],
               allowed_children=[canonical_hash(t['child']) for t in tasks])
-    return dict(kind='sandbox', scope='sim', name='c345-W-DRAFT', sandbox=sb, tasks=tasks, cwd=REPO,
+    return dict(kind='sandbox', scope='sim', name='c345-W' if w_measures else 'c345-W-DRAFT', sandbox=sb, tasks=tasks, cwd=REPO,
                 entries=[t['child']['entries'][0] for t in tasks], limits={'wall_clock_hours': sb['per_run_wall_clock_hours']},
                 max_parallel=16, cpu_affinity='8-39',
-                authority=['R-20261106-002', 'M-20261106-011', 'DRAFT: needs its own frozen-card approval'],
+                authority=['R-20261106-002', 'M-20261106-011', ('J369: W is the timing measurement; launch = approval of this frozen card' if w_measures else 'DRAFT: needs its own frozen-card approval')],
                 policy=dict(stages=['P0', 'W'], expected_tasks=len(tasks), variant=VARIANT, val_seeds=VAL,
                             lanes=list(lanes), transfer_source_ticks=SRC, total_ticks=W_TOTAL,
                             checkpoint='last target endpoint only', failed_stop=3, overrun='stop all immediately',
@@ -216,13 +221,14 @@ def build(lanes=('opus',), pilots=None):
                             arm_labels={'derp_hist10': 'Enhanced DERP, explicit --derp-history 10',
                                         'derp_ddqn': 'Enhanced DERP, history 10 + Double-DQN; sync 1 isolates '
                                                      'target substitution; sync 100 also changes cadence'},
-                            pilot_gate='Separate approved pilot spec required before W; full W exposure, startup '
+                            pilot_gate='none (w_is_measurement)' if w_measures else ('Separate approved pilot spec required before W; full W exposure, startup '
                                        'and endpoint val included, each distinct config and reference covered; '
-                                       'rebuild with --pilot-timings FILE; cap = 2x slowest measured pilot per arm',
-                            launch_ready=pilots is not None,
+                                       'rebuild with --pilot-timings FILE; cap = 2x slowest measured pilot per arm'),
+                            launch_ready=pilots is not None or w_measures,
+                            timing_mode='w_is_measurement' if w_measures else ('pilots' if pilots is not None else 'draft'),
                             pilot_timings=pilots,
-                            envelope_cpu_h=ENVELOPE, margin=MARGIN,
-                            costs=('measured pilot reservations; nominal figures remain historical extrapolations' if pilots is not None
+                            envelope_cpu_h=ENVELOPE, margin=(W_MEASURES_MARGIN if w_measures else MARGIN),
+                            costs=('W is the timing measurement: reservations = 3x historical cycle-3 estimates (not measured on poisson_ms); overrun stops all; F is rebuilt from W timings' if w_measures else '' ) or ('measured pilot reservations; nominal figures remain historical extrapolations' if pilots is not None
                                    else 'extrapolated cycle-3 ledger rates, NOT launch-ready; rebuild after pilots'),
                             interpretation='screening on reused val; no winner claim from W'),
                 nominal_cpu_h=round(nom, 6), reserved_cpu_h=round(res, 6),
@@ -269,15 +275,16 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--lanes', default='opus')
     ap.add_argument('--pilot-timings', type=Path)
+    ap.add_argument('--w-measures', action='store_true')
     a = ap.parse_args()
     lanes = tuple(a.lanes.split(','))
     hits = seed_guard()
     if hits:
         raise SystemExit('seed guard: seeds already used:\n' + '\n'.join(hits[:20]))
-    spec = build(lanes, json.loads(a.pilot_timings.read_text()) if a.pilot_timings else None)
+    spec = build(lanes, json.loads(a.pilot_timings.read_text()) if a.pilot_timings else None, a.w_measures)
     ft = f_template()
     OUT.mkdir(exist_ok=True)
-    (OUT / 'W-spec-draft.json').write_text(json.dumps(spec, indent=2) + '\n')
+    (OUT / ('W-spec.json' if a.w_measures else 'W-spec-draft.json')).write_text(json.dumps(spec, indent=2) + '\n')
     (OUT / 'F-template.json').write_text(json.dumps(ft, indent=2) + '\n')
     total = spec['reserved_cpu_h'] + ft['reserved_cpu_h'] * (1 if 'astra' in lanes else 1)
     print(f"W lanes={lanes} tasks={len(spec['tasks'])} nominal={spec['nominal_cpu_h']:.2f} "
