@@ -138,3 +138,23 @@ def test_sweep_transition_is_conditional(tmp_path, monkeypatch):
     assert d.sweep() == 0, "the row had finished: nothing freed, its job not requeued"
     d.dd.conn = real
     assert d.work.job(jid)["status"] == "running"
+
+
+def test_sweep_during_completion_does_not_fail_the_run(tmp_path, monkeypatch):
+    d = make(tmp_path, monkeypatch)
+    t = d.dd.reserve("peer", "T", ["P-x"], "codex", "peer")
+    d.dd.claim_start(t, ["P-x"], None, False)
+    d.dd.conn.execute("INSERT INTO peer_requests(id, ts, from_provider, to_provider, prompt, status) VALUES (?,?,?,?,?,?)",
+                      ("P-x", D.now_iso(), "claude", "codex", "q", "running"))
+    real, seen = d.dd.conn, []
+
+    class Mid:                       # a sweep runs exactly when the terminal update is about to be written
+        def execute(self, sql, *a):
+            if sql.startswith("UPDATE tasks SET ended=?, status=?"):
+                seen.append(d.sweep())
+            return real.execute(sql, *a)
+    d.dd.conn = Mid()
+    d.dd.task_end(t, "done", {}, 1.0)
+    d.dd.conn = real
+    assert seen == [0] and row(d, t)["status"] == "done" and t not in D.LIVE_TASKS
+    assert real.execute("SELECT status FROM peer_requests WHERE id='P-x'").fetchone()[0] == "running"

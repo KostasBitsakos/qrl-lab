@@ -517,7 +517,12 @@ class DispatchDB:
         self.conn.execute("UPDATE peer_requests SET status='queued' WHERE id=? AND status='running'", (pid,))
 
     def task_end(self, task_id, status, res, duration_s, note=""):
-        self._disown(task_id)
+        try:
+            self._task_end_row(task_id, status, res, duration_s, note)
+        finally:
+            self._disown(task_id)       # only AFTER the terminal update: a sweep in between must still see a live owner
+
+    def _task_end_row(self, task_id, status, res, duration_s, note=""):
         u = res.get("usage", {}) if res else {}
         self.conn.execute(
             "UPDATE tasks SET ended=?, status=?, session_id=COALESCE(?, session_id), cost_usd=?, input_tokens=?,"
