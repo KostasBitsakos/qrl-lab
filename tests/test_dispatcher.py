@@ -346,13 +346,20 @@ def test_decisions_and_run_events():
     add_run("new-1", rid, "running")
     assert d.once() is None
     db.conn.execute("UPDATE runs SET status='done' WHERE run_id='new-1'")
+    n_claude = len(calls("claude"))
+    assert d.once() is None, "a clean batch is summarised by a script: no coordinator task"   # B3
+    assert len(calls("claude")) == n_claude
+    body = thread_bodies(db, root)[-1]
+    assert "new-1" in body and "old-1" not in body and "[run-summary " in body
+    assert d.once() is None and thread_bodies(db, root)[-1] == body
+    add_run("new-2", rid, "failed")                      # a failed batch still wakes the coordinator, once
+    db.conn.execute("UPDATE runs SET exit_code=1 WHERE run_id='new-2'")
     queue("claude", {"mode": "ok", "text": "Τα αποτελέσματα: ..."})
     assert d.once() == "done"
     p = prompt_of(calls("claude")[-1])
-    assert "new-1" in p and "old-1" not in p and "have ended" in p
+    assert "new-2" in p and "old-1" not in p and "have ended" in p
     assert d.once() is None
-    assert thread_bodies(db, root)[-1].startswith("Κώστα,\n\nΤα αποτελέσματα")
-    ok("decisions and finished experiment batches wake the coordinator once each (no LLM polling)")
+    ok("decisions wake the coordinator once; clean batches get a script summary, failed ones wake the coordinator once")
 
 
 def test_peers():
@@ -721,6 +728,32 @@ def test_max_workers_cancel_heartbeat():
     ok("max_workers cap, cancel stops the run, heartbeat thread, restart re-queues spawned jobs")
 
 
+def test_clean_batch_summary_by_script_exactly_once():
+    d = fresh_dispatcher()
+    d.lab.close()
+    d.lab = LabDB(os.path.join(LAB, ".lab", f"script-ev-{time.time_ns()}.db"))
+    d.dd.conn.execute("INSERT OR REPLACE INTO settings(key,value) VALUES ('events_initialized','1')")
+    n0 = len(calls("claude")) + len(calls("codex"))
+
+    def add(ident, rid, status, code):
+        d.lab.conn.execute(
+            "INSERT INTO runs(run_id,request_id,spec_hash,entry,attempt,scope,cmd,cwd,run_dir,status,exit_code,created)"
+            " VALUES (?,?, 'h',0,1,'sim','[]','.','fx',?,?,?)", (ident, rid, status, code, D.now_iso()))
+    add("ok-a", "R-script-ok", "done", 0)
+    add("ok-b", "R-script-ok", "done", 0)
+    assert not [x for x in d._candidates() if x.get("event_ref", "").startswith("R-script-ok:")], "clean batch: no model"
+    posts = d.lab.conn.execute("SELECT body FROM messages WHERE author='dispatcher' AND body LIKE '%[run-summary R-script-ok:%'").fetchall()
+    assert len(posts) == 1 and "ok-a" in posts[0]["body"] and "ok-b" in posts[0]["body"]
+    assert not [x for x in d._candidates() if x.get("event_ref", "").startswith("R-script-ok:")]
+    d.dd.conn.execute("DELETE FROM notified")   # restart that lost the notified mark: the marker in the thread still holds
+    d._candidates()
+    assert d.lab.conn.execute("SELECT COUNT(*) FROM messages WHERE body LIKE '%[run-summary R-script-ok:%'").fetchone()[0] == 1
+    add("bad-a", "R-script-bad", "done", 0)
+    add("bad-b", "R-script-bad", "failed", 1)
+    assert len([x for x in d._candidates() if x.get("event_ref", "").startswith("R-script-bad:")]) == 1, "failure -> model"
+    assert len(calls("claude")) + len(calls("codex")) == n0
+
+
 def test_run_events_full_request_set():
     d = fresh_dispatcher()
     # This window fixture must own its run set, independent of earlier test batches.
@@ -729,7 +762,7 @@ def test_run_events_full_request_set():
     d.dd.conn.execute("INSERT OR REPLACE INTO settings(key,value) VALUES ('events_initialized','1')")
     rid = "R-rolling-regression"
 
-    def add(ident, request, created, status="done"):
+    def add(ident, request, created, status="failed"):
         d.lab.conn.execute(
             "INSERT INTO runs(run_id,request_id,spec_hash,entry,attempt,scope,cmd,cwd,run_dir,status,created)"
             " VALUES (?,?, 'h',0,1,'sim','[]','.','fixture',?,?)", (ident, request, status, created))
@@ -984,7 +1017,7 @@ def test_held_job_does_not_block_the_queue_and_peer_requeues():
 
 
 
-TESTS = [test_run_events_full_request_set, test_retry_attempt_accounting_and_resume_policy,
+TESTS = [test_clean_batch_summary_by_script_exactly_once, test_run_events_full_request_set, test_retry_attempt_accounting_and_resume_policy,
          test_resume_rejection_before_work_only, test_peer_context_and_ttl_limits, test_claude_reply_and_resume, test_failover_on_quota, test_both_exhausted_then_resume,
          test_choice_mention_status_and_errors, test_paid_credits_guard, test_decisions_and_run_events, test_peers,
          test_md_index, test_parse_reset, test_panel_and_installer, test_edit_freeze, test_headless_permission_roundtrip,

@@ -57,6 +57,7 @@ import perm_store  # noqa: E402
 import work as W  # noqa: E402
 from researcher_text import researcher_text  # noqa: E402
 import governor  # noqa: E402
+import run_events  # noqa: E402
 
 PROVIDERS = ("claude", "codex")
 OTHER = {"claude": "codex", "codex": "claude"}
@@ -863,6 +864,18 @@ class Dispatcher:
         return "\n\n".join(p for p in parts if p)
 
     # ---- work discovery
+    def _post_batch_summary(self, rid, runs, ref, tid):
+        """Exactly once: the marker in the body is the idempotency key (a crash between post and mark_notified must not
+        post twice), mark_notified keeps the candidate scan from revisiting the batch."""
+        mark = run_events.marker(ref)
+        have = self.lab.conn.execute("SELECT 1 FROM messages WHERE thread_id=? AND author='dispatcher' AND"
+                                     " instr(body, ?)>0 LIMIT 1", (tid, mark)).fetchone()
+        if not have:
+            root = self.lab.conn.execute("SELECT id FROM messages WHERE id=?", (tid,)).fetchone()["id"]
+            self.lab.post("dispatcher", run_events.summary(rid, runs, ref, os.path.join(self.root, ".lab")), root,
+                          kind="status")
+        self.dd.mark_notified("runs", ref)
+
     def _system_thread(self):
         """Root message for events that belong to no thread (author 'dispatcher')."""
         r = self.lab.conn.execute("SELECT id FROM messages WHERE author='dispatcher' AND kind='status' AND"
@@ -994,6 +1007,9 @@ class Dispatcher:
             req = self.lab.request(rid) or {}
             tid = req.get("thread_id") if req.get("thread_id") and self.lab.message(req["thread_id"]) \
                 else self._system_thread()
+            if run_events.all_ok(runs):  # B3: a clean batch is summarised by a script; a model only on failure
+                self._post_batch_summary(rid, runs, ref, tid)
+                continue
             lines = [f"- {r['run_id']} entry {r['entry']} attempt {r['attempt']} {r['name'] or ''}: {r['status']},"
                      f" exit {r['exit_code']}, dir {r['run_dir']}" for r in sorted(runs, key=lambda r: r['entry'])]
             text = (f"All runs of approved request {rid} have ended:\n" + "\n".join(lines) +
