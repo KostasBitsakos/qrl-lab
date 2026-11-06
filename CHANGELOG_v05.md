@@ -77,3 +77,9 @@
   deregisters after the terminal update. Held peer requests keep `peer_hold_max_min` (30 min).
 - Codex review 5 (two P1s: recovery vs live inline peer, late heartbeat) and re-review (one P1: completion race) fixed.
   Not fixed (non-blocking): pid reuse ignores the owner timestamp; config apply/mark-applied are two transactions.
+
+## Fix: CLIs find their lab from the script's location (6/11)
+- `labdb.lab_root()` and `dispatcher.lab_root()` (used by dispatcher.py, labq.py, launch_run.py, work.py, ask_peer.py) fell back to the
+  caller's current directory: `dispatcher.py exhaust claude 10` run from `~` wrote `~/.lab/dispatch.db`, which the live dispatcher
+  never reads. Now `$QRL_LAB_DIR` wins, otherwise the lab the script lives in (`REPO_ROOT`). `tests/test_cli_root.py` (3 tests).
+- No restart needed: the service has `WorkingDirectory=/home/ubuntu/qrl-lab`, so its root did not change.

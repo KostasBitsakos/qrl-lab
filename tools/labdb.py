@@ -139,8 +139,13 @@ class LabError(Exception):
     """An invalid request or state transition. The message is safe to show to the user."""
 
 
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # the lab this script belongs to
+
+
 def lab_root():
-    return os.environ.get("QRL_LAB_DIR") or os.getcwd()
+    """$QRL_LAB_DIR wins; otherwise the lab the script lives in, never the caller's current directory (a CLI run from ~
+    used to create and use a second, empty .lab there)."""
+    return os.environ.get("QRL_LAB_DIR") or REPO_ROOT
 
 
 def lab_dir(root=None):

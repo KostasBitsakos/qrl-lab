@@ -269,8 +269,12 @@ CREATE TABLE IF NOT EXISTS limits(provider TEXT NOT NULL, window TEXT NOT NULL, 
 """
 
 
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # the lab this script belongs to
+
+
 def lab_root():
-    return os.environ.get("QRL_LAB_DIR") or os.getcwd()
+    """$QRL_LAB_DIR wins; otherwise the lab the script lives in, never the caller's current directory."""
+    return os.environ.get("QRL_LAB_DIR") or REPO_ROOT
 
 
 def now_iso():
@@ -281,7 +285,7 @@ def dispatch_db_path(root=None):
     """`.lab/dispatch.db` of the lab root (own helper: independent of later changes to labdb.py)."""
     if os.environ.get("QRL_DISPATCH_DB"):
         return os.environ["QRL_DISPATCH_DB"]
-    base = os.path.abspath(root or os.environ.get("QRL_LAB_DIR") or os.getcwd())
+    base = os.path.abspath(root or os.environ.get("QRL_LAB_DIR") or REPO_ROOT)
     return os.path.join(base, ".lab", "dispatch.db")
 
 
@@ -2180,7 +2184,7 @@ def propose_config(lab, dd, key, value, reason, author="agent"):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--root", default=None, help="lab directory (default: $QRL_LAB_DIR or cwd)")
+    ap.add_argument("--root", default=None, help="lab directory (default: $QRL_LAB_DIR, else the lab this script lives in)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("run")
     sub.add_parser("once")
