@@ -266,3 +266,40 @@ def test_watchdog_clean_driver_exit_is_not_an_alert(tmp_path, monkeypatch):
     monkeypatch.setattr(D, 'post', lambda *a: (_ for _ in ()).throw(AssertionError('must not alert')))
     D.watch('R-test', 'session')
     assert not (tmp_path / 'STOP').exists()
+
+
+@pytest.mark.parametrize('half', 'AB')
+def test_f_spec_validates_and_is_frozen(half):
+    """J381: stage F parent = 5 seeds x 10 arms, val only, test12 and W seeds forbidden, caps recomputed from measured W."""
+    import json
+    from labdb import canonical_hash
+    F, W, D = _load('build_f'), _load('build_w'), _load('driver')
+    spec = F.build(half)
+    pol = spec['policy']
+    assert pol['stages'] == ['F'] and pol['gate_stages'] == [] and pol['timing_mode'] == 'f_from_w'
+    assert len(spec['tasks']) == pol['expected_tasks'] == 50 and spec['sandbox']['cpu_hours_budget'] <= 160
+    assert {t['seed'] for t in spec['tasks']} == set(F.HALVES[half])
+    assert set(F.HALVES['A']).isdisjoint(F.HALVES['B']) and sorted(F.HALVES['A'] + F.HALVES['B']) == W.F_SEEDS
+    assert [14000, 14019] in spec['sandbox']['seed_ranges_forbidden'] and [18500, 18501] in spec['sandbox']['seed_ranges_forbidden']
+    for t in spec['tasks']:   # eval is val only; endpoint weights saved; total ticks 39,936 incl. transfer source
+        c = t['child']['entries'][0]['cmd']
+        assert c[c.index('--eval-split') + 1] == 'val' and c[c.index('--total-ticks') + 1] == str(W.F_TOTAL)
+        assert c[c.index('--save-weights') + 1] == 'on' and 'test' not in c
+    sel = json.loads((ROOT / '.lab/j380/w_analysis.json').read_text())['selection']
+    assert pol['selection'] == sel
+    assert spec['sandbox']['allowed_children'] == [canonical_hash(t['child']) for t in spec['tasks']]
+    D.validate(spec, protected=True)
+    spec['tasks'][0]['reserve_cpu_h'] += .01
+    with pytest.raises(Exception):
+        D.validate(spec, protected=False)
+
+    # Codex review (J381): a consistently re-hashed command alteration must still be rejected.
+    spec = F.build(half)
+    spec['tasks'][0]['child']['entries'][0]['cmd'] += ['--lr', '0.123']
+    spec['sandbox']['allowed_children'] = [canonical_hash(t['child']) for t in spec['tasks']]
+    with pytest.raises(Exception):
+        D.validate(spec, protected=False)
+    spec = F.build(half)
+    spec['policy']['selection']['v2']['config'] = 'c1'
+    with pytest.raises(Exception, match='rebuilt from measured W'):
+        D.validate(spec, protected=False)

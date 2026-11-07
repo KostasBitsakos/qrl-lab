@@ -58,6 +58,15 @@ def validate(spec, protected=True):
         if pol(spec, 'pilot_timings', None) is not None or \
                 any(abs(t['reserve_cpu_h'] - W_MEASURES_MARGIN * t['nominal_cpu_h']) > 4e-6 for t in tasks):
             raise LabError('reservations differ from W-is-measurement caps')
+    elif pol(spec, 'launch_ready', False) and pol(spec, 'timing_mode', None) == 'f_from_w':
+        # J381: F reservations are a pure function of the measured W runs (w_analysis.json, hashed in runtime_sha256).
+        from c345.build_f import build as build_f
+        want = build_f(pol(spec, 'half', 'A'))
+        # Whole-spec equality (tasks incl. every command, selection, seeds, caps): a consistently re-hashed alteration fails.
+        if pol(spec, 'stages', None) != ['F'] or pol(spec, 'gate_stages', None) != [] or tasks != want['tasks'] or \
+                spec.get('policy') != want['policy'] or sb['seed_ranges_allowed'] != want['sandbox']['seed_ranges_allowed'] or \
+                sb['seed_ranges_forbidden'] != want['sandbox']['seed_ranges_forbidden']:
+            raise LabError('F spec differs from the one rebuilt from measured W')
     elif pol(spec, 'launch_ready', False):
         from copy import deepcopy
         from c345.build_w import apply_pilots
