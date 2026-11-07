@@ -412,13 +412,16 @@ def watch(rid,session):
         try:
             atomic(OUT/'watch-ready.json',dict(session=session,pid=os.getpid(),ts=stamp()))
             r=load(OUT/'receipt.json')
-            os.kill(r['pids']['drive'],0)
-            if not (OUT/'state.json').exists() and time.monotonic()-first<60:
+            drive_gone=False
+            try:os.kill(r['pids']['drive'],0)
+            except ProcessLookupError:drive_gone=True  # clean exit is fine if state is terminal (checked below)
+            if not (OUT/'state.json').exists() and time.monotonic()-first<60 and not drive_gone:
                 time.sleep(1);continue
             s=load(OUT/'state.json')
             active=any(x['status'] in ACTIVE for x in b.rows())
             if s['state'] in ('DONE','INCOMPLETE','STOPPED') and not active:
                 return
+            if drive_gone:raise LabError('driver exited without a terminal state')
             age=(datetime.now(timezone.utc)-datetime.fromisoformat(s['ts'])).total_seconds()
             if age>300:raise LabError('driver heartbeat older than 5 minutes')
             if s['state']=='STOPPED' and active:raise LabError('terminal state with active runs')

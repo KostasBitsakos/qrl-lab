@@ -246,3 +246,23 @@ def test_w_is_measurement_mode():
         D.validate(spec, protected=False)
     with pytest.raises(AssertionError):
         B.build(pilots={'measurements': []}, w_measures=True)
+
+
+def test_watchdog_clean_driver_exit_is_not_an_alert(tmp_path, monkeypatch):
+    """J380: driver exits normally after writing DONE; watchdog must return quietly (no STOP, no post)."""
+    import json
+    B, D = _load('build_w'), _load('driver')
+    (tmp_path / 'parent-spec.json').write_text(json.dumps(B.build(('opus', 'astra'), w_measures=True)))
+    monkeypatch.setattr(D, 'OUT', tmp_path)
+    D.atomic(tmp_path / 'receipt.json', dict(pids={'drive': 12345}))
+    D.atomic(tmp_path / 'state.json', dict(state='DONE', ts=D.stamp()))
+    monkeypatch.setattr(D, 'ready_role', lambda *a: None)
+    monkeypatch.setattr(D.os, 'kill', lambda *a: (_ for _ in ()).throw(ProcessLookupError('gone')))
+    class Bk:
+        def __init__(self, *a): pass
+        def stop_all(self): raise AssertionError('must not stop')
+        def rows(self): return []
+    monkeypatch.setattr(D, 'Backend', Bk)
+    monkeypatch.setattr(D, 'post', lambda *a: (_ for _ in ()).throw(AssertionError('must not alert')))
+    D.watch('R-test', 'session')
+    assert not (tmp_path / 'STOP').exists()
