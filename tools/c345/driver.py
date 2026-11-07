@@ -492,9 +492,64 @@ def start(rid):
         print(json.dumps(receipt))
 
 
+def resume(rid):
+    """Re-spawn ONLY dead drive/watch roles of an approved, non-terminal, non-stopped parent (J383 supervisor hook).
+    Never starts payloads itself: the Engine reconciles existing launcher rows. Max 2 resumes per receipt.
+    The receipt stays at phase GO (a surviving role must keep passing its approval check); on failure the old pids are restored."""
+    spec=validate(load(OUT/'parent-spec.json')); b=Backend(rid,spec); b.approval()
+    def alive(pid):
+        try:
+            st=Path(f'/proc/{int(pid)}/stat').read_text().rsplit(')',1)[1].split()[0]
+            return st not in ('Z','X')
+        except (OSError,ValueError,IndexError,TypeError):return False
+    with (OUT/'start.lock').open('w') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        r=load(OUT/'receipt.json')
+        if r['request']!=rid or r['spec_hash']!=canonical_hash(spec) or r.get('phase')!='GO':
+            raise LabError('resume refused: receipt binding/phase')
+        if not (OUT/'state.json').exists():raise LabError('resume refused: no preserved state')
+        st=load(OUT/'state.json')
+        if st['state'] not in ('READY','RUNNING'):raise LabError('resume refused: state '+st['state'])
+        if (OUT/'STOP').exists():raise LabError('resume refused: STOP file present')
+        if not st.get('ts') or (datetime.now(timezone.utc)-datetime.fromisoformat(st['ts'])).total_seconds()>6*3600:
+            raise LabError('resume refused: state older than 6 h (abandoned)')
+        if r.get('resumes',0)>=2:raise LabError('resume refused: retry budget exhausted')
+        dead=[x for x in ('drive','watch') if not alive(r['pids'].get(x,0))]
+        if not dead:raise LabError('resume refused: both roles alive')
+        old=dict(r['pids']);r['resumes']=r.get('resumes',0)+1;atomic(OUT/'receipt.json',r)
+        children=[]
+        try:
+            for role in dead:
+                with (OUT/f'{role}.log').open('a') as f:
+                    p=subprocess.Popen([str(ROOT/'.venv/bin/python'),'-u',str(Path(__file__).resolve()),role,'--request',rid,
+                                        '--session',r['session']],cwd=ROOT,stdin=subprocess.DEVNULL,stdout=f,stderr=f,start_new_session=True)
+                    children.append(p);r['pids'][role]=p.pid;atomic(OUT/'receipt.json',r)
+            deadline=time.monotonic()+20
+            while True:
+                ok=[]
+                for role in dead:
+                    q=OUT/f'{role}-ready.json';v=load(q) if q.exists() else {}
+                    ok.append(v.get('session')==r['session'] and v.get('pid')==r['pids'][role])
+                if all(ok) and all(p.poll() is None for p in children):break
+                if time.monotonic()>deadline or any(p.poll() is not None for p in children):raise LabError('resume handshake failed')
+                time.sleep(.1)
+        except Exception:
+            try:
+                for p in children:
+                    try:
+                        if p.poll() is None:p.terminate();p.wait(timeout=10)
+                    except Exception:
+                        try:p.kill()
+                        except Exception:pass
+            finally:
+                r['pids']=old;atomic(OUT/'receipt.json',r)
+            raise
+        print(json.dumps(r))
+
+
 if __name__=='__main__':
     ap=argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('action',choices=['validate','start','drive','watch'])
+    ap.add_argument('action',choices=['validate','start','drive','watch','resume'])
     ap.add_argument('--request')
     ap.add_argument('--session')
     a=ap.parse_args()
@@ -504,6 +559,7 @@ if __name__=='__main__':
     else:
         if not a.request: ap.error('--request required')
         if a.action=='start':start(a.request)
+        elif a.action=='resume':resume(a.request)
         else:
             if not a.session:ap.error('--session is required for startup children')
             {'drive':drive,'watch':watch}[a.action](a.request,a.session)
