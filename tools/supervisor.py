@@ -191,7 +191,8 @@ def ask(title, body):
 
 def do_resume(out, request):
     env = dict(os.environ, QRL_C345_OUT=str(out))
-    p = run([str(ROOT / '.venv/bin/python'), str(ROOT / 'tools/c345/driver.py'), 'resume', '--request', request], env=env)
+    entry = 'tools/c345/fb_restart.py' if (Path(out) / 'superseded.json').exists() else 'tools/c345/driver.py'  # J402
+    p = run([str(ROOT / '.venv/bin/python'), str(ROOT / entry), 'resume', '--request', request], env=env)
     return p.returncode == 0, (p.stdout + p.stderr).strip()[-300:]
 
 
