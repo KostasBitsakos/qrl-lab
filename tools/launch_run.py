@@ -350,6 +350,8 @@ def supervise(run_id):
                     k not in ("PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME", "LD_PRELOAD", "LD_LIBRARY_PATH")}
     env = dict(base_env, QRL_RUN_ID=run_id, QRL_RUN_DIR=run["run_dir"], QRL_LAB_DIR=lab_root(),
                QRL_RUN_SEED=str(meta["entry_spec"].get("seed", "")))
+    if not env["QRL_RUN_SEED"]:   # J419: an entry without a seed must leave the variable unset ('' crashes int(os.environ...))
+        env.pop("QRL_RUN_SEED")
     log = open(os.path.join(run["run_dir"], "output.log"), "ab")
     if sbm:
         cores = [int(c) for c in sbm["cores"]]
