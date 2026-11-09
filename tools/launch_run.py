@@ -361,12 +361,14 @@ def supervise(run_id):
         expires_ts = parse_ts_epoch(sbm["expires"])
     else:
         cores, upd = pin_plan(meta.get("scope"), meta.get("cpu_affinity"), meta.get("env_threads"))
-        expires_ts = None
+        expires_ts = parse_ts_epoch(meta["envelope_expires"]) if meta.get("envelope_expires") else None   # J427 envelope
     env.update(upd)
     if cores:
         log.write(f"[launcher] cpu affinity {cores[0]}-{cores[-1]} ({len(cores)} cores), threads={upd.get('OMP_NUM_THREADS')}\n".encode())
     t0 = time.time()
     try:
+        if not sbm and expires_ts is not None and time.time() >= expires_ts:
+            raise LabError(f"Envelope expired at {meta['envelope_expires']} before process spawn.")
         if sbm and sbm.get("repo") in ("code-poisson", "code-poisson-astra"):
             import sandbox_guard as G
             pr, parent = load_sandbox(db, meta["request_id"])
@@ -418,7 +420,7 @@ def supervise(run_id):
                         time.monotonic() - last_stop_read >= START_LOCK_WAIT_S):
                     reason = "cannot read stop request; stopping conservatively"
             if expires_ts is not None and time.time() >= expires_ts:
-                reason = f"sandbox expired at {sbm['expires']}"
+                reason = f"sandbox expired at {sbm['expires'] if sbm else meta['envelope_expires']}"
             elif time.time() - t0 > limit_s:
                 reason = f"wall-clock limit {meta['limits']['wall_clock_hours']} h reached"
             if reason:

@@ -1118,11 +1118,9 @@ class Dispatcher:
         except (LabError, OSError, ValueError) as e:
             return str(e)[:300]
         if first:
-            root = tid if self.lab.message(tid) else self._system_thread()
-            self.lab.post("dispatcher", f"Κώστα, εγκρίθηκε το {r['id']} («{r['title']}»). Ο dispatcher ξεκίνησε "
-                          f"{len(started)} από {len(spec['entries'])} entries με script, χωρίς μοντέλο"
-                          + (f" ({left} περιμένουν θέση, max_parallel {spec.get('max_parallel', 1)})" if left else "")
-                          + ":\n" + "\n".join(f"- {x}" for x in started), root, kind="status")
+            # F3 (J427): auto-messages go to the technical log, never to the researcher thread.
+            self._tech_log(f"launch {r['id']} «{r['title']}»: started {len(started)}/{len(spec['entries'])}"
+                           f" (waiting {left}, max_parallel {spec.get('max_parallel', 1)}): " + ", ".join(started))
         self.lab.mark_delivered(req_ids=[r["id"]])
         return None
 
@@ -1141,13 +1139,23 @@ class Dispatcher:
         """Exactly once: the marker in the body is the idempotency key (a crash between post and mark_notified must not
         post twice), mark_notified keeps the candidate scan from revisiting the batch."""
         mark = run_events.marker(ref)
-        have = self.lab.conn.execute("SELECT 1 FROM messages WHERE thread_id=? AND author='dispatcher' AND"
-                                     " instr(body, ?)>0 LIMIT 1", (tid, mark)).fetchone()
+        try:
+            with open(os.path.join(self.root, ".lab", "technical.log"), encoding="utf-8") as f:
+                have = mark in f.read()
+        except OSError:
+            have = False
         if not have:
-            root = self.lab.conn.execute("SELECT id FROM messages WHERE id=?", (tid,)).fetchone()["id"]
-            self.lab.post("dispatcher", run_events.summary(rid, runs, ref, os.path.join(self.root, ".lab")), root,
-                          kind="status")
+            # F3 (J427): batch summaries go to the technical log (.lab/technical.log); only the coordinator posts
+            # to the researcher thread. The marker keeps the summary idempotent.
+            txt = run_events.summary(rid, runs, ref, os.path.join(self.root, ".lab"))
+            self._tech_log(txt if mark in txt else txt + "\n" + mark)
         self.dd.mark_notified("runs", ref)
+
+    def _tech_log(self, text):
+        """F3: technical, not researcher-facing, events (run-id lists, end of batch)."""
+        os.makedirs(os.path.join(self.root, ".lab"), exist_ok=True)
+        with open(os.path.join(self.root, ".lab", "technical.log"), "a", encoding="utf-8") as f:
+            f.write(f"[{now_iso()}] {text}\n")
 
     def _system_thread(self):
         """Root message for events that belong to no thread (author 'dispatcher')."""
