@@ -1,38 +1,39 @@
 # STATE — QRL-Lab strategic handoff
 <!-- Read first. ≤ 8 KB / 150 lines. Facts with pointers. Full previous text (verbatim, same
      line numbers as cited below as «A:n»): docs/archive/STATE_2026-11-06_before_B6.md. Older: docs/archive/STATE_2026-10-30_before_J170.md -->
-Last update: 2026-11-07 · Codex · J395. Previous: `docs/archive/STATE_2026-11-07_before_J395.md` (verbatim).
+Last update: 2026-11-10 · J457 (c4 Φάση 0). Previous (verbatim): `docs/archive/STATE_2026-11-10_before_J457.md`.
 ## 1. Goal now
 - PhD paper: hybrid quantum–classical extension of the DInos autoscaler; simulation first, then real cluster. **CCGrid abstract 24/11/2026**; remaining: Poisson experiments → quantum additions → new experiments → writing. Quantum work PAUSED (`docs/rules/paused.md`); order and start decided by the researcher in the dashboard (plan §1).
-- Cycle 2 (triggered 29/10, R-20261028-001): all models + DRe-SCale LSTM-PPO baseline, noisy Poisson microservice workload, Claude/Codex branches (`docs/cycle2_plan.md`, `docs/expert/`).
+- Cycle 2 (R-20261028-001): all models + DRe-SCale baseline, noisy Poisson workload, Claude/Codex branches (`docs/cycle2_plan.md`).
 ## 2. In progress
-- **J383 / M-20261107-005:** supervisor `tools/supervisor.py` (script-only, νέα αρχεία + `driver.py resume`): ειδοποίηση άμεσα + ασφαλής αυτόματη συνέχιση (max 2, ίδιο εγκεκριμένο spec), 87 tests pass, Codex APPROVE (3 γύροι, `.lab/j383/`). Κανόνες `docs/rules/supervisor.md`. ΕΝΕΡΓΟΠΟΙΗΘΗΚΕ 7/11 13:16 UTC (R-20261107-004, J387): transient timer `qrl-supervisor`, ανά 2 λεπτά, cores 4-7· δεν επιβιώνει reboot. Χωρίς phone push.
-- **J377:** monitors, 22 tests + Claude review: `.lab/j377/REPORT.md`. J394: 6ωρο timer ενεργό, waiter F-B θέλει host stop· `.lab/j395/REPORT.md`.
-- **J352 / R-20261106-002(δ):** offline drafts `real/infra-draft/` (Redis YAML, namespace `qrl-calib`, seeded RESP schedule, runbook); Codex: αποδοχή μόνο ως draft (`.lab/j352/GATES.md`, `codex_review_round2.md`). Χωρίς cluster· calibration PAUSED.
-- **J351 / R-20261106-002(γ):** `docs/quantum_design_v1.md`: 4 Quantum Dinos V.2 (+transfer) παραλλαγές, parameter-matched controls· design-only, quantum PAUSED (`.lab/j351/`).
-- R-20261106-001 / J343: εγκρίθηκε η Πρόταση 2· Redis αντίγραφο στο `code/real/` (173 υπάρχοντα αρχεία ίδια), K8s στο `code/real/k8s/` (6 νέα). SHA-256 επαλήθευση 179 αρχείων: `code/real/COPY_MANIFEST.json`, προέλευση/όρια `code/real/PROVENANCE.md`. Originals read-only, χωρίς cluster/run· calibration παραμένει PAUSED.
-- **v0.5.1:** B0–B7 merged 6/11 (75c56e2), governor ON, dispatcher/dashboard restarted. Infrastructure-only freeze; research continues. Issues/rollback: `CHANGELOG_v05.md`; deviations: `docs/V051_changes_from_original_plan.md`. Baseline: 24 failures (`.lab/backup-v051-20261105/`); merge requires same set.
-- **J341 council C341 (M-20261106-011)**: Opus+Astra converged plan to 9/11 on poisson_ms (W screening → freeze → F 10 seeds × 39,936 ticks + HPA → test12 once, integrity gate), new control `derp_ddqn`; card **R-20261106-002** (~350 CPU-h envelope, code work, quantum design-only, Opus workers). LSTM: Double DQN· DERP: max target (`.lab/c341/ddqn_findings.md`, `.lab/c341/council_record.md`). Council record only.
-- **J380 / C345 W DONE (7/11):** 55/55, 0 errors, 41,4 of 80,56 CPU-h; M-091 = watchdog race, fixed + test. Selection + F draft: `.lab/j380/`, card R-20261107-001 (approved, Πρόταση 1).
-- **J381 / R-20261107-001:** F extension DONE, δεν ξεκίνησε τίποτα: `tools/c345/build_f.py` → `.lab/j381/F-spec-A/B.json` (2 parents × 50 tasks, 135,2 CPU-h each, seeds 18600-09, val only), driver `f_from_w` mode, 37 tests pass· επιλογή W 10/10. Review + whole-spec check: `.lab/j381/codex_review.md`. Ξεχωριστό `QRL_C345_OUT` ανά γονέα.
-- Older experiments: A:20-43, `docs/EXPERIMENTS.md`; W history: `.lab/j370/REPORT.md`.
+- **C455 / cycle 4 (M-20261110-030):** οδηγίες `Mds με νέες οδηγίες Κώστα/QRL-Lab_cycle4_instructions.md`, ένας κλάδος c4 (`code-poisson-c4/`), Poisson ως 13/11· Φάσεις 0-2 sim προεγκεκριμένες, G2/τελικός έλεγχος θέλουν ΟΚ. Jobs J456 (φάκελος «Αποτελέσματα 2ου Κύκλου Πειραμάτων Poisson»), J457 (Φάση 0), J458 (υλοποίηση v2, Codex). Briefs `.lab/c455/`.
+- **J458 / c4 ΣΤΑΣΗ πριν από υλοποίηση:** διαψεύστηκε η [Υ] §1.1: ο παλιός `hpa_demand` ήδη περιορίζεται σε ±1 μέσω `pms_reference.py:30–33,49`, με EWMA αφίξεων. Το §0 απαιτεί απόφαση ερευνητή· ενημερώθηκε C455. Δεν δημιουργήθηκαν c4 copy/branch, specs ή runs· `docs/c4_implementation_blocker.md`, `.lab/c4/implementation/GATES.md` (M-20261110-030). Commit blocked: read-only `.git/index.lock`.
+- **J457 / c4 Φάση 0:** 0.1 έγινε (ο κανόνας είναι ήδη ±1, clip μόνο στο Dinos clip_frac 0,988, ε V.2 δεν φτάνει floor), 0.5 draft· 0.2 script+draft spec χωρίς approved request id, 0.3/0.4 όχι· G0 προσωρινό κλάδος 2. `.lab/c4/phase0/REPORT.md`.
+- **J446 / J444:** ENV-cycle3 n0–177 175 done + 3 σκόπιμα failed selftests· J444 n170–177 eval-only seed19100· λείπει RPPO adaptation. `.lab/j446/{summary.json,REPORT.md}` (λεπτομέρειες στο archive before_J457).
+- **T ΟΛΟΚΛΗΡΩΘΗΚΕ (R-20261110-001, J450):** 40/40 exit0, Dinos / Dinos+Transfer V.2 × spiky/shift ×10 seeds 19200–19209, val. V.2−Dinos 95%CI: spiky[-10208,+12060], shift[-27571,-4136]· exploratory. `.lab/j450/T-summary.json`.
+- **J436/J442 (batch S ΤΕΛΕΙΩΣΕ 10/11):** 7 arms×10 seeds, spiky val, 70/70 exit0. Val: dinos 191,6k±7,1k, v2 188,1k±12,0k, lstm_transfer 179,9k, lstm 164,6k, derp 153,6k, derp_hist10/rppo ασταθή· όλα < tuned HPA 201,9k, oracle 222,7k. Paired v2−dinos −3,5k±16,9k. `.lab/j442/summary.json`· test13 μόνο με frozen spec/review.
+- **J427:** F1–F3 draft (`tools/envelope.py`, `docs/envelopes/cycle3.json`, M-20261109-043), εκκρεμεί review/restart από ερευνητή. Διάγνωση: `.lab/c426/`· παλιά κατάσταση στο αρχείο πριν J446. Υποδομή μόνο fixes.
+- **J383:** supervisor ΕΝΕΡΓΟ (`docs/rules/supervisor.md`). **J352/J343:** offline drafts `real/infra-draft/`, `docs/quantum_design_v1.md`· PAUSED.
+- **v0.5.1:** B0–B7 merged 6/11, governor ON; freeze μόνο υποδομής. Issues `CHANGELOG_v05.md`. Baseline 24 failures (`.lab/backup-v051-20261105/`).
+- **Cycle2 poisson_ms:** W (7/11, `.lab/j380/`), F 10 seeds (`.lab/c401/RESULTS.md`), test12 103/103 (M-20261109-040, SPENT). Council `.lab/c341/`· παλιότερα A:20-43.
+- **J444/J450 PDFs:** `reports/2026-11-10-models-report/report.pdf`, `reports/2026-11-10-goals-experiments/report.pdf` (review.md, verification.json, 327f0d1). Αρχεία μόνο μέσω 📁 Αρχεία (M-20261110-014).
 ## 3. Waiting for the researcher
-- **J408: F-B ΤΕΛΕΙΩΣΕ (8/11 ~18:30 UTC)**, 50/50 done, 10 seeds×10 arms. Πίνακας 10 seeds (val, χωρίς claim): `.lab/c401/RESULTS.md`, `f_analysis.json`. 8 μοντέλα +53..+69χιλ. από HPA, κανένα δεν νικά tuned HPA (211,8χιλ.· καλύτερο Dinos 200χιλ.)· DERP αρχικό ≈HPA, rppo χειρότερο. Integrity gate PASS 14/14 (J410, `.lab/c409/INTEGRITY.md`). Επόμενο: test12 — ΜΠΛΟΚΑΡΕΙ από κώδικα (harness κλειδώνει test12· δεν υπάρχει eval-from-weights loader)· draft freeze `.lab/c409/test12_freeze_draft.md` + Codex review· χρειάζεται engineer job (loader + val-parity gate), μετά hashed spec μέσω launch_run.py. Παλιά attempts: `tools/c345/fb_restart.py`, `.lab/c345f-b/superseded.json`.
-- v0.5.1: dashboard live message + approved small `sim` pending (B3).
-- R-20261101-005 and the stage-A remainder: new card/approval needed; nothing starts without it (A:53). R-20261031-001 ran to 2/11 (A:54).
-- R-20261030-004/005 recovery of waves 6-7 needs a host-visible check first (A:55-56, `.lab/j236/`); R-012 dispatcher restart done 6/11 (live token-saving still unverified, A:58); results-retention policy open (A:59); branch cleanup dinos-tuning-c19/-c20/-c22/-c23 needs joint review + OK (A:60).
+- R-20261110-001 εγκρίθηκε και T40/40 ολοκληρώθηκε (M-20261110-016/017), ανάλυση J450. Για νέο τελικό test χρειάζεται ξεχωριστό frozen spec/review. Εκκρεμεί επανεκκίνηση dispatcher για F3 (M-20261109-043).
+- J421/J423: test12 ολοκληρώθηκε (103/103). Πύλη: μη διαβάζεις test12 ξανά (ledger `.lab/test12_ledger/`).
+- Ανοιχτά (παλιά): R-20261101-005/stage-A (A:53), recovery κυμάτων 6-7 (A:55-56), results-retention (A:59), cleanup branches c19/c20/c22/c23 (A:60).
 ## 4. Next steps (in order)
-1. **B7 freeze until the abstract (24/11) — «αφορά μόνο υποδομή (dispatcher, dashboard, tools, κανόνες)· η έρευνα, τα πειράματα και το paper συνεχίζουν κανονικά».** Infrastructure: only fixes. Known issues: `CHANGELOG_v05.md`.
+1. **B7 freeze until the abstract (24/11) — «αφορά μόνο υποδομή (dispatcher, dashboard, tools, κανόνες)· η έρευνα, τα πειράματα και το paper συνεχίζουν κανονικά».** Infrastructure: only fixes. Issues: `CHANGELOG_v05.md`.
 2. Researcher decides stage 2 / remaining stage-A arms (A:24-25); every run only via `launch_run.py` with an approved frozen spec.
 3. Keep `docs/EXPERIMENTS.md` per batch; flaky `tests/test_lab.py::test_sandbox`.
 ## 5. Key facts (pointer each)
+- **ENV-cycle3 / J438+J431 (9/11):** shift val 10×5000: HPA original 166699,14, tuned 224953,91, oracle 238595,64, DERP 188479,47, Dinos 211705,68 (−5,89% vs tuned)· 90 eval-only checkpoints, 3 σκόπιμα failed selftests· περιγραφικά, val-selected, όχι claim, όχι test. Spiky smoke DERP s19100 mean 179021,94 (J436 κάνει το πλήρες S). Αναλυτικά `.lab/j438/{summarize.py,summary.json,REPORT.md}`, `.lab/j431/REPORT.md`· Claude APPROVE P-20261109-225832-b5d0.
 - Cycle1 finals test11 R-20261023-001/c24c, test10 R-20261022-005/c18c: `.lab/tuning/cycles/c24_test11_result.md`, `c21_test10_result.md`; test10/11 are spent single-use. Recipe `.lab/tuning/cycles/c24_freeze.md`. Not cycle2 targets (M-20261029-017).
 - The 17x is a protocol artefact (DERP eps=1); original HPA reacts to independent random CPU/mem; oracle_Dstep is look-ahead, not an optimal bound (`docs/paper_notes.md` §6).
 - Names: LSTM / LSTM+transfer / Dinos / Dinos+Transfer V.2 (always the full «Dinos+Transfer V.2»); `derp` original / `derp_hist10` enhanced (M-20261022-007).
 - Stage results (val only, large variance, NO claim): `.lab/j299/stageA_summary.json`, `.lab/j312/summary.json`, `.lab/j289/summary.json`, `docs/EXPERIMENTS.md`.
 - Real cluster/calibration PAUSED (`docs/rules/paused.md`). Governor/usage rules: plan §5, `tools/governor.py`.
 ## 6. Do not repeat
-- Dropped in the loop: sim_v2 as primary, coupled env, D=15/20 delays, noise15_multispike_d5, spike300_d7/multispike_d5 envs, noise for B1, dueling, PER, arch a12, c23 (`docs/tuning_experiments.md`).
+- Dropped in the loop: sim_v2 as primary, coupled env, D=15/20 delays, noise for B1, dueling, PER, a12, c23 (`docs/tuning_experiments.md`).
 - Never DERP eps=1 or reuse spent test splits. Never ask approval for `sqlite3` (C2: `docs/researcher_requirements.md`; J360 not retried). J362: approved worktree retry blocked by read-only `.git`; no tests ran (`.lab/j362/retry.md`). R-003 without spec/hash cannot apply (A:80).
 - No hourly in-session crons (A:82-84). `~/.local/bin` must be on PATH for services (A:85). Do not pin the coordinator to CPUs (A:87).
 ## 7. Standing rules (full text: `docs/claude-memory/`, A:89-104)
