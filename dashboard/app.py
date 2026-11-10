@@ -79,6 +79,7 @@ import tutorials_view  # noqa: E402
 import system_view  # noqa: E402
 import event_tail  # noqa: E402
 from uploads import UploadError, attachment_paths  # noqa: E402
+from uploads import MAX_BYTES as MAX_UPLOAD_BYTES, sanitize_filename, _free_path as _free_upload_path  # noqa: E402
 
 LAB = os.path.join(ROOT, ".lab")
 DB_PATH = os.path.join(LAB, "lab.db")
@@ -2324,6 +2325,20 @@ with tab_files:
         except ValueError:
             ss["fb_line"] = None
     ss.setdefault("fb_path_in", file_view.ROOTS[0])
+    with st.expander("⬆️ Ανέβασμα αρχείων στο «Mds με νέες οδηγίες Κώστα»"):
+        _upl = st.file_uploader("Διάλεξε αρχεία", accept_multiple_files=True, key="fb_md_upl")
+        if _upl and st.button("Αποθήκευση", key="fb_md_save"):
+            _d = os.path.join(ROOT, "Mds με νέες οδηγίες Κώστα")
+            os.makedirs(_d, exist_ok=True)
+            for _f in _upl:
+                _data = _f.getvalue()
+                if len(_data) > MAX_UPLOAD_BYTES:
+                    st.error(f"{_f.name}: πολύ μεγάλο")
+                    continue
+                _p = _free_upload_path(_d, sanitize_filename(_f.name))
+                with open(_p, "wb") as _o:
+                    _o.write(_data)
+                st.success("Αποθηκεύτηκε: " + _p.replace(os.path.expanduser("~"), "~"))
     fc1, fc2 = st.columns([5, 1])
     fc1.text_input("Διαδρομή (απόλυτη ή ~/…)", key="fb_path_in")
     hidden = fc2.toggle("Κρυφά αρχεία", value=False, key="fb_hidden")
