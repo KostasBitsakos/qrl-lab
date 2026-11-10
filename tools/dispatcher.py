@@ -1048,13 +1048,12 @@ class Dispatcher:
                     if urgent:
                         if self.lab.conn.execute("SELECT 1 FROM requests WHERE instr(body, ?)>0", (mark,)).fetchone():
                             continue
-                        self.lab.ask("question", f"{job}: χρειάζεται απόφαση — {title}",
-                                     f"Ο worker {job} («{title}») ζητά απόφαση:\n- {m['body']}\n\n{mark}",
+                        self.lab.ask("question", f"Χρειάζεται η απόφασή σου: {title}",
+                                     f"Μια εργασία που τρέχει («{title}») χρειάζεται απόφασή σου:\n- {m['body']}\n\n{mark}",
                                      author="dispatcher", scope="other", thread_id=tid)
-                    elif not self.lab.conn.execute("SELECT 1 FROM messages WHERE thread_id=? AND instr(body, ?)>0",
-                                                   (tid, mark)).fetchone():
-                        self.lab.post("dispatcher", f"Σημείωση από {job} («{title}»):\n- {m['body']}\n\n{mark}", tid,
-                                      kind="status")
+                    elif mark not in self._tech_log_text():
+                        # J449: routine worker notes are internal: technical log only, never the researcher thread.
+                        self._tech_log(f"worker note {job} («{title}»): {m['body']} {mark}")
             self.work.mark_read([m["id"] for m in msgs])
         self.dd.conn.execute("INSERT OR REPLACE INTO settings(key, value, updated_at, updated_by)"
                              " VALUES ('escalation_last_wake',?,?,'dispatcher')", (str(time.time()), now_iso()))
@@ -1150,6 +1149,13 @@ class Dispatcher:
             txt = run_events.summary(rid, runs, ref, os.path.join(self.root, ".lab"))
             self._tech_log(txt if mark in txt else txt + "\n" + mark)
         self.dd.mark_notified("runs", ref)
+
+    def _tech_log_text(self):
+        try:
+            with open(os.path.join(self.root, ".lab", "technical.log"), encoding="utf-8") as f:
+                return f.read()
+        except OSError:
+            return ""
 
     def _tech_log(self, text):
         """F3: technical, not researcher-facing, events (run-id lists, end of batch)."""

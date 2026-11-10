@@ -350,9 +350,9 @@ def test_decisions_and_run_events():
     n_claude = len(calls("claude"))
     assert d.once() is None, "a clean batch is summarised by a script: no coordinator task"   # B3
     assert len(calls("claude")) == n_claude
-    body = thread_bodies(db, root)[-1]
+    body = open(os.path.join(d.root, ".lab", "technical.log"), encoding="utf-8").read()   # F3: technical log
     assert "new-1" in body and "old-1" not in body and "[run-summary " in body
-    assert d.once() is None and thread_bodies(db, root)[-1] == body
+    assert d.once() is None and open(os.path.join(d.root, ".lab", "technical.log"), encoding="utf-8").read() == body
     add_run("new-2", rid, "failed")                      # a failed batch still wakes the coordinator, once
     db.conn.execute("UPDATE runs SET exit_code=1 WHERE run_id='new-2'")
     queue("claude", {"mode": "ok", "text": "Τα αποτελέσματα: ..."})
@@ -882,7 +882,9 @@ def test_approved_sim_spec_is_launched_by_script():
     runs = lambda: [dict(r) for r in db.conn.execute("SELECT entry, status FROM runs WHERE request_id=?", (rid,))]
     assert sorted(r["entry"] for r in runs()) == [0, 1], runs()           # max_parallel 2
     assert db.request(rid)["decision_delivered"] == 1
-    assert any("ξεκίνησε 2 από 3" in b for b in thread_bodies(db, root))
+    assert not any("ξεκίνησε" in b for b in thread_bodies(db, root)), "F3: no auto-message in the researcher thread"
+    tl = open(os.path.join(d.root, ".lab", "technical.log"), encoding="utf-8").read()
+    assert "started 2/3" in tl
     d.once()
     assert len(runs()) == 2, "no duplicate start while both slots are busy"
     db.conn.execute("UPDATE runs SET status='done', exit_code=0 WHERE request_id=? AND entry=0", (rid,))  # a slot frees up
@@ -917,12 +919,13 @@ def test_clean_batch_summary_by_script_exactly_once():
     add("ok-a", "R-script-ok", "done", 0)
     add("ok-b", "R-script-ok", "done", 0)
     assert not [x for x in d._candidates() if x.get("event_ref", "").startswith("R-script-ok:")], "clean batch: no model"
-    posts = d.lab.conn.execute("SELECT body FROM messages WHERE author='dispatcher' AND body LIKE '%[run-summary R-script-ok:%'").fetchall()
-    assert len(posts) == 1 and "ok-a" in posts[0]["body"] and "ok-b" in posts[0]["body"]
+    tl = lambda: open(os.path.join(d.root, ".lab", "technical.log"), encoding="utf-8").read()
+    assert tl().count("[run-summary R-script-ok:") == 1 and "ok-a" in tl() and "ok-b" in tl()   # F3: technical log, not the thread
+    assert not d.lab.conn.execute("SELECT 1 FROM messages WHERE body LIKE '%[run-summary R-script-ok:%'").fetchone()
     assert not [x for x in d._candidates() if x.get("event_ref", "").startswith("R-script-ok:")]
     d.dd.conn.execute("DELETE FROM notified")   # restart that lost the notified mark: the marker in the thread still holds
     d._candidates()
-    assert d.lab.conn.execute("SELECT COUNT(*) FROM messages WHERE body LIKE '%[run-summary R-script-ok:%'").fetchone()[0] == 1
+    assert tl().count("[run-summary R-script-ok:") == 1
     add("bad-a", "R-script-bad", "done", 0)
     add("bad-b", "R-script-bad", "failed", 1)
     assert len([x for x in d._candidates() if x.get("event_ref", "").startswith("R-script-bad:")]) == 1, "failure -> model"
@@ -1072,9 +1075,10 @@ def test_escalation_debounce():
     n0 = len(calls("claude")) + len(calls("codex"))
     esc = lambda: [i for i in d._candidates() if i["kind"] == "escalation"]
     reqs = lambda: d.lab.conn.execute("SELECT * FROM requests WHERE author='dispatcher' AND title LIKE ?",
-                                      (a + ":%",)).fetchall()
-    notes = lambda: d.lab.conn.execute("SELECT body FROM messages WHERE author='dispatcher' AND body LIKE ?",
-                                       (f"%{a}%",)).fetchall()
+                                      ("Χρειάζεται η απόφασή σου%",)).fetchall()
+    def notes():   # J449: routine worker notes go to the technical log, one line per note
+        return [{"body": l} for l in d._tech_log_text().splitlines() if "worker note" in l]
+    assert not d.lab.conn.execute("SELECT 1 FROM messages WHERE body LIKE '%Σημείωση από%'").fetchone()
     w.say(a, "coordinator", "progress 1")
     assert esc() == [] and len(notes()) == 1, "routine note: a status line by script, no coordinator task"
     w.say(a, "coordinator", "progress 2")

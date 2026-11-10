@@ -85,3 +85,5 @@ Active rule texts live in `docs/rules/`; if this file and a rule file disagree, 
 ## I. How to use
 `grep -i "<topic>" docs/INDEX.md` finds this file. Before asking him something, grep it here (e.g. `grep -n "approval" docs/researcher_requirements.md`).
 Add a line (and an M- pointer) only for NEW standing instructions; mark old ones superseded rather than deleting.
+
+- (M-20261110-018) Replies to the researcher are plain language, ≤8 lines, no ids/paths/jargon except one pointer to the 📁 Αρχεία tab. See `docs/rules/researcher_messages.md`.

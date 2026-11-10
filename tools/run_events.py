@@ -22,21 +22,21 @@ def all_ok(runs):
 
 
 def summary(rid, runs, ref, lab_dir=None):
-    lines = [f"Κώστα, τέλος παρτίδας για το αίτημα {rid}: {len(runs)} run, όλα ολοκληρώθηκαν (exit 0).", ""]
-    for r in sorted(runs, key=lambda r: (r["entry"], r["attempt"])):
-        lines.append(f"- {r['run_id']} · entry {r['entry']} · attempt {r['attempt']} · {r['name'] or '-'} · {r['status']}"
-                     f" · {r['run_dir']}")
+    lines = [f"Κώστα, η παρτίδα τελείωσε: και τα {len(runs)} πειράματα ολοκληρώθηκαν χωρίς σφάλμα."]
+    full = ["Technical list:"] + [f"- {r['run_id']} · entry {r['entry']} · attempt {r['attempt']} · {r['name'] or '-'}"
+                                  f" · {r['status']} · {r['run_dir']}" for r in sorted(runs, key=lambda r: (r["entry"], r["attempt"]))]
     try:
         agg = S.aggregate_by_seed(S.collect(rid, lab_dir or S.LAB))
     except Exception:  # metrics are optional: the list above is still the summary
         agg = {}
     if agg:
-        lines += ["", "| mode | model | seeds | mean reward (sd) | mean VMs |", "|---|---|---|---|---|"]
+        lines += ["", "Μέσο reward ανά μοντέλο και workload (σε παρένθεση η διακύμανση):", "",
+                  "| workload | μοντέλο | seeds | μέσο reward (sd) | μέσα VMs |", "|---|---|---|---|---|"]
         for mode in sorted(agg):
             for model, a in sorted(agg[mode].items()):
                 vms = "-" if a["vms_mean"] is None else f"{a['vms_mean']:.2f}"
                 lines.append(f"| {mode} | {model} | {a['n_seeds']} | {a['reward_mean']:,.0f} ({a['reward_sd']:,.0f}) | {vms} |")
     else:
-        lines += ["", "Δεν βρέθηκαν μετρικές επεισοδίων στα run dirs· δες docs/EXPERIMENTS.md."]
-    lines += ["", "Αυτή η σύνοψη γράφτηκε από script, χωρίς κλήση μοντέλου. Ζήτα ανάλυση αν τη θέλεις.", "", marker(ref)]
-    return "\n".join(lines)
+        lines += ["", "Δεν βρέθηκαν ακόμα αριθμητικά αποτελέσματα· θα τα δεις όταν γίνει η ανάλυση."]
+    lines += ["", "Ζήτα μου ανάλυση αν τη θέλεις. Αρχεία: καρτέλα 📁 Αρχεία.", "", marker(ref)]
+    return "\n".join(lines) + "\n\n" + "\n".join(full)
