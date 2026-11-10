@@ -1,0 +1,10 @@
+{
+  "pages": 8,
+  "pdf_sha256": "6d60e827cede47e329c32d7df70fde7b54ac9a8832078a05c8aa986367fcb615",
+  "t_outputs_verified": 40,
+  "gates_met": 3,
+  "gates_unmet": 0,
+  "gates_abandoned": 0,
+  "review": "APPROVE",
+  "git_commit": "blocked: .git read-only"
+}
