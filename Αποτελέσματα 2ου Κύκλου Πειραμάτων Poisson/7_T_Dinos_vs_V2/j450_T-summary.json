@@ -1,0 +1,401 @@
+{
+  "request": "R-20261110-001",
+  "attempts": 40,
+  "groups": {
+    "poisson_ms_shift": {
+      "dinos": {
+        "n": 10,
+        "mean": 215452.5512689747,
+        "sd": 7397.641532619917,
+        "iqm": 216896.02415301325,
+        "per_seed": {
+          "19200": 211764.33742718428,
+          "19201": 221017.87265152024,
+          "19202": 212485.73798629185,
+          "19203": 219450.0635957325,
+          "19204": 219920.07967337687,
+          "19205": 197674.46001893232,
+          "19206": 214049.33500108644,
+          "19207": 221816.79449983392,
+          "19208": 214308.83717596444,
+          "19209": 222037.99465982424
+        },
+        "slo_viol_rate": 0.171738,
+        "p95_latency": 1.480067326747031,
+        "mean_pods": 9.233634,
+        "pods_changes": 899.59,
+        "drops": 24199.409365512634,
+        "served": 405874.7906344874,
+        "pretrain_cpu_s_sum": 25.297122736000002,
+        "target_train_cpu_s_sum": 36083.28850606,
+        "eval_cpu_s_sum": 1043.7522152449997,
+        "cpu_s_sum": 37152.342915584,
+        "wall_s_sum": 37201.106887578964,
+        "pod_ticks": 46168.17,
+        "mean_ci95": [
+          206561.4088767567,
+          224292.5337746136
+        ],
+        "iqm_ci95": [
+          207790.4552317668,
+          225567.4353986811
+        ]
+      },
+      "v2": {
+        "n": 10,
+        "mean": 200462.82545741383,
+        "sd": 17458.701494997134,
+        "iqm": 204602.72070613835,
+        "per_seed": {
+          "19200": 159354.4077333062,
+          "19201": 197905.67574857306,
+          "19202": 204357.6708318495,
+          "19203": 216945.18766622478,
+          "19204": 205273.54900049977,
+          "19205": 215130.02283182018,
+          "19206": 204576.45422650976,
+          "19207": 183600.04565211202,
+          "19208": 202288.0801816361,
+          "19209": 215197.16070160674
+        },
+        "slo_viol_rate": 0.135118,
+        "p95_latency": 1.5286635279880567,
+        "mean_pods": 10.483688,
+        "pods_changes": 671.89,
+        "drops": 25501.81727129309,
+        "served": 404572.3827287069,
+        "pretrain_cpu_s_sum": 16615.726547777,
+        "target_train_cpu_s_sum": 16503.48025069,
+        "eval_cpu_s_sum": 1054.1784240390002,
+        "cpu_s_sum": 34173.391168705,
+        "wall_s_sum": 34222.417348861694,
+        "pod_ticks": 52418.44,
+        "mean_ci95": [
+          186228.61721356143,
+          212868.77749403619
+        ],
+        "iqm_ci95": [
+          189306.16151927502,
+          214945.82449420038
+        ]
+      },
+      "v2_minus_dinos": {
+        "mean": -14989.725811560897,
+        "sd_paired": 19342.42303767505,
+        "mean_ci95": [
+          -27570.612379000882,
+          -4135.5118775245855
+        ],
+        "iqm": -12293.303446874896,
+        "iqm_ci95": [
+          -25662.31336479251,
+          -3008.597935983802
+        ],
+        "p_improvement": 0.181,
+        "p_improvement_ci95": [
+          0.004,
+          0.402
+        ]
+      }
+    },
+    "poisson_ms_spiky": {
+      "dinos": {
+        "n": 10,
+        "mean": 185757.7064344455,
+        "sd": 18590.92803127348,
+        "iqm": 190200.7537345867,
+        "per_seed": {
+          "19200": 184080.34131527733,
+          "19201": 187635.15153525668,
+          "19202": 196844.94062373927,
+          "19203": 201470.17680379885,
+          "19204": 190832.22599057757,
+          "19205": 182702.73518619555,
+          "19206": 135503.95717146943,
+          "19207": 189193.04481995245,
+          "19208": 193291.8604408282,
+          "19209": 196022.6304573596
+        },
+        "slo_viol_rate": 0.152344,
+        "p95_latency": 1.6838645687725635,
+        "mean_pods": 8.887089,
+        "pods_changes": 885.18,
+        "drops": 10888.719282777225,
+        "served": 354273.38071722275,
+        "pretrain_cpu_s_sum": 27.48446414,
+        "target_train_cpu_s_sum": 32963.692533011,
+        "eval_cpu_s_sum": 1489.233075867,
+        "cpu_s_sum": 34480.48759571,
+        "wall_s_sum": 34517.00509309769,
+        "pod_ticks": 44435.445,
+        "mean_ci95": [
+          172240.40762746215,
+          196866.45567488068
+        ],
+        "iqm_ci95": [
+          179616.69521649755,
+          198355.80980723767
+        ]
+      },
+      "v2": {
+        "n": 10,
+        "mean": 185457.48915784855,
+        "sd": 10424.62486001974,
+        "iqm": 186416.18511434598,
+        "per_seed": {
+          "19200": 171694.91332593228,
+          "19201": 197138.81661009495,
+          "19202": 187450.84808578002,
+          "19203": 199489.0011967605,
+          "19204": 193580.29753232002,
+          "19205": 175003.25028674645,
+          "19206": 182454.92260350552,
+          "19207": 189160.4419352375,
+          "19208": 188722.93903767358,
+          "19209": 169879.46096443458
+        },
+        "slo_viol_rate": 0.144971,
+        "p95_latency": 1.67164350959423,
+        "mean_pods": 8.72822,
+        "pods_changes": 874.58,
+        "drops": 11420.12292107571,
+        "served": 353741.97707892425,
+        "pretrain_cpu_s_sum": 14380.047653405,
+        "target_train_cpu_s_sum": 13582.83731123,
+        "eval_cpu_s_sum": 1366.3621717289998,
+        "cpu_s_sum": 29329.313191673,
+        "wall_s_sum": 29344.06837940216,
+        "pod_ticks": 43641.1,
+        "mean_ci95": [
+          176884.53528410103,
+          194310.68466259475
+        ],
+        "iqm_ci95": [
+          175384.784927623,
+          195935.5450757131
+        ]
+      },
+      "v2_minus_dinos": {
+        "mean": -300.2172765969532,
+        "sd_paired": 19179.154599569447,
+        "mean_ci95": [
+          -10208.40039174147,
+          12059.814867503575
+        ],
+        "iqm": -3784.5686202407232,
+        "iqm_ci95": [
+          -13041.889728933615,
+          4815.799103190597
+        ],
+        "p_improvement": 0.417,
+        "p_improvement_ci95": [
+          0.2319875,
+          0.5940124999999998
+        ]
+      }
+    }
+  },
+  "sources": [
+    {
+      "run": "20261110-113035-R-20261110-001-e0-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_shift-dinos-s19200.json",
+      "sha256": "576834ec71b5c53c92f3302dcd05cfc3cace367ce0ce77093496219511e2f586"
+    },
+    {
+      "run": "20261110-113035-R-20261110-001-e1-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_shift-dinos-s19201.json",
+      "sha256": "864d65576c889929730eb13ccf940b403f20f0b5b7b664cbae2cc2f16a4cd96e"
+    },
+    {
+      "run": "20261110-113035-R-20261110-001-e2-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_shift-dinos-s19202.json",
+      "sha256": "4a1bc7c8fcc5b3c0401069752410603f0325d6e1f3fde4752c243e822b4fcba0"
+    },
+    {
+      "run": "20261110-113035-R-20261110-001-e3-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_shift-dinos-s19203.json",
+      "sha256": "7e5ddace7799a8a5bf079cfa9c35263cdf7236de416078062599660e371f692c"
+    },
+    {
+      "run": "20261110-113035-R-20261110-001-e4-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_shift-dinos-s19204.json",
+      "sha256": "4dabdd38a73936582790e45876388b477401ae45d3a717778bc64623a7e05fdc"
+    },
+    {
+      "run": "20261110-113035-R-20261110-001-e5-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_shift-dinos-s19205.json",
+      "sha256": "297ea6267889818eebae0ec29f178d221233a371a946ba3efcd4f2b6e4e27ff7"
+    },
+    {
+      "run": "20261110-113035-R-20261110-001-e6-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_shift-dinos-s19206.json",
+      "sha256": "31776d68559e9110525c3d9d28c0e6f0ee056c119096b345cb9a550c5f2c7e2b"
+    },
+    {
+      "run": "20261110-113035-R-20261110-001-e7-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_shift-dinos-s19207.json",
+      "sha256": "da81c7fae1fde963f3c83a680d83b904701f688bbb73cbdc7b5fccde63f7dc34"
+    },
+    {
+      "run": "20261110-113036-R-20261110-001-e10-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_shift-v2-s19200.json",
+      "sha256": "b98fdcface2ea1b086b87fcdade155d6783e850243e28f43893792049d842840"
+    },
+    {
+      "run": "20261110-113036-R-20261110-001-e11-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_shift-v2-s19201.json",
+      "sha256": "d148c6b9d9be68e8be97bf585f9efaba38c230585b4492866bba3281b6cabe65"
+    },
+    {
+      "run": "20261110-113036-R-20261110-001-e12-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_shift-v2-s19202.json",
+      "sha256": "5b0a34be55f9aa407738e5b11bde6236051f4ffce450476348c330e3a8785086"
+    },
+    {
+      "run": "20261110-113036-R-20261110-001-e13-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_shift-v2-s19203.json",
+      "sha256": "339c4779338d806f14428c098cbdde5e8d1e8719b7d60ef1ce803f87251addfc"
+    },
+    {
+      "run": "20261110-113036-R-20261110-001-e14-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_shift-v2-s19204.json",
+      "sha256": "05d0a22192a75e4548275109bfea1ac5afb0f689b11e2dc153f653a953aa168d"
+    },
+    {
+      "run": "20261110-113036-R-20261110-001-e15-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_shift-v2-s19205.json",
+      "sha256": "9d848c47853eb36f9b4c03fd889f4fbd8aa2d9f6cda824fd0197cfc85c41763f"
+    },
+    {
+      "run": "20261110-113036-R-20261110-001-e16-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_shift-v2-s19206.json",
+      "sha256": "9900c87b29151fa1aef4c2cd18e86ae8c86a85dccad2034b498e063592d842ea"
+    },
+    {
+      "run": "20261110-113036-R-20261110-001-e17-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_shift-v2-s19207.json",
+      "sha256": "0bb19090589546ff6de4d97b3c103deb5ccb7fa81eaf3bfa6feb1f9ea51f21cd"
+    },
+    {
+      "run": "20261110-113036-R-20261110-001-e18-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_shift-v2-s19208.json",
+      "sha256": "8710714b02ed0dc0162e01dfdde40c190af33632934e8d79bac121a74b4cefaf"
+    },
+    {
+      "run": "20261110-113036-R-20261110-001-e19-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_shift-v2-s19209.json",
+      "sha256": "8877cf2e9c46337c9b7c36290f1a6be03fcc35b4155d4ee0fb594594fccb9e6b"
+    },
+    {
+      "run": "20261110-113036-R-20261110-001-e20-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_spiky-dinos-s19200.json",
+      "sha256": "c935d5aa2831c458ca9d4adb10185a8900e33e560bd1a5f211a44bf4b004f82d"
+    },
+    {
+      "run": "20261110-113036-R-20261110-001-e21-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_spiky-dinos-s19201.json",
+      "sha256": "3df855368faf2c297d5058017196604eaf1737194f67a3fbab4ef3d9852aae5c"
+    },
+    {
+      "run": "20261110-113036-R-20261110-001-e22-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_spiky-dinos-s19202.json",
+      "sha256": "875d800834adf076ecdcfefe512f5965332df6c21421e6bc7c6171456bc746b3"
+    },
+    {
+      "run": "20261110-113036-R-20261110-001-e23-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_spiky-dinos-s19203.json",
+      "sha256": "92a5c4c738854b1d9c9bc0291d91076558a3467affb0651b313d5dfd37b29ae2"
+    },
+    {
+      "run": "20261110-113036-R-20261110-001-e8-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_shift-dinos-s19208.json",
+      "sha256": "847384dd40b1b84fd0ec1d32ac992b5c3e9c446b9a3445fa1c06f34935ae3139"
+    },
+    {
+      "run": "20261110-113036-R-20261110-001-e9-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_shift-dinos-s19209.json",
+      "sha256": "428a030174160b381c1150111957cb089c11f575630fbd0b48885ac2a75f4c94"
+    },
+    {
+      "run": "20261110-122717-R-20261110-001-e24-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_spiky-dinos-s19204.json",
+      "sha256": "dae7ab2258d5ce3b80c0b500985d3d2d3db0aa5b6f43530ffe21f4c1c032675f"
+    },
+    {
+      "run": "20261110-122731-R-20261110-001-e25-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_spiky-dinos-s19205.json",
+      "sha256": "e57fbfd4a59338852de13097c72f8289768205232f1bb44a771728339a99f56e"
+    },
+    {
+      "run": "20261110-122731-R-20261110-001-e26-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_spiky-dinos-s19206.json",
+      "sha256": "4146bd95383582afa1c9079a37c77a681def61d3dcccf2a2b2dfbd3a48ad153b"
+    },
+    {
+      "run": "20261110-122731-R-20261110-001-e27-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_spiky-dinos-s19207.json",
+      "sha256": "8b912fd366a08c942b9406e7f10b8707f3043094becb8ab65035d107b2036b13"
+    },
+    {
+      "run": "20261110-122748-R-20261110-001-e28-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_spiky-dinos-s19208.json",
+      "sha256": "ddcd648d34e8b49afed32628abf34f34cddbba843213aa1e3c88c8cd64afbc5d"
+    },
+    {
+      "run": "20261110-122748-R-20261110-001-e29-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_spiky-dinos-s19209.json",
+      "sha256": "d5667a01f4571fecc23fb6c1496dac75441ab1e40333dca9fa1805bdcb345cb1"
+    },
+    {
+      "run": "20261110-122753-R-20261110-001-e30-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_spiky-v2-s19200.json",
+      "sha256": "13541d8c2c5a1842576bfaa4a3ceb3031a09855a2e7067358c3c1a9e479e55fe"
+    },
+    {
+      "run": "20261110-122812-R-20261110-001-e31-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_spiky-v2-s19201.json",
+      "sha256": "ea40159995c9f1d19c9d231d5c53844b383ec07e5a1fdd4dd37a45b4d0b7c826"
+    },
+    {
+      "run": "20261110-122812-R-20261110-001-e32-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_spiky-v2-s19202.json",
+      "sha256": "2d0e286b539c7aa0a6c6fc0023fc5bf91696bd6526f9b78d05c22d351b29ca7a"
+    },
+    {
+      "run": "20261110-122812-R-20261110-001-e33-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_spiky-v2-s19203.json",
+      "sha256": "6d4431fb9511d9e130060a54b71261d7f73306daef40c58d2b29e85d9f06d5f9"
+    },
+    {
+      "run": "20261110-123203-R-20261110-001-e34-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_spiky-v2-s19204.json",
+      "sha256": "bfc0ab7b4b01fb71adeb84449077ecd6fb19fd79bd2643d1d9567e0d52b51144"
+    },
+    {
+      "run": "20261110-123213-R-20261110-001-e35-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_spiky-v2-s19205.json",
+      "sha256": "bae8057cef55fa4109d53bf66c7f9c7b81e48397dfed8a8f57db86857780fd9c"
+    },
+    {
+      "run": "20261110-123218-R-20261110-001-e36-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_spiky-v2-s19206.json",
+      "sha256": "7ed69d7e4a262b951e8fed58f46a47d5b17a77d186377f1f65fda6d3b58fd6b4"
+    },
+    {
+      "run": "20261110-123227-R-20261110-001-e37-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_spiky-v2-s19207.json",
+      "sha256": "3e2ce384db408a79edbd8442c1f4f3cfac0693cb3b0ed1d69299cf9875af87b1"
+    },
+    {
+      "run": "20261110-123252-R-20261110-001-e38-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_spiky-v2-s19208.json",
+      "sha256": "18016788fa4a66eed3bd48726a7028db09380c25423cea3057777bfa9927ad0e"
+    },
+    {
+      "run": "20261110-123252-R-20261110-001-e39-a1",
+      "output": "code-poisson-c345/tuning/results/cycle3/T/c3T-poisson_ms_spiky-v2-s19209.json",
+      "sha256": "588afe73713f457e4f1c4418cc3bef6c3b2d9604ebb5b97ed771fcad2f10288e"
+    }
+  ],
+  "method": "10000 paired crossed resamples, RNG445, percentile95%; fractional IQM over seed means; exploratory validation only"
+}

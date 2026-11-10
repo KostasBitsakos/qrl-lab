@@ -1,0 +1,531 @@
+{
+  "scope": "Only 11 notified run IDs; validation, no test12 access",
+  "request_id": "ENV-cycle3",
+  "runs": [
+    {
+      "run_id": "20261109-202750-ENV-cycle3-n0-a1",
+      "entry": 0,
+      "name": "smoke",
+      "spec_name": "selftest",
+      "attempt": 1,
+      "launcher": {
+        "status": "done",
+        "exit_code": 0,
+        "reason": null,
+        "seconds": 5.0,
+        "cpu_seconds": null
+      },
+      "spec_hash": "eb988f44dce69293b133e346d9bf0b10d8926299e8b94e4fd5b7b82022271f2c",
+      "code_sha": "d9357d4bc3866bf186a04f23856616a4f3391aae+dirty",
+      "log_sha256": "7a1c93a0fe022debe7df5cdfe318c9e50e912b75ced59b18547a992829f6361a",
+      "command": [
+        "python3",
+        "-c",
+        "print('smoke ok')"
+      ]
+    },
+    {
+      "run_id": "20261109-202756-ENV-cycle3-n1-a1",
+      "entry": 1,
+      "name": "ok",
+      "spec_name": "selftest",
+      "attempt": 1,
+      "launcher": {
+        "status": "done",
+        "exit_code": 0,
+        "reason": null,
+        "seconds": 5.0,
+        "cpu_seconds": null
+      },
+      "spec_hash": "eb988f44dce69293b133e346d9bf0b10d8926299e8b94e4fd5b7b82022271f2c",
+      "code_sha": "d9357d4bc3866bf186a04f23856616a4f3391aae+dirty",
+      "log_sha256": "ec1c355629314c1a968c6dac01ad17f84815f0a02e9ee78a8a1f2bf3b2c9d6e7",
+      "command": [
+        "python3",
+        "-c",
+        "print('ok')"
+      ]
+    },
+    {
+      "run_id": "20261109-202756-ENV-cycle3-n2-a1",
+      "entry": 2,
+      "name": "fail",
+      "spec_name": "selftest",
+      "attempt": 1,
+      "launcher": {
+        "status": "failed",
+        "exit_code": 3,
+        "reason": null,
+        "seconds": 5.0,
+        "cpu_seconds": null
+      },
+      "spec_hash": "eb988f44dce69293b133e346d9bf0b10d8926299e8b94e4fd5b7b82022271f2c",
+      "code_sha": "d9357d4bc3866bf186a04f23856616a4f3391aae+dirty",
+      "log_sha256": "48d8643b196336f4fd854caf59522d423595e72d9757eceee6b1703927393429",
+      "command": [
+        "python3",
+        "-c",
+        "import sys;sys.exit(3)"
+      ]
+    },
+    {
+      "run_id": "20261109-202802-ENV-cycle3-n3-a2",
+      "entry": 3,
+      "name": "fail",
+      "spec_name": "selftest",
+      "attempt": 2,
+      "launcher": {
+        "status": "failed",
+        "exit_code": 3,
+        "reason": null,
+        "seconds": 5.0,
+        "cpu_seconds": null
+      },
+      "spec_hash": "eb988f44dce69293b133e346d9bf0b10d8926299e8b94e4fd5b7b82022271f2c",
+      "code_sha": "d9357d4bc3866bf186a04f23856616a4f3391aae+dirty",
+      "log_sha256": "48d8643b196336f4fd854caf59522d423595e72d9757eceee6b1703927393429",
+      "command": [
+        "python3",
+        "-c",
+        "import sys;sys.exit(3)"
+      ]
+    },
+    {
+      "run_id": "20261109-202808-ENV-cycle3-n4-a3",
+      "entry": 4,
+      "name": "fail",
+      "spec_name": "selftest",
+      "attempt": 3,
+      "launcher": {
+        "status": "failed",
+        "exit_code": 3,
+        "reason": null,
+        "seconds": 5.0,
+        "cpu_seconds": null
+      },
+      "spec_hash": "eb988f44dce69293b133e346d9bf0b10d8926299e8b94e4fd5b7b82022271f2c",
+      "code_sha": "d9357d4bc3866bf186a04f23856616a4f3391aae+dirty",
+      "log_sha256": "48d8643b196336f4fd854caf59522d423595e72d9757eceee6b1703927393429",
+      "command": [
+        "python3",
+        "-c",
+        "import sys;sys.exit(3)"
+      ]
+    },
+    {
+      "run_id": "20261109-203525-ENV-cycle3-n5-a1",
+      "entry": 5,
+      "name": "smoke",
+      "spec_name": "c3-shift-reference",
+      "attempt": 1,
+      "launcher": {
+        "status": "done",
+        "exit_code": 0,
+        "reason": null,
+        "seconds": 5.0,
+        "cpu_seconds": null
+      },
+      "spec_hash": "5cd89360a74ca560aa28682b439d6786011c7fc9ea0110fe4aaf60e113064cae",
+      "code_sha": "d9357d4bc3866bf186a04f23856616a4f3391aae+dirty",
+      "log_sha256": "4fbbb5abfa23584a22cac1e99c38cec1f76d86ee32220830e9fe19fa53b0445f",
+      "command": [
+        "/home/ubuntu/qrl-lab/.venv/bin/python",
+        "tuning/cycle2_entry.py",
+        "reference",
+        "--variant",
+        "pms:poisson_ms_shift",
+        "--controllers",
+        "hpa_orig",
+        "--split",
+        "val",
+        "--out",
+        "tuning/results/cycle3/smoke.json",
+        "--ticks",
+        "200"
+      ]
+    },
+    {
+      "run_id": "20261109-203535-ENV-cycle3-n6-a1",
+      "entry": 6,
+      "name": "hpa_orig",
+      "spec_name": "c3-shift-reference",
+      "attempt": 1,
+      "launcher": {
+        "status": "done",
+        "exit_code": 0,
+        "reason": null,
+        "seconds": 20.0,
+        "cpu_seconds": null
+      },
+      "spec_hash": "5cd89360a74ca560aa28682b439d6786011c7fc9ea0110fe4aaf60e113064cae",
+      "code_sha": "d9357d4bc3866bf186a04f23856616a4f3391aae+dirty",
+      "log_sha256": "f581cf107af9dfbded7301d4f49a8ea637900f784df445907e4992f860c9bb33",
+      "command": [
+        "/home/ubuntu/qrl-lab/.venv/bin/python",
+        "tuning/cycle2_entry.py",
+        "reference",
+        "--variant",
+        "pms:poisson_ms_shift",
+        "--controllers",
+        "hpa_orig",
+        "--split",
+        "val",
+        "--out",
+        "tuning/results/cycle3/shift_hpa_orig.json"
+      ]
+    },
+    {
+      "run_id": "20261109-203535-ENV-cycle3-n7-a1",
+      "entry": 7,
+      "name": "fixed",
+      "spec_name": "c3-shift-reference",
+      "attempt": 1,
+      "launcher": {
+        "status": "done",
+        "exit_code": 0,
+        "reason": null,
+        "seconds": 310.0,
+        "cpu_seconds": null
+      },
+      "spec_hash": "5cd89360a74ca560aa28682b439d6786011c7fc9ea0110fe4aaf60e113064cae",
+      "code_sha": "d9357d4bc3866bf186a04f23856616a4f3391aae+dirty",
+      "log_sha256": "af568e8087600fe30ac920d1ff6914c797fe4436023c66d354dbd33909e18700",
+      "command": [
+        "/home/ubuntu/qrl-lab/.venv/bin/python",
+        "tuning/cycle2_entry.py",
+        "reference",
+        "--variant",
+        "pms:poisson_ms_shift",
+        "--controllers",
+        "fixed",
+        "--split",
+        "val",
+        "--out",
+        "tuning/results/cycle3/shift_fixed.json"
+      ]
+    },
+    {
+      "run_id": "20261109-203535-ENV-cycle3-n8-a1",
+      "entry": 8,
+      "name": "hpa_demand",
+      "spec_name": "c3-shift-reference",
+      "attempt": 1,
+      "launcher": {
+        "status": "done",
+        "exit_code": 0,
+        "reason": null,
+        "seconds": 85.0,
+        "cpu_seconds": null
+      },
+      "spec_hash": "5cd89360a74ca560aa28682b439d6786011c7fc9ea0110fe4aaf60e113064cae",
+      "code_sha": "d9357d4bc3866bf186a04f23856616a4f3391aae+dirty",
+      "log_sha256": "090d41e44d2ae7e124febd545c2a74e84a9c10b1b6d3e8a788b2117842702197",
+      "command": [
+        "/home/ubuntu/qrl-lab/.venv/bin/python",
+        "tuning/cycle2_entry.py",
+        "reference",
+        "--variant",
+        "pms:poisson_ms_shift",
+        "--controllers",
+        "hpa_demand",
+        "--split",
+        "val",
+        "--out",
+        "tuning/results/cycle3/shift_hpa_demand.json"
+      ]
+    },
+    {
+      "run_id": "20261109-203535-ENV-cycle3-n9-a1",
+      "entry": 9,
+      "name": "oracle",
+      "spec_name": "c3-shift-reference",
+      "attempt": 1,
+      "launcher": {
+        "status": "done",
+        "exit_code": 0,
+        "reason": null,
+        "seconds": 180.0,
+        "cpu_seconds": null
+      },
+      "spec_hash": "5cd89360a74ca560aa28682b439d6786011c7fc9ea0110fe4aaf60e113064cae",
+      "code_sha": "d9357d4bc3866bf186a04f23856616a4f3391aae+dirty",
+      "log_sha256": "efa63b79a3b39fc2fc89c811b09b49a6eb3bc3ec0e6c3e5e3f79060fffe87025",
+      "command": [
+        "/home/ubuntu/qrl-lab/.venv/bin/python",
+        "tuning/cycle2_entry.py",
+        "reference",
+        "--variant",
+        "pms:poisson_ms_shift",
+        "--controllers",
+        "oracle",
+        "--split",
+        "val",
+        "--out",
+        "tuning/results/cycle3/shift_oracle.json"
+      ]
+    },
+    {
+      "run_id": "20261109-204214-ENV-cycle3-n10-a1",
+      "entry": 10,
+      "name": "c345-F-derp-s18600.ck39936",
+      "spec_name": "c3-shift-eval",
+      "attempt": 1,
+      "launcher": {
+        "status": "done",
+        "exit_code": 0,
+        "reason": null,
+        "seconds": 35.0,
+        "cpu_seconds": null
+      },
+      "spec_hash": "b411d4cf0078b446e4914bb9e94da0f53058e86ba70d1ea380343246c58e459a",
+      "code_sha": "d9357d4bc3866bf186a04f23856616a4f3391aae+dirty",
+      "log_sha256": "4aa3aa42a8faec023d195eccaca2fc52b32b5cab170fd20ae4c8eebe2938b5b5",
+      "command": [
+        "/home/ubuntu/qrl-lab/.venv/bin/python",
+        "tuning/cycle2_entry.py",
+        "legacy",
+        "--protocol",
+        "fair",
+        "--env-variant",
+        "legacy",
+        "--env-family",
+        "orig",
+        "--orig-variant",
+        "pms:poisson_ms_shift",
+        "--eval-split",
+        "val",
+        "--reward-div",
+        "10",
+        "--obs-scale",
+        "on",
+        "--eps-schedule",
+        "linear10k",
+        "--seed",
+        "18600",
+        "--threads",
+        "1",
+        "--checkpoints",
+        "39936",
+        "--agent",
+        "derp",
+        "--total-ticks",
+        "39936",
+        "--derp-history",
+        "1",
+        "--eval-weights",
+        "tuning/results/c345/c345-F-derp-s18600.ck39936.pt",
+        "--out",
+        "tuning/results/cycle3/shift_eval/c345-F-derp-s18600.ck39936.json"
+      ]
+    }
+  ],
+  "done": 8,
+  "intentional_failed": 3,
+  "unique_spec_hashes": [
+    "5cd89360a74ca560aa28682b439d6786011c7fc9ea0110fe4aaf60e113064cae",
+    "b411d4cf0078b446e4914bb9e94da0f53058e86ba70d1ea380343246c58e459a",
+    "eb988f44dce69293b133e346d9bf0b10d8926299e8b94e4fd5b7b82022271f2c"
+  ],
+  "references": {
+    "smoke": {
+      "param": 50,
+      "grid_size": 1,
+      "mean_return": 5250.967053552785,
+      "sd_across_workloads": 2545.9610437286055,
+      "mean_pods": 12.6125,
+      "episodes": 10,
+      "ticks_per_episode": 200,
+      "returns": [
+        3963.0000000000005,
+        7827.379428599943,
+        10053.000000000007,
+        5777.999999999998,
+        4927.453448422457,
+        4432.721072119797,
+        2651.9999999999995,
+        1934.779784236844,
+        3460.598493179826,
+        7480.738308968977
+      ]
+    },
+    "hpa_orig": {
+      "param": 50,
+      "grid_size": 1,
+      "mean_return": 166699.13608869945,
+      "sd_across_workloads": 13847.092240858425,
+      "mean_pods": 13.64668,
+      "episodes": 10,
+      "ticks_per_episode": 5000,
+      "returns": [
+        161557.00000000006,
+        156237.51739372962,
+        175823.47330050133,
+        182592.00000000026,
+        178188.00000000017,
+        141043.9999999998,
+        179877.94613684385,
+        154683.92770450847,
+        160148.49635141113,
+        176838.99999999994
+      ]
+    },
+    "fixed": {
+      "param": 14,
+      "grid_size": 20,
+      "mean_return": 121027.27381173191,
+      "sd_across_workloads": 21317.816123940243,
+      "mean_pods": 13.9864,
+      "episodes": 10,
+      "ticks_per_episode": 5000,
+      "returns": [
+        138980.99999999997,
+        101350.07771951355,
+        127580.99999999991,
+        124833.99999999975,
+        147796.00000000003,
+        101136.00000000003,
+        153927.00000000006,
+        90244.77511482342,
+        115778.88528298242,
+        108643.9999999999
+      ]
+    },
+    "hpa_demand": {
+      "param": 0.9,
+      "grid_size": 5,
+      "mean_return": 224953.907834122,
+      "sd_across_workloads": 13831.37153572375,
+      "mean_pods": 8.95872,
+      "episodes": 10,
+      "ticks_per_episode": 5000,
+      "returns": [
+        226811.00000000012,
+        212173.61944752457,
+        232613.1049753757,
+        237728.6077752278,
+        238744.7124548108,
+        203558.00000000032,
+        243864.23157398155,
+        212147.08835759156,
+        212841.899350116,
+        229056.8144065914
+      ]
+    },
+    "oracle": {
+      "param": 1.1,
+      "grid_size": 5,
+      "mean_return": 238595.64460457113,
+      "sd_across_workloads": 14786.73207439402,
+      "mean_pods": 8.79516,
+      "episodes": 10,
+      "ticks_per_episode": 5000,
+      "returns": [
+        237920.00000000017,
+        226267.6703068858,
+        246941.10497537584,
+        251176.88664779498,
+        254581.53563213747,
+        214198.00000000023,
+        258681.44636921768,
+        223762.0883575921,
+        229077.89935011603,
+        243349.81440659115
+      ]
+    },
+    "derp": {
+      "training_seed": 18600,
+      "checkpoint": 39936,
+      "epsilon_metadata": 1.0,
+      "mean_return": 188479.46672512573,
+      "sd_across_workloads": 11727.214128900321,
+      "mean_pods": 12.52812,
+      "episodes": 10,
+      "ticks_per_episode": 5000,
+      "returns": [
+        185226.00000000015,
+        180115.51071848258,
+        195396.99999999994,
+        202931.00000000044,
+        202513.00000000006,
+        169905.0000000002,
+        198171.94613684458,
+        176643.63131928278,
+        179205.57907664616,
+        194686.00000000052
+      ]
+    }
+  },
+  "artifacts": [
+    {
+      "entry": 5,
+      "path": "code-poisson-c345/tuning/results/cycle3/smoke.json",
+      "snapshot": ".lab/j431/entry5.snapshot.json",
+      "sha256": "a152d7628734df559d5bc781af276f6356069878aa12a82fd5d79a774cc4a783"
+    },
+    {
+      "entry": 6,
+      "path": "code-poisson-c345/tuning/results/cycle3/shift_hpa_orig.json",
+      "snapshot": ".lab/j431/entry6.snapshot.json",
+      "sha256": "1b6bb1cef3435cf715f254ca7b7479e18d91ff25e6ee4955677234e489c28a69"
+    },
+    {
+      "entry": 7,
+      "path": "code-poisson-c345/tuning/results/cycle3/shift_fixed.json",
+      "snapshot": ".lab/j431/entry7.snapshot.json",
+      "sha256": "35f20709d45ef7ae5978a9055a30600e29eaac746861db0e00b7237970a368be"
+    },
+    {
+      "entry": 8,
+      "path": "code-poisson-c345/tuning/results/cycle3/shift_hpa_demand.json",
+      "snapshot": ".lab/j431/entry8.snapshot.json",
+      "sha256": "d43ad8fc3659e14bd29af17140f355d8c34340aed99868f586b69441e62be79d"
+    },
+    {
+      "entry": 9,
+      "path": "code-poisson-c345/tuning/results/cycle3/shift_oracle.json",
+      "snapshot": ".lab/j431/entry9.snapshot.json",
+      "sha256": "0026a7f07954d78403024ff8e926372b259b122706260a8ef52ba3e80418e462"
+    },
+    {
+      "entry": 10,
+      "path": "code-poisson-c345/tuning/results/cycle3/shift_eval/c345-F-derp-s18600.ck39936.json",
+      "snapshot": ".lab/j431/entry10.snapshot.json",
+      "sha256": "fdfeade93e1e4935bcb643a309ecbaca13af923bcaba100be3fe8309adf92958"
+    }
+  ],
+  "descriptive_pairs": [
+    {
+      "comparison": "derp minus hpa_orig",
+      "mean_difference": 21780.330636426275,
+      "percent_of_comparator": 13.065652976651968,
+      "sd_difference": 3441.571737152482,
+      "workloads_positive": 10,
+      "n": 10
+    },
+    {
+      "comparison": "derp minus hpa_demand",
+      "mean_difference": -36474.441108996245,
+      "percent_of_comparator": -16.21418425675539,
+      "sd_difference": 4155.247360241746,
+      "workloads_positive": 0,
+      "n": 10
+    },
+    {
+      "comparison": "oracle minus hpa_demand",
+      "mean_difference": 13641.736770449159,
+      "percent_of_comparator": 6.06423640371182,
+      "sd_difference": 1932.1925012343263,
+      "workloads_positive": 10,
+      "n": 10
+    }
+  ],
+  "all_checks_pass": true,
+  "limitations": [
+    "Validation parameters selected on the same workload seeds; no confirmatory inference.",
+    "One saved DERP training seed only; workload SD is not training-seed SD.",
+    "Oracle is look-ahead, not a proven optimum.",
+    "Snapshots hash mutable outputs at inspection, not at launcher completion.",
+    "Launcher CPU accounting unknown (cpu_seconds=null); code SHA has +dirty.",
+    "Three frozen spec hashes under one envelope request; authorization not audited here."
+  ]
+}

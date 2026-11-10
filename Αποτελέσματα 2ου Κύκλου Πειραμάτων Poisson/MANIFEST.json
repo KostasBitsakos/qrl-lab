@@ -1,0 +1,109 @@
+{
+ "files": {
+  "1_W_screening/j380_F-summary.json": {
+   "sha256": "2a3e50595c6c162aa1bb2fa0dd2dba56b1e18a9a2f14acd6afd618769ebc1d8f",
+   "source": ".lab/j380/F-summary.json"
+  },
+  "1_W_screening/j380_w_analysis.json": {
+   "sha256": "d3cce0781d9eaa815ef0031db5eed1aa7e60f8c7fc510b875150eb8196d3e26e",
+   "source": ".lab/j380/w_analysis.json"
+  },
+  "2_F_poisson_ms/F_per_seed_val.csv": {
+   "sha256": "c39bbf4ca14336137b5ea6e129a47e28894dad51e21af54621dbcac4f68c2c29",
+   "source": ".lab/c401/f_analysis.json"
+  },
+  "2_F_poisson_ms/c401_RESULTS.md": {
+   "sha256": "4eedd923392dca4f7c6d82664a32a631a126a703ec1da8aa11dc1e659f3376cc",
+   "source": ".lab/c401/RESULTS.md"
+  },
+  "2_F_poisson_ms/c401_f_analysis.json": {
+   "sha256": "8980c38f1fbd8a5a4ed12e77279affe6c46cb5a0230543c46b77943d98dba38a",
+   "source": ".lab/c401/f_analysis.json"
+  },
+  "3_test12_poisson_ms/j414_t12_analysis.json": {
+   "sha256": "e21b586c9a7ab6259ca84fb1dcb8c3a654de235139c512abba515a2f58434cb9",
+   "source": ".lab/j414/t12_analysis.json"
+  },
+  "3_test12_poisson_ms/j414_t12_table.md": {
+   "sha256": "669dcee8ccf68ed5ce687ced09003186dd32dcb01e9da075da5f136c405780a6",
+   "source": ".lab/j414/t12_table.md"
+  },
+  "3_test12_poisson_ms/test12_per_seed.csv": {
+   "sha256": "7e970cdb033e32d678f4af6481c85b7e5ed04472812eb626e2b96d6950249b9e",
+   "source": ".lab/j414/t12_analysis.json"
+  },
+  "4_spiky_P0_stageA/j299_stageA_summary.json": {
+   "sha256": "0e55417f7dad7a54e6c0cb1e44e2f753d794375ba442e19f00a10ede5c369b30",
+   "source": ".lab/j299/stageA_summary.json"
+  },
+  "4_spiky_P0_stageA/j312_summary.json": {
+   "sha256": "f7d2a882083894a5510e3029f34b967aec5b6d1289ea49930d3a927c1289d1c0",
+   "source": ".lab/j312/summary.json"
+  },
+  "5_S_spiky_10seeds/S_per_seed_val.csv": {
+   "sha256": "4dfe60555f1e75bab37ad56d7f838db81fc77e1156c6f3c15c16b00ad8684f7b",
+   "source": ".lab/j442/summary.json"
+  },
+  "5_S_spiky_10seeds/j442_summary.json": {
+   "sha256": "311e54d4802242418e2cf9f5e00e91b3debf86b9f1e814c4eec7cf14813e4c19",
+   "source": ".lab/j442/summary.json"
+  },
+  "5_S_spiky_10seeds/j446_summary.json": {
+   "sha256": "ad48da7d118c070dcfad8ab2175a5a546c61ea51a480f09bf14fe4bf40eb8119",
+   "source": ".lab/j446/summary.json"
+  },
+  "6_shift_ENV_cycle3/c426_shift_results.json": {
+   "sha256": "5fcb61a3ba8a1c9a252b290fec2ce675c48de76ccc1e390ba5fd4c772eb84949",
+   "source": ".lab/c426/shift_results.json"
+  },
+  "6_shift_ENV_cycle3/j431_summary.json": {
+   "sha256": "1afdcc2daec22b69507e5aba3666b516258f11e496439030f80281fa44f73683",
+   "source": ".lab/j431/summary.json"
+  },
+  "6_shift_ENV_cycle3/j438_summary.json": {
+   "sha256": "2ff40265cdc74d3052a787fb37973cb7bf2e3cb1ed6cbac6a8a2cb355ae0cc49",
+   "source": ".lab/j438/summary.json"
+  },
+  "7_T_Dinos_vs_V2/T_per_seed_val.csv": {
+   "sha256": "7d284350110b988c42ec0e6d15a499cc902cb8863a3ce3fe9d4d6733d1e65e9d",
+   "source": ".lab/j450/T-summary.json"
+  },
+  "7_T_Dinos_vs_V2/j450_T-summary.json": {
+   "sha256": "d0f9d4e1901e6f712ad734bcdbbb9d3d75d126f0a28ebdc74fe514afab9c0b23",
+   "source": ".lab/j450/T-summary.json"
+  },
+  "8_J444_traces_figures/base_shift.json": {
+   "sha256": "a1989dbc5f53eee1cc8d1fa2bd9c314312bdc67e6bbc60ac3582a3da9789421b",
+   "source": "code-poisson-c345/tuning/results/cycle3/j444/base_shift.json"
+  },
+  "8_J444_traces_figures/base_spiky.json": {
+   "sha256": "0ba3e65e181dc8f241b067786225e5e52443189174568501ae07dadd1874e4e9",
+   "source": "code-poisson-c345/tuning/results/cycle3/j444/base_spiky.json"
+  },
+  "8_J444_traces_figures/c3S-derp-s19100.traj.json": {
+   "sha256": "592e84ef042655461c17714370ba46f24b0b3afe84ba1023e490b614f366f4ab",
+   "source": "code-poisson-c345/tuning/results/cycle3/j444/c3S-derp-s19100.traj.json"
+  },
+  "8_J444_traces_figures/c3S-derp_hist10-s19100.traj.json": {
+   "sha256": "392b0357f003c8ac4d23d785ac6e233df2ab4b91efda385acddd3af0e10685d5",
+   "source": "code-poisson-c345/tuning/results/cycle3/j444/c3S-derp_hist10-s19100.traj.json"
+  },
+  "8_J444_traces_figures/c3S-dinos-s19100.traj.json": {
+   "sha256": "756d70bfebec55593df1bc701fee6bb9828e5993be53a8bb145f281d59d860ba",
+   "source": "code-poisson-c345/tuning/results/cycle3/j444/c3S-dinos-s19100.traj.json"
+  },
+  "8_J444_traces_figures/c3S-lstm-s19100.traj.json": {
+   "sha256": "dde4ed064cb3a7fded3ce03d1b88d14239a94513792aa6aa07ff92a5380d6bf1",
+   "source": "code-poisson-c345/tuning/results/cycle3/j444/c3S-lstm-s19100.traj.json"
+  },
+  "8_J444_traces_figures/c3S-lstm_transfer-s19100.traj.json": {
+   "sha256": "6a7fd1a9e005162d517c6e8022dea9f170bc916f6b11feca38cf9001ea7c17f8",
+   "source": "code-poisson-c345/tuning/results/cycle3/j444/c3S-lstm_transfer-s19100.traj.json"
+  },
+  "8_J444_traces_figures/c3S-v2-s19100.traj.json": {
+   "sha256": "2341ec2c9df7b47a3cb7ce87d7b776e3eb5dcc4603b765c10886d36d1a4502b1",
+   "source": "code-poisson-c345/tuning/results/cycle3/j444/c3S-v2-s19100.traj.json"
+  }
+ },
+ "missing": []
+}

@@ -1,0 +1,14 @@
+{
+ "A": {
+  "tasks": 50,
+  "nominal": 66.9616,
+  "reserved": 135.2038,
+  "hash": "ee3baf4830654f36d7292cbb9c644a1f4651719cbd0b8e7b2a48c48e2724ddd9"
+ },
+ "B": {
+  "tasks": 50,
+  "nominal": 66.9616,
+  "reserved": 135.2038,
+  "hash": "1c5319a0f667c50f5851562483c9648f34f542bb052ef2bc4eb3302c06fde7f7"
+ }
+}

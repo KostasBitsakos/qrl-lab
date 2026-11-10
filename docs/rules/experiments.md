@@ -38,3 +38,8 @@ Approvals, launcher and seeds policy: see AGENTS.md «Rules» and PLAN §6, §8.
   branches) is pushed by the Claude side directly to `main` of remote `github` (fast-forward, never --force), with
   results/LESSONS updated. Competing working branches stay local; no new side branches are pushed, so no PR/«Compare &
   pull request» step is needed by the researcher.
+- Paper results folder (2026-11-10, M-20261110-030): every finished batch saves the numbers behind its paper tables and figures
+  (per-seed scores, summaries, CIs, paired differences, traces) as copies in `~/qrl-lab/Αποτελέσματα 2ου Κύκλου Πειραμάτων Poisson/`
+  (cycle 2-3); cycle-4 batches go to the sibling `~/qrl-lab/Αποτελέσματα 4ου Κύκλου Poisson/`. Register new files in
+  `tools/results_collect.py` (copy-only, idempotent; spent/gated test splits are never re-read, only their existing summaries) and
+  rerun it; README.md lists batch, source, split, seeds and the table/figure each file feeds.
