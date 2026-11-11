@@ -358,6 +358,16 @@ def render(root=ROOT):
     rows = settings_rows(P["dispatch"])
     s = effective(rows)
 
+    st.subheader("Αυτόματη έγκριση c4 sim")
+    try:
+        from c4_autonomy import policy
+        approval = policy(root)
+        st.caption("M-20261110-049 · " + ("ΕΝΕΡΓΗ" if approval["active"] else "ΕΛΗΞΕ")
+                   + " · μόνο validation μέσω c4_train · λήξη: " + approval["until"])
+        st.json(approval)
+    except (OSError, ValueError, KeyError, D.LabError) as e:
+        st.caption(f"Ανενεργή: {e}")
+
     st.subheader("Χρήση ανά πάροχο")
     try:
         status = U.load_claude_status(P["claude_status"]) or {}

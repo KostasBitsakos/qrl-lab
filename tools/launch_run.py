@@ -127,8 +127,11 @@ def load_approved_spec(db, rid):
     return r, spec
 
 
-def start_entry(db, rid, entry):
-    r, spec = load_approved_spec(db, rid)
+def start_entry(db, rid, entry, authorization=None):
+    if authorization is not None:
+        from c4_autonomy import authorize
+        authorization = authorize(lab_root(), authorization[0]["spec_path"], entry=entry)
+    r, spec = authorization if authorization is not None else load_approved_spec(db, rid)
     if spec.get("kind") in ("sandbox", "sandbox-amendment"):
         raise LabError("Sandbox approvals require sandbox-start with a verified child spec.")
     if entry < 0 or entry >= len(spec["entries"]):
@@ -145,6 +148,11 @@ def start_entry(db, rid, entry):
         raise LabError(f"Working directory {cwd} does not exist.")
     max_attempts = spec.get("max_attempts", 1)
     with db.tx() as c:
+        if r.get("auto_approve"):
+            active = c.execute("SELECT count(*) FROM runs WHERE request_id=? AND status IN ('starting','running')",
+                               (rid,)).fetchone()[0]
+            if active >= int(spec.get("max_parallel", 1)):
+                raise LabError("c4 max_parallel reached.")
         rows = c.execute("SELECT status FROM runs WHERE request_id=? AND entry=?", (rid, entry)).fetchall()
         if any(x["status"] in ("starting", "running") for x in rows):
             raise LabError(f"Entry {entry} of {rid} is already running.")
@@ -161,11 +169,17 @@ def start_entry(db, rid, entry):
                    json.dumps(e["cmd"]), cwd, run_dir, sha, "starting", now()))
         c.execute("INSERT INTO audit(ts, actor, action, target, detail) VALUES (?,?,?,?,?)",
                   (now(), "launcher", "start", run_id, f"{rid} entry {entry} attempt {attempt}"))
+        if r.get("auto_approve"):
+            c.execute("INSERT INTO audit(ts, actor, action, target, detail) VALUES (?,?,?,?,?)",
+                      (now(), "launcher", "auto-approve", run_id,
+                       json.dumps({"source": "M-20261110-049", "spec_hash": r["spec_hash"],
+                                   "spec_path": r["spec_path"], "policy": r["auto_approve"]})))
     with open(os.path.join(run_dir, "spec_entry.json"), "w", encoding="utf-8") as f:
         json.dump({"request_id": rid, "spec_hash": r["spec_hash"], "spec_name": spec["name"], "scope": spec["scope"],
                    "entry": entry, "attempt": attempt, "entry_spec": e, "limits": spec["limits"],
                    "real": spec.get("real"), "cpu_affinity": spec.get("cpu_affinity"),
-                   "env_threads": spec.get("env_threads"), "code_sha": sha, "cwd": cwd}, f, indent=2, ensure_ascii=False)
+                   "env_threads": spec.get("env_threads"), "code_sha": sha, "cwd": cwd,
+                   "envelope_expires": (r.get("auto_approve") or {}).get("until")}, f, indent=2, ensure_ascii=False)
     subprocess.Popen([sys.executable, os.path.abspath(__file__), "_supervise", run_id],
                      cwd=root, start_new_session=True, stdin=subprocess.DEVNULL,
                      stdout=subprocess.DEVNULL, stderr=open(os.path.join(run_dir, "supervisor.log"), "a"))
@@ -490,6 +504,9 @@ def main():
     g = s.add_mutually_exclusive_group(required=True)
     g.add_argument("--entry", type=int)
     g.add_argument("--all", action="store_true")
+    s = sub.add_parser("auto-start", help="temporary c4 sim authorization M-20261110-049; no dashboard card")
+    s.add_argument("--spec", required=True)
+    s.add_argument("--entry", type=int, required=True)
     sub.add_parser("list")
     s = sub.add_parser("show", help="read-only run status by exact id or unique prefix")
     s.add_argument("run_id")
@@ -536,6 +553,10 @@ def main():
             print(f"{st['request']} ({st['branch']}): {st['cpu_hours_used']} / {st['budget']} CPU-h used, "
                   f"{st['cpu_hours_left']} left; {st['running']}/{st['max_parallel']} running; "
                   f"expires {st['expires']} ({'EXPIRED' if st['expired'] else str(st['hours_to_expiry']) + ' h left'})")
+        elif a.cmd == "auto-start":
+            from c4_autonomy import authorize
+            authorization = authorize(lab_root(), a.spec, entry=a.entry)
+            print(start_entry(db, authorization[0]["id"], a.entry, authorization))
         elif a.all:
             _, spec = load_approved_spec(db, a.request)
             if spec.get("kind") in ("sandbox", "sandbox-amendment"):
